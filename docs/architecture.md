@@ -45,7 +45,7 @@ Core supplies owned detached work to its generic executor.
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v32 Cell/Cut containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v30 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence and explicit current-document Revert flag, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v31 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, and bounded validated-sidecar-target cache control/telemetry, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -131,6 +131,7 @@ silent authority.
 | Encoded bytes per raster file | 512 MiB |
 | Encoded total | 8 GiB |
 | Decoded pixel total | 8 GiB |
+| Validated sidecar targets | 0–1 GiB configurable, 256 MiB default, 64 targets maximum |
 
 Reservations precede reads and pixel allocation. Encoded and decoded LRU
 accounting includes queued results, consumer-held leases, old/new replacement
@@ -145,28 +146,40 @@ document/catalog. Document/history assets are separate authoritative data and
 are never evicted by this cache. Native/recovery files use uncached bounded
 streaming with the existing 1 GiB limit.
 
-For a sidecar-less Sequence pair target, the final post-recovery `LoadedImage`
-may reuse the catalog source only through an exact runtime capability. A
-`DecodedLease` records the originating manager, complete stamp, cache
-generation, format, raster metadata, payload length, and a weak allocation
-identity. The weak identity does not pin every catalog image. If the final image
-still proves the same allocation, `RetainedDecodedRaster` gives the staged Core
-a pathless immutable dense payload with its existing decoded-budget charge.
-Cache clear/reload, force reload, another manager, or any descriptor mismatch is
-ordinary ineligibility and uses the unchanged owned import. Existing sidecars
-and recovery artifacts are fully replayed and never enter this decision.
+Every successfully attached Sequence keeps all source `TileRaster` values and
+thumbnails resident. During attachment, each dense codec output is converted
+once, its canonical `AssetId` is computed once, then only that exact decoded
+cache ownership is discarded. The source's derived-budget lease stays with the
+tiles, so eviction or manager shutdown cannot invalidate resident pixels. Thus a
+35-frame catalog retains 35 edit-ready tiled sources, not a second dense copy of
+the same 35 pixel arrays.
 
-The managed builder uses the same stable-ID order, Genesis/editor baseline,
-pair plan, validation, and publication as the owned builder. Its `AssetRecord`
-retains the exact dense payload and the source's derived tile lease, while the
-Genesis and editable MainLine share a cloned `TileRaster`. `TileRaster` clones
-share an `Arc<BTreeMap<...>>` as well as each tile allocation; the first
-effective write detaches the map and only the touched tile. Asset save/replay
-still emits and validates complete canonical bytes, so native v32, replay epoch
-27, digests, history, savepoints, and the C ABI are unchanged. A private
-test-support counter distinguishes managed reuse from owned fallback and records
-copy/hash/materialization work; this classification is not semantic state and
-is absent from production Core storage.
+For a sidecar-less Sequence pair target, the manager first validates the
+catalog source's originating manager, normalized path, complete stamp, source
+generation, format, and raster metadata. A match constructs the target directly
+from the catalog's `TileRaster` and precomputed canonical `AssetId`; it does not
+read/decode the raster, scan/hash all pixels, allocate a dense payload, or retile
+the image. The managed `AssetRecord`, Genesis source, editable MainLine and
+sequence catalog share the immutable tile-map backing. `TileRaster` COW detaches
+the map and then only a touched tile on the first effective edit. A provenance
+mismatch is ordinary ineligibility and uses the unchanged owned import.
+Persistence and InkScript export materialize a temporary canonical dense byte
+stream only when those operations actually request it. Native v32, replay epoch
+27, digests, history, and savepoints are unchanged; ABI v31 changes only for the
+cache control/telemetry described below. Private test-support counters require
+the managed switch to report zero dense-copy, hash, and full-tile-materialization
+work.
+
+Existing sidecars still undergo full replay and canonical companion comparison
+on the first exact visit. The application-wide `ValidatedTargetCache` then keeps
+only clean, non-recovered, committed targets in an LRU keyed by normalized pair
+paths and both complete stamps. It is capped by both a conservative logical
+weight (0–1 GiB, 256 MiB default) and 64 targets. A hit clones Core metadata and
+COW graph/tile owners without repeating native read, replay, raster decode or
+full comparison. Directory observer proof, selected-member stamp validation and
+final namespace/TOCTOU checks remain mandatory. Changed or missing members,
+limit reduction, disable, and LRU pressure evict entries. Live Core/job clones
+remain valid after eviction and are not counted as cache ownership.
 
 Pair-target adoption remains independent of that optimization classification.
 After the common resolver has proved a staged pair target, the existing restore
@@ -210,7 +223,7 @@ discarding edits made after the primary open. Discovery/decode failure leaves
 that successful primary open intact.
 
 Jobs expose nonblocking discovery, read, loaded, failure, work, result, and
-installation counters through ABI v30. Loaded images include cache hits;
+installation counters through ABI v31. Loaded images include cache hits;
 internal Batch output rereads do not count as additional input images. Queued
 drop/cancel cannot publish a live candidate. A result is applied only on its
 captured owner after generation/revision validation. Normal save, sequence
@@ -879,7 +892,7 @@ session/generation value must be supplied when reading them; the UI never
 re-resolves the active document. The read-only C ABI resource query reports
 logical document tile/history, render-cache, CPU-staging, light-table/reference,
 sequence-source, thumbnail-cache, and reserved sequence-composition categories
-without building a snapshot. ABI v30 retains the latter's byte/source/tile counts;
+without building a snapshot. ABI v31 retains the latter's byte/source/tile counts;
 the aggregate render-cache byte/tile counts already include the same charged
 payloads. Shared COW Core clones may report overlapping logical usage; the I/O
 manager's shared reservation counters enforce the application-wide CPU ceiling.
@@ -1740,7 +1753,7 @@ independent Core/catalog lifetime. Successful catalog replacement renews it;
 staging preserves it, while an independent Core clone gets a new namespace.
 Exhaustion disables source-cache reuse instead of wrapping. The identity is
 neither persisted nor included in semantic snapshot equality, document digests,
-replay, or revision-max. ABI v30's immutable snapshot accessor copies this
+replay, or revision-max. ABI v31's immutable snapshot accessor copies this
 provenance without payload reads and without giving the caller a source owner.
 
 Pristine eligibility is established by fresh source activation and checked
@@ -2090,7 +2103,7 @@ remain dirty/recovered. Partial selection revert reconstructs the saved document
 this same current-version reader and commits the selected delta as one new
 canonical undo unit.
 
-Whole-document Revert is an explicit ABI v30 `OPEN_NATIVE` request carrying both
+Whole-document Revert is the explicit ABI v30 `OPEN_NATIVE` request, retained by ABI v31, carrying both
 force-reload and `REVERT_CURRENT`; ordinary forced open is not inferred to be a
 Revert. Preparation resolves the current native pair and captures its logical
 identity. Apply requires the exact live current native path and document UUID,

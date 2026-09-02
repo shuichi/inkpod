@@ -56,7 +56,8 @@ HRESULT StartRenderer(ApplicationHost& state) noexcept {
 }
 
 InkpodStatus StartCore(ApplicationHost& state) noexcept {
-    const InkpodStatus io_status = state.file_io.Initialize();
+    const InkpodStatus io_status = state.file_io.Initialize(
+        state.settings.Values().validated_sidecar_cache_mib);
     if (io_status != INKPOD_STATUS_OK) {
         return io_status;
     }

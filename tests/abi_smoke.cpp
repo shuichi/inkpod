@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <vector>
 
-static_assert(INKPOD_ABI_VERSION == UINT32_C(30));
+static_assert(INKPOD_ABI_VERSION == UINT32_C(31));
 static_assert(std::is_standard_layout_v<InkpodCoreConfig>);
 static_assert(std::is_standard_layout_v<InkpodSnapshotView>);
 static_assert(sizeof(InkpodCoreConfig) == 16U);
@@ -191,7 +191,7 @@ static_assert(sizeof(InkpodIoRequest) == 72U);
 static_assert(sizeof(InkpodIoJobInfo) == 104U);
 static_assert(sizeof(InkpodIoFileIdentity) == 32U);
 static_assert(sizeof(InkpodIoItemInfo) == 80U);
-static_assert(sizeof(InkpodIoCacheInfo) == 72U);
+static_assert(sizeof(InkpodIoCacheInfo) == 120U);
 static_assert(sizeof(InkpodIoRecoveryPairProof) == 168U);
 static_assert(sizeof(InkpodIoRecoveryMetadata) == 328U);
 static_assert(sizeof(InkpodIoRecoveryArtifactStamp) == 80U);

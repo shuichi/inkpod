@@ -34,9 +34,11 @@ pub struct SequenceCellSource {
     pub frames: FrameMetadata,
     /// Raster companion format retained when this source becomes editable.
     pub raster_file_format: CommonRasterFormat,
+    // Exact decoded metadata used only with the manager-owned source proof.
+    managed_info: Option<inkpod_format::CommonRasterInfo>,
     // Runtime-only charge for the tiled image and thumbnail; not replay identity.
     decoded_lease: Option<inkpod_io::DecodedLease>,
-    // Runtime-only identity cache bound to the exact managed decoded capability.
+    // Runtime-only identity cache bound to the exact managed source provenance.
     // It is excluded from equality, sequence identity, digests, and persistence.
     cached_asset_id: Arc<OnceLock<AssetId>>,
     pub(super) thumbnail: Arc<Thumbnail>,
@@ -104,7 +106,12 @@ impl SequenceCellSource {
             image.generation(),
             image.raster(),
         )?;
+        let asset_id = asset::canonical_common_raster_id(info, &image.raster().pixels)?;
+        source.cached_asset_id.set(asset_id).map_err(|_| {
+            CoreError::InvalidState("sequence asset identity was initialized twice")
+        })?;
         source.raster_file_format = image.format();
+        source.managed_info = Some(info);
         source.decoded_lease = Some(lease);
         Ok(source)
     }
@@ -179,6 +186,7 @@ impl SequenceCellSource {
             document_uuid,
             source_generation,
             raster_file_format: CommonRasterFormat::Png,
+            managed_info: None,
             decoded_lease: None,
             cached_asset_id: Arc::new(OnceLock::new()),
             thumbnail,
@@ -219,13 +227,33 @@ impl SequenceCellSource {
         manager: &inkpod_io::IoManager,
         image: &inkpod_io::LoadedImage,
     ) -> Option<asset::ManagedRasterAssetInput> {
+        self.managed_raster_input_from_stamp(manager, image.path(), image.source().stamp())
+    }
+
+    pub(crate) fn managed_raster_input_from_stamp(
+        &self,
+        manager: &inkpod_io::IoManager,
+        path: &std::path::Path,
+        stamp: inkpod_io::FileStamp,
+    ) -> Option<asset::ManagedRasterAssetInput> {
         let raster_lease = self.decoded_lease.as_ref()?;
-        let payload = manager.retain_decoded_raster(raster_lease, image)?;
+        let info = self.managed_info?;
+        if !manager.validate_derived_source(
+            raster_lease,
+            path,
+            stamp,
+            self.source_generation,
+            self.raster_file_format,
+            info,
+        ) {
+            return None;
+        }
+        let id = self.cached_asset_id.get().copied()?;
         Some(asset::ManagedRasterAssetInput {
-            payload,
+            info,
+            id,
             raster: self.raster.clone(),
             raster_lease: raster_lease.clone(),
-            cached_id: Arc::clone(&self.cached_asset_id),
         })
     }
 }

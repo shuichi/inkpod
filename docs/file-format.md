@@ -1479,7 +1479,7 @@ rebases the active frontend file binding to the current pair paths/identities;
 document/history/dirty/savepoints and pair authority remain unchanged. A real
 replacement instead adopts only the target resolver's authority.
 
-Whole-document Revert is an ABI v30 runtime operation, not a native schema
+Whole-document Revert was introduced as an ABI v30 runtime operation and is retained by ABI v31; it is not a native schema
 feature. It is accepted only as `OPEN_NATIVE` with both force-reload and explicit
 current-document Revert flags, and apply requires the exact live current native
 path and document UUID. The staged v32 data replaces document/history/editor/
@@ -1599,7 +1599,7 @@ versions are rejected without compatibility shims.
 
 31. Opaque common-raster Genesis advances the top-level format to v32 without
 changing runtime replay epoch 27, payload schemas, the primitive/InkScript
-catalogs, or the then-current C ABI v29. Current ABI v30 later adds only the
+catalogs, or the then-current C ABI v29. ABI v30 later added only the
 runtime current-document Revert flag and does not change these bytes. An optional initial-raster source may be paired with
 `SolidWhite` only when its exact RGBA8/16 source is fully opaque; a source with
 any non-opaque alpha must retain `Transparent`. In both cases the imported

@@ -344,6 +344,17 @@ impl ImageCache {
         }
     }
 
+    pub(crate) fn discard_decoded(&self, stamp: FileStamp) {
+        let mut state = lock_unpoisoned(&self.state);
+        if let Some(entry) = state
+            .entries
+            .get_mut(&stamp.identity)
+            .filter(|entry| entry.stamp == stamp)
+        {
+            entry.decoded = None;
+        }
+    }
+
     pub(crate) fn invalidate(&self, identity: FileIdentity) {
         lock_unpoisoned(&self.state).entries.remove(&identity);
     }

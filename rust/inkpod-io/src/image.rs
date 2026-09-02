@@ -61,6 +61,7 @@ impl ImageLease {
 #[derive(Clone)]
 struct DecodedSourceProof {
     allocation: Weak<Charged<CommonRaster>>,
+    path: PathBuf,
     stamp: FileStamp,
     generation: u64,
     format: CommonRasterFormat,
@@ -82,9 +83,9 @@ struct DerivedCharge {
     _slot: Arc<Reservation>,
     // Cache entries never own derived leases, so retaining this owner is acyclic.
     cache_owner: Arc<ManagerInner>,
-    // Weak allocation identity keeps a catalog-derived capability from pinning
-    // every dense decoded source. Exact reuse is possible only while the same
-    // immutable decoded allocation remains alive in the originating manager.
+    // The weak allocation identity supports the separate dense-retention API
+    // without pinning decoded cache owners. Tiled consumers validate the stable
+    // path/stamp/generation provenance below and do not require this allocation.
     source: DecodedSourceProof,
 }
 
@@ -98,6 +99,7 @@ impl DecodedLease {
             cache_owner: Arc::clone(&source.cache_owner),
             source: DecodedSourceProof {
                 allocation: Arc::downgrade(&source.raster.0),
+                path: source.path().to_path_buf(),
                 stamp: source.source.stamp,
                 generation: source.source.generation,
                 format: source.format,
@@ -167,6 +169,23 @@ impl DecodedLease {
         Some(RetainedDecodedRaster {
             raster: image.raster.clone(),
         })
+    }
+
+    pub(crate) fn validates_provenance(
+        &self,
+        manager: &Arc<ManagerInner>,
+        path: &Path,
+        stamp: FileStamp,
+        generation: u64,
+        format: CommonRasterFormat,
+        info: CommonRasterInfo,
+    ) -> bool {
+        Arc::ptr_eq(manager, &self.0.cache_owner)
+            && self.0.source.path == path
+            && self.0.source.stamp == stamp
+            && self.0.source.generation == generation
+            && self.0.source.format == format
+            && self.0.source.info == info
     }
 }
 

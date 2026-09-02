@@ -191,4 +191,10 @@ pub struct InkpodIoCacheInfo {
     pub cache_hits: u64,
     pub sequence_render_allocations: u64,
     pub sequence_render_bytes: u64,
+    pub validated_target_maximum_bytes: u64,
+    pub validated_target_bytes: u64,
+    pub validated_target_count: u64,
+    pub validated_target_hits: u64,
+    pub validated_target_misses: u64,
+    pub validated_target_evictions: u64,
 }

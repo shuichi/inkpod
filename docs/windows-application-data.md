@@ -40,7 +40,7 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
 ```json
 {
   "format": "inkpod-settings",
-  "formatVersion": 4,
+  "formatVersion": 5,
   "general": {
     "uiLanguage": "ja-JP"
   },
@@ -51,7 +51,8 @@ virtual-key、scan-code、modifier bit mask、Base64、binary blob を JSON へ�
   "animation": {
     "sequenceCellSwitch": "autosave-before-switch",
     "sequenceEndpoint": "wrap",
-    "sequenceThumbnailWidthDip": 64
+    "sequenceThumbnailWidthDip": 64,
+    "validatedSidecarCacheMiB": 256
   },
   "colorManagement": {
     "outputGuardProfile": "bt709-conservative-ycbcr"
@@ -104,14 +105,19 @@ settings decode や起動時の既定解決を custom profile の暗黙 reset �
 workspace の pane、zone、tab、preset も `layer-plane`、`right`、`right-tab-1`、
 `coloring` のような stable かつ人間が理解できる key で表す。
 
-現行の設定 schema は `formatVersion: 4` だけを decode する。
-`animation.sequenceThumbnailWidthDip` の追加に伴い通常設定を 4 へ更新した。
+現行の設定 schema は `formatVersion: 5` だけを decode する。
+`animation.validatedSidecarCacheMiB` の追加に伴い通常設定を 5 へ更新した。
 `.inkshortcuts` preset は引き続き version 3 である。旧 version は
 移行または decode せず、下記の識別・削除規則に従う。文書の
-`.inkpod` version、replay epoch、公開 C ABI はこの表示変更では変わらない。
+`.inkpod` version と replay epoch はこの runtime cache 設定では変わらない。公開 C ABI は
+cache setter と統計 record の追加により v31 へ更新した。
 `animation.sequenceThumbnailWidthDip` は 32～96 DIP の整数で、既定値は 64 DIP
 である。Sequence pane の表示倍率と単独 Bottom dock の実測固定高だけに作用し、
 文書、Core thumbnail、cache key、history、保存形式を変更しない。
+`animation.validatedSidecarCacheMiB` は 0～1024 MiB の整数で、既定値は 256 MiB、
+0 は cache 無効化である。検証済みの clean sidecar target を application 全体で最大
+64 件まで LRU 保持し、Apply／OK で直ちに上限を変更する。この上限は live 文書と、
+全件 resident の Sequence source tile／thumbnail には適用しない。
 `saveAndRecovery.defaultRasterFormat` は新規セルのラスタ保存形式で、
 `png`（既定値）、`tiff`、`tga`、`bmp` を指定できる。環境設定の一般ページからも
 同じ値を変更できる。この設定は既存文書の保存形式を変更しない。読み込んだ

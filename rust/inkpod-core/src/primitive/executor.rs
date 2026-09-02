@@ -966,7 +966,7 @@ fn decode_stroke_procedure(
                 ));
             }
             (
-                asset.payload().to_vec(),
+                asset.canonical_payload()?.into_owned(),
                 Some(asset.descriptor().logical_element_count),
             )
         }

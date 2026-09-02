@@ -10,7 +10,7 @@
  *
  * @par 共通の構造体規則
  * 拡張可能な入出力構造体は先頭が `uint32_t struct_size` である。呼び出し側は
- * `struct_size = sizeof(その構造体)` を設定する。Core は現行 ABI v30 で既知の末尾まで
+ * `struct_size = sizeof(その構造体)` を設定する。Core は現行 ABI v31 で既知の末尾まで
  * 読み書きできるサイズ、アラインメント、stride、count と全バイト範囲を検証してから
  * ポインターを参照する。構造体ポインターは個別に NULL 可と明記したものを除き非 NULL。
  * count が 0 の任意 span だけはデータポインターを NULL にできる。入力構造体、出力構造体、
@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(30)
+#define INKPOD_ABI_VERSION UINT32_C(31)
 #define INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE UINT32_C(1)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
@@ -7010,6 +7010,12 @@ typedef struct InkpodIoCacheInfo {
     uint64_t cache_hits;
     uint64_t sequence_render_allocations;
     uint64_t sequence_render_bytes;
+    uint64_t validated_target_maximum_bytes;
+    uint64_t validated_target_bytes;
+    uint64_t validated_target_count;
+    uint64_t validated_target_hits;
+    uint64_t validated_target_misses;
+    uint64_t validated_target_evictions;
 } InkpodIoCacheInfo;
 
 /** Null config uses available parallelism clamped to 1..8 workers, 10,000 images,
@@ -7017,6 +7023,8 @@ typedef struct InkpodIoCacheInfo {
 InkpodStatus inkpod_io_manager_create(const InkpodIoConfig* config, InkpodIoManager** out_manager);
 /** Cancels queued work and drains accepted workers; call after all frontend jobs have resolved. */
 InkpodStatus inkpod_io_manager_release(InkpodIoManager** manager);
+/** Sets the validated sidecar-target LRU to 0..1 GiB; zero disables it. */
+InkpodStatus inkpod_io_manager_set_validated_target_cache_bytes(InkpodIoManager* manager, uint64_t maximum_bytes);
 InkpodStatus inkpod_io_manager_get_cache_info(const InkpodIoManager* manager, InkpodIoCacheInfo* out_info);
 InkpodStatus inkpod_io_resolve_identity(const InkpodIoManager* manager, const uint8_t* path, uint64_t path_bytes, InkpodIoFileIdentity* out_identity);
 /** Binds the application runtime without changing document/history/savepoints. Owner thread only. */

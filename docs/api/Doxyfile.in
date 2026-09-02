@@ -1,5 +1,5 @@
 PROJECT_NAME           = "Inkpod FFI API"
-PROJECT_NUMBER         = "ABI v30"
+PROJECT_NUMBER         = "ABI v31"
 PROJECT_BRIEF          = "Rust Core C ABI リファレンス"
 OUTPUT_DIRECTORY       = "@INKPOD_API_DOCS_OUTPUT_DIRECTORY@"
 OUTPUT_LANGUAGE        = Japanese

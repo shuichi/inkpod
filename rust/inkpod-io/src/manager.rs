@@ -146,6 +146,34 @@ impl IoManager {
         capability.retain_exact(&self.inner, image)
     }
 
+    /// Validates a derived sequence source against its original manager-owned
+    /// path, complete stamp, generation, format, and decoded metadata without
+    /// retaining or reading the former dense decoded allocation.
+    #[must_use]
+    pub fn validate_derived_source(
+        &self,
+        capability: &DecodedLease,
+        path: &Path,
+        stamp: crate::FileStamp,
+        generation: u64,
+        format: CommonRasterFormat,
+        info: inkpod_format::CommonRasterInfo,
+    ) -> bool {
+        capability.validates_provenance(&self.inner, path, stamp, generation, format, info)
+    }
+
+    /// Drops only cache ownership of one exact decoded image. Existing callers
+    /// keep their leases, while derived sequence tiles and encoded bytes remain.
+    pub fn discard_cached_decoded(&self, image: &LoadedImage) -> IoResult<()> {
+        if !Arc::ptr_eq(&self.inner, &image.cache_owner) {
+            return Err(IoError::InvalidInput(
+                "image belongs to another I/O manager",
+            ));
+        }
+        self.inner.cache.discard_decoded(image.source().stamp());
+        Ok(())
+    }
+
     pub(crate) fn check_running(&self, context: &JobContext) -> IoResult<()> {
         context.check_cancelled()?;
         if self.executor.is_shutdown() {

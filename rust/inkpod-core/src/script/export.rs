@@ -680,8 +680,10 @@ fn ensure_tile_raster_asset(
         return Err(InkScriptExportError::ResourceLimit);
     }
     let symbol = format!("asset_{}", assets.len() + 1);
-    let declaration =
-        raster_asset_declaration(&symbol, asset_id, &record.descriptor(), record.payload())?;
+    let payload = record
+        .canonical_payload()
+        .map_err(|_| InkScriptExportError::InvalidSource)?;
+    let declaration = raster_asset_declaration(&symbol, asset_id, &record.descriptor(), &payload)?;
     assets.insert(
         asset_id,
         ExportedAsset {
@@ -900,8 +902,10 @@ fn ensure_raster_asset(
         return Err(InkScriptExportError::ResourceLimit);
     }
     let symbol = format!("asset_{}", assets.len() + 1);
-    let declaration =
-        raster_asset_declaration(&symbol, asset_id, &record.descriptor(), record.payload())?;
+    let payload = record
+        .canonical_payload()
+        .map_err(|_| InkScriptExportError::InvalidSource)?;
+    let declaration = raster_asset_declaration(&symbol, asset_id, &record.descriptor(), &payload)?;
     assets.insert(
         asset_id,
         ExportedAsset {

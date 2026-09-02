@@ -117,7 +117,10 @@ public:
     FileIoController(const FileIoController&) = delete;
     FileIoController& operator=(const FileIoController&) = delete;
 
-    [[nodiscard]] InkpodStatus Initialize() noexcept;
+    [[nodiscard]] InkpodStatus Initialize(
+        std::uint32_t validated_sidecar_cache_mib) noexcept;
+    [[nodiscard]] InkpodStatus SetValidatedSidecarCacheMiB(
+        std::uint32_t maximum_mib) noexcept;
     [[nodiscard]] InkpodIoManager* Manager() const noexcept;
     [[nodiscard]] bool Queue(
         CoreHost& engine,

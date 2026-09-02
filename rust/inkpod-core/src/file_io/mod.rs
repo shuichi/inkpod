@@ -7,10 +7,15 @@ mod model;
 mod prepare;
 mod recovery;
 mod session;
+mod target_cache;
 
 pub use job::FileIoJob;
 pub use model::{FileIoApply, FileIoItem, FileIoKind, FileIoProgress, FileIoRequest, FileIoState};
 pub(crate) use model::{PlannedPair, SavedPair};
+pub use target_cache::{
+    DEFAULT_VALIDATED_TARGET_CACHE_BYTES, MAX_VALIDATED_TARGET_CACHE_BYTES, MAX_VALIDATED_TARGETS,
+    ValidatedTargetCache, ValidatedTargetCacheStats,
+};
 
 /// Resolves the current native/raster pair for the synchronous Core Revert API.
 ///

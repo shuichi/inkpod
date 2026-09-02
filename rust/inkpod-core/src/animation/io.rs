@@ -17,10 +17,7 @@ impl InitialRasterAsset {
     fn dimensions(&self) -> (u32, u32) {
         match self {
             Self::Owned(raster) => (raster.width, raster.height),
-            Self::Managed(raster) => {
-                let info = raster.payload.info();
-                (info.width, info.height)
-            }
+            Self::Managed(raster) => (raster.info.width, raster.info.height),
         }
     }
 }
@@ -111,7 +108,7 @@ impl Core {
         document_uuid: u128,
     ) -> Result<DocumentInfo, CoreError> {
         self.ensure_no_active_stroke()?;
-        let source_info = raster.payload.info();
+        let source_info = raster.info;
         if document_uuid == 0 {
             return Err(CoreError::InvalidArgument(
                 "common-raster document UUID must be nonzero",

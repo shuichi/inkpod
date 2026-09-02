@@ -17058,6 +17058,8 @@ bool ApplyPreferencesValues(
         candidate_settings.sequence_endpoint_policy = values.sequence_endpoint_policy;
         candidate_settings.sequence_thumbnail_width_dip =
             values.sequence_thumbnail_width_dip;
+        candidate_settings.validated_sidecar_cache_mib =
+            values.validated_sidecar_cache_mib;
         candidate_settings.output_color_guard_profile = values.color_profile;
         candidate_settings.shortcuts = values.shortcuts;
         const std::uint32_t slot = state->Workspace().persistence_slot;
@@ -17077,9 +17079,20 @@ bool ApplyPreferencesValues(
         if (!settings_saved) {
             return false;
         }
+        const InkpodStatus cache_status =
+            state->file_io.SetValidatedSidecarCacheMiB(
+                values.validated_sidecar_cache_mib);
+        if (cache_status != INKPOD_STATUS_OK) {
+            (void)(state->lifetime.smoke_test
+                ? state->settings.ReplaceTransient(previous_settings)
+                : state->settings.Save(previous_settings));
+            return false;
+        }
         const InkpodStatus shortcut_status = ApplyShortcutProfileSet(
             *state->engine, state->shortcuts, values.shortcuts);
         if (shortcut_status != INKPOD_STATUS_OK) {
+            static_cast<void>(state->file_io.SetValidatedSidecarCacheMiB(
+                previous_settings.validated_sidecar_cache_mib));
             (void)(state->lifetime.smoke_test
                 ? state->settings.ReplaceTransient(previous_settings)
                 : state->settings.Save(previous_settings));
@@ -17124,6 +17137,8 @@ bool ApplyPreferencesValues(
             }
             static_cast<void>(ApplyShortcutProfileSet(
                 *state->engine, state->shortcuts, previous_settings.shortcuts));
+            static_cast<void>(state->file_io.SetValidatedSidecarCacheMiB(
+                previous_settings.validated_sidecar_cache_mib));
             (void)(state->lifetime.smoke_test
                 ? state->settings.ReplaceTransient(previous_settings)
                 : state->settings.Save(previous_settings));
@@ -22169,6 +22184,7 @@ std::optional<LRESULT> RouteApplicationCommand(
                     state->lifetime.sequence_switch_policy,
                     state->lifetime.sequence_endpoint_policy,
                     state->settings.Values().sequence_thumbnail_width_dip,
+                    state->settings.Values().validated_sidecar_cache_mib,
                     OutputColorGuardProfileSetting::Bt709ConservativeYcbcr,
                     state->Workspace().windows.workspace.selected_preset,
                     state->Workspace().windows.workspace.density,

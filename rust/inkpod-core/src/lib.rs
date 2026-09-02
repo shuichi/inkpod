@@ -101,7 +101,9 @@ pub use editor::{
 pub use effects::FilterPreviewInfo;
 pub use error::CoreError;
 pub use file_io::{
-    FileIoApply, FileIoItem, FileIoJob, FileIoKind, FileIoProgress, FileIoRequest, FileIoState,
+    DEFAULT_VALIDATED_TARGET_CACHE_BYTES, FileIoApply, FileIoItem, FileIoJob, FileIoKind,
+    FileIoProgress, FileIoRequest, FileIoState, MAX_VALIDATED_TARGET_CACHE_BYTES,
+    MAX_VALIDATED_TARGETS, ValidatedTargetCache, ValidatedTargetCacheStats,
 };
 pub use genesis::{BaseSurface, GenesisInfo};
 pub use geometry::{

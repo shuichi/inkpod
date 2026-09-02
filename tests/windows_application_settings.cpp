@@ -48,6 +48,7 @@ ApplicationSettings Sample() {
         inkpod::app::SequenceCellSwitchPolicy::AutosaveBeforeSwitch;
     result.sequence_endpoint_policy = inkpod::app::SequenceEndpointPolicy::Wrap;
     result.sequence_thumbnail_width_dip = 88U;
+    result.validated_sidecar_cache_mib = 768U;
     result.shortcuts = Defaults();
 
     ShortcutProfile custom{};
@@ -147,8 +148,9 @@ int wmain() {
         return 1;
     }
     if (!Contains(json, "\"format\": \"inkpod-settings\"")
-        || !Contains(json, "\"formatVersion\": 4")
+        || !Contains(json, "\"formatVersion\": 5")
         || !Contains(json, "\"sequenceThumbnailWidthDip\": 88")
+        || !Contains(json, "\"validatedSidecarCacheMiB\": 768")
         || !Contains(json, "\"defaultRasterFormat\": \"tiff\"")
         || !Contains(json, "\"command\": \"file.save\"")
         || !Contains(json, "\"logicalKey\": \"S\"")
@@ -168,6 +170,8 @@ int wmain() {
         || decoded.sequence_endpoint_policy != sample.sequence_endpoint_policy
         || decoded.sequence_thumbnail_width_dip
             != sample.sequence_thumbnail_width_dip
+        || decoded.validated_sidecar_cache_mib
+            != sample.validated_sidecar_cache_mib
         || decoded.shortcuts.profiles.size() != 2U
         || decoded.shortcuts.profiles[0] != defaults.profiles[0]
         || decoded.shortcuts.profiles[1].name != L"My shortcuts"
@@ -183,12 +187,12 @@ int wmain() {
     }
 
     const std::string wrong_version =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":3} ";
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":4} ";
     const std::string duplicate =
         "{\"format\":\"inkpod-settings\",\"format\":\"inkpod-settings\","
-        "\"formatVersion\":4}";
+        "\"formatVersion\":5}";
     const std::string unknown =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":5,"
         "\"mystery\":true}";
     if (DecodeApplicationSettingsJson(wrong_version, defaults, decoded)
         || DecodeApplicationSettingsJson(duplicate, defaults, decoded)
@@ -197,7 +201,7 @@ int wmain() {
     }
 
     const std::string invalid_raster_format =
-        "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
+        "{\"format\":\"inkpod-settings\",\"formatVersion\":5,"
         "\"saveAndRecovery\":{\"restorePreviousDocuments\":false,"
         "\"defaultRasterFormat\":\"jpeg\"}}";
     if (DecodeApplicationSettingsJson(invalid_raster_format, defaults, decoded)) {
@@ -218,12 +222,14 @@ int wmain() {
         }
     }
     if (!DecodeApplicationSettingsJson(
-            "{\"format\":\"inkpod-settings\",\"formatVersion\":4}",
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":5}",
             defaults,
             decoded)
         || decoded.default_raster_format != inkpod::app::RasterFileFormatSetting::Png
         || decoded.sequence_thumbnail_width_dip
-            != inkpod::app::kDefaultSequenceThumbnailWidthDip) {
+            != inkpod::app::kDefaultSequenceThumbnailWidthDip
+        || decoded.validated_sidecar_cache_mib
+            != inkpod::app::kDefaultValidatedSidecarCacheMiB) {
         return 15;
     }
 
@@ -242,12 +248,32 @@ int wmain() {
     }
     for (const char* width : {"31", "97"}) {
         const std::string invalid_width =
-            "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":5,"
             "\"animation\":{\"sequenceCellSwitch\":\"prompt\","
             "\"sequenceEndpoint\":\"stop\","
-            "\"sequenceThumbnailWidthDip\":" + std::string(width) + "}}";
+            "\"sequenceThumbnailWidthDip\":" + std::string(width) + ","
+            "\"validatedSidecarCacheMiB\":256}}";
         if (DecodeApplicationSettingsJson(invalid_width, defaults, decoded)) {
             return 19;
+        }
+    }
+
+    for (const std::uint32_t maximum_mib : {0U, 256U, 1024U}) {
+        ApplicationSettings candidate = sample;
+        candidate.validated_sidecar_cache_mib = maximum_mib;
+        std::string encoded;
+        if (!EncodeApplicationSettingsJson(candidate, encoded)
+            || !DecodeApplicationSettingsJson(encoded, defaults, decoded)
+            || decoded.validated_sidecar_cache_mib != maximum_mib) {
+            return 20;
+        }
+    }
+    {
+        ApplicationSettings candidate = sample;
+        candidate.validated_sidecar_cache_mib = 1025U;
+        std::string encoded;
+        if (EncodeApplicationSettingsJson(candidate, encoded)) {
+            return 21;
         }
     }
     for (const std::uint32_t width : {
@@ -315,6 +341,8 @@ int wmain() {
             != inkpod::app::SequenceCellSwitchPolicy::Prompt
         || loaded.sequence_endpoint_policy
             != inkpod::app::SequenceEndpointPolicy::Stop
+        || loaded.validated_sidecar_cache_mib
+            != inkpod::app::kDefaultValidatedSidecarCacheMiB
         || loaded.shortcuts.profiles.size() != defaults.profiles.size()
         || !loaded.workspaces.empty() || !loaded.saved_workspaces.empty()
         || GetFileAttributesW(file.c_str()) == INVALID_FILE_ATTRIBUTES) {
@@ -346,6 +374,8 @@ int wmain() {
                 != inkpod::windows::ui::UiLanguagePreference::System
             || loaded.sequence_thumbnail_width_dip
                 != inkpod::app::kDefaultSequenceThumbnailWidthDip
+            || loaded.validated_sidecar_cache_mib
+                != inkpod::app::kDefaultValidatedSidecarCacheMiB
             || loaded.shortcuts.profiles.size() != defaults.profiles.size()) {
             std::filesystem::remove_all(directory, error);
             return 21;
@@ -354,7 +384,7 @@ int wmain() {
 
     const std::array retained_noncurrent{
         std::string_view{
-            "{\"format\":\"inkpod-settings\",\"formatVersion\":5}"},
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":6}"},
         std::string_view{
             "{\"format\":\"inkpod-settings\",\"formatVersion\":0}"},
         std::string_view{
@@ -363,7 +393,7 @@ int wmain() {
         std::string_view{
             "{\"format\":\"other-settings\",\"formatVersion\":1}"},
         std::string_view{
-            "{\"format\":\"inkpod-settings\",\"formatVersion\":4,"
+            "{\"format\":\"inkpod-settings\",\"formatVersion\":5,"
             "\"mystery\":true}"},
     };
     for (const std::string_view retained : retained_noncurrent) {

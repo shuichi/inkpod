@@ -214,10 +214,11 @@ impl FrozenScriptAssets {
         self.by_symbol.get(symbol).map(|asset| asset.record.id())
     }
 
-    pub(crate) fn logical_bytes(&self, symbol: &str) -> Option<&[u8]> {
+    pub(crate) fn logical_bytes(&self, symbol: &str) -> Option<Vec<u8>> {
         self.by_symbol
             .get(symbol)
-            .map(|asset| asset.record.payload())
+            .and_then(|asset| asset.record.canonical_payload().ok())
+            .map(std::borrow::Cow::into_owned)
     }
 
     pub(crate) fn raster_input(&self, symbol: &str) -> Result<RasterAssetInput, ScriptAssetError> {
@@ -244,11 +245,15 @@ impl FrozenScriptAssets {
         let alpha_semantics = descriptor
             .alpha_semantics
             .ok_or(ScriptAssetError::InvalidDescriptor)?;
+        let canonical = asset
+            .record
+            .canonical_payload()
+            .map_err(|_| ScriptAssetError::ResourceLimit)?;
         let mut pixels = Vec::new();
         pixels
-            .try_reserve_exact(asset.record.payload().len())
+            .try_reserve_exact(canonical.len())
             .map_err(|_| ScriptAssetError::ResourceLimit)?;
-        pixels.extend_from_slice(asset.record.payload());
+        pixels.extend_from_slice(&canonical);
         Ok(RasterAssetInput {
             width,
             height,
@@ -1051,8 +1056,8 @@ assets {{ {assets} }}
 
         assert_eq!(inline.asset_id("paint"), Some(id));
         assert_eq!(external.asset_id("paint"), Some(id));
-        assert_eq!(inline.logical_bytes("paint"), Some(payload.as_slice()));
-        assert_eq!(external.logical_bytes("paint"), Some(payload.as_slice()));
+        assert_eq!(inline.logical_bytes("paint"), Some(payload.clone()));
+        assert_eq!(external.logical_bytes("paint"), Some(payload));
         assert_eq!(inline.usage().declaration_count, 1);
         assert_eq!(inline.usage().unique_asset_count, 1);
         assert_eq!(inline.usage().inline_decoded_bytes, 4);

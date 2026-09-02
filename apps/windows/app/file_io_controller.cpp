@@ -624,7 +624,8 @@ struct FileIoController::Impl final {
 FileIoController::FileIoController() = default;
 FileIoController::~FileIoController() = default;
 
-InkpodStatus FileIoController::Initialize() noexcept {
+InkpodStatus FileIoController::Initialize(
+    std::uint32_t validated_sidecar_cache_mib) noexcept {
     if (impl_ != nullptr) {
         return INKPOD_STATUS_OK;
     }
@@ -635,6 +636,14 @@ InkpodStatus FileIoController::Initialize() noexcept {
         const InkpodStatus status = inkpod_io_manager_create(nullptr, &next->manager);
         if (status != INKPOD_STATUS_OK) {
             return status;
+        }
+        const InkpodStatus cache_status =
+            inkpod_io_manager_set_validated_target_cache_bytes(
+                next->manager,
+                static_cast<std::uint64_t>(validated_sidecar_cache_mib)
+                    * UINT64_C(1024) * UINT64_C(1024));
+        if (cache_status != INKPOD_STATUS_OK) {
+            return cache_status;
         }
         impl_ = std::move(next);
         return INKPOD_STATUS_OK;
@@ -896,6 +905,17 @@ bool FileIoController::ConflictsWithPendingWrite(
         }
     }
     return false;
+}
+
+InkpodStatus FileIoController::SetValidatedSidecarCacheMiB(
+    std::uint32_t maximum_mib) noexcept {
+    if (impl_ == nullptr) {
+        return INKPOD_STATUS_INVALID_STATE;
+    }
+    return inkpod_io_manager_set_validated_target_cache_bytes(
+        impl_->manager,
+        static_cast<std::uint64_t>(maximum_mib)
+            * UINT64_C(1024) * UINT64_C(1024));
 }
 
 bool FileIoController::HasPendingKind(

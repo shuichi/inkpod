@@ -27,6 +27,8 @@ struct PreferencesValues final {
         app::SequenceEndpointPolicy::Stop};
     std::uint32_t sequence_thumbnail_width_dip{
         app::kDefaultSequenceThumbnailWidthDip};
+    std::uint32_t validated_sidecar_cache_mib{
+        app::kDefaultValidatedSidecarCacheMiB};
     app::OutputColorGuardProfileSetting color_profile{
         app::OutputColorGuardProfileSetting::Bt709ConservativeYcbcr};
     WorkspacePreset workspace_preset{WorkspacePreset::Coloring};

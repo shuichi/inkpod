@@ -3,6 +3,7 @@ use super::*;
 /// Opaque shared service; release after all owner-thread jobs are finalized.
 pub struct InkpodIoManager {
     pub(crate) manager: IoManager,
+    pub(crate) validated_targets: ValidatedTargetCache,
 }
 
 /// Opaque request. Its mutex protects detached state, never a live Core.
@@ -24,6 +25,14 @@ pub(crate) fn io_boundary(operation: impl FnOnce() -> Result<u32, u32>) -> u32 {
 pub(crate) unsafe fn manager_ref<'a>(
     pointer: *const InkpodIoManager,
 ) -> Result<&'a IoManager, u32> {
+    // SAFETY: This preserves the same live-handle contract and narrows the borrow.
+    Ok(&unsafe { manager_handle_ref(pointer)? }.manager)
+}
+
+// SAFETY: Caller supplies a live, externally synchronized opaque handle.
+pub(crate) unsafe fn manager_handle_ref<'a>(
+    pointer: *const InkpodIoManager,
+) -> Result<&'a InkpodIoManager, u32> {
     if pointer.is_null() || !is_aligned(pointer) {
         return Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
@@ -31,7 +40,7 @@ pub(crate) unsafe fn manager_ref<'a>(
         ));
     }
     // SAFETY: Checked address shape; validity/lifetime are the caller contract.
-    Ok(&unsafe { &*pointer }.manager)
+    Ok(unsafe { &*pointer })
 }
 
 // SAFETY: Caller supplies a live handle and does not race release.

@@ -16,8 +16,10 @@ implementation:
 
 - InkScript registry schema/language/file version 2, procedure catalog and owner
   manifest version 5, replay epoch 27, `.inkpod` top-level version 32, and C ABI
-  version 30 are the exact-current values. Catalog/owner v5 expose the same 73 public
+  version 31 are the exact-current values. Catalog/owner v5 expose the same 73 public
   commands; the private `ApplyBatchOperations` canonical procedure is not an InkScript command.
+  ABI v31 changes only application-owned validated-sidecar cache control/telemetry and does not
+  change InkScript syntax, catalog entries, procedure semantics, replay, or native payloads.
 - M07's approved exact-current registry schema v2 supersedes registry schema v1 solely to add
   closed catalog-owned enum, record, and constructor definitions; schema v1 is not accepted.
 - M21's approved option A changed only the shooting-frame selector from a layer owner to the

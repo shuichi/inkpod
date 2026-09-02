@@ -46,7 +46,9 @@ pub unsafe extern "C" fn inkpod_io_manager_get_cache_info(
         // SAFETY: Caller provides a readable prefix and writable output range.
         unsafe { validate_struct(out_info, "InkpodIoCacheInfo")? };
         // SAFETY: Live service lifetime is retained throughout the query.
-        let stats = unsafe { manager_ref(manager)? }.cache_stats();
+        let handle = unsafe { manager_handle_ref(manager)? };
+        let stats = handle.manager.cache_stats();
+        let targets = handle.validated_targets.stats();
         let info = InkpodIoCacheInfo {
             struct_size: size_of::<InkpodIoCacheInfo>() as u32,
             reserved: 0,
@@ -58,6 +60,12 @@ pub unsafe extern "C" fn inkpod_io_manager_get_cache_info(
             cache_hits: stats.cache_hits,
             sequence_render_allocations: stats.sequence_render_allocations,
             sequence_render_bytes: stats.sequence_render_bytes,
+            validated_target_maximum_bytes: targets.maximum_bytes,
+            validated_target_bytes: targets.retained_bytes,
+            validated_target_count: targets.target_count,
+            validated_target_hits: targets.hits,
+            validated_target_misses: targets.misses,
+            validated_target_evictions: targets.evictions,
         };
         // SAFETY: Complete writable output validated above.
         unsafe { out_info.write(info) };

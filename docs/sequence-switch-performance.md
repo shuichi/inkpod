@@ -120,18 +120,34 @@ unobserved run or proof of a particular OS/driver cause.
 ## 2026-09-02 COW construction follow-up
 
 The current native v32/replay epoch 27 implementation adds an exact-provenance
-construction optimization for sidecar-less Sequence targets. It retains the
-decoded allocation and clones the catalog tile map only when manager, complete
-file stamp, decode generation, format, metadata and allocation all match. Every
-mismatch takes the ordinary owned import. This classification is used only for
-the optimization choice and test-support counters; pair authority and the
-existing resolver-proven pristine re-registration do not depend on it.
+construction optimization for sidecar-less Sequence targets. Sequence import
+materializes each source once into its tiled COW representation, retains every
+source tile set and thumbnail under the decoded budget, and immediately releases
+the manager's dense decoded-cache owner. A warm switch clones the catalog tile
+map only when manager, normalized path, complete file stamp, decode generation,
+format and metadata all match. Every mismatch takes the ordinary owned import.
+This classification is used only for the optimization choice and test-support
+counters; pair authority and the existing resolver-proven pristine
+re-registration do not depend on it.
 
 The Core contract records zero dense-copy bytes and zero full tile
 materialization on the managed path, exact 16-byte/four-pixel work on the forced
 fallback, and zero warm AssetId hashing on A–B–A. Both paths have byte-identical
-native output and identical document/Genesis/asset/editor/history semantics,
-including after decoded-cache clear and manager shutdown.
+native output and identical document/Genesis/asset/editor/history semantics.
+The managed path remains available after decoded-cache clear and manager worker
+shutdown because the catalog owns the tiled source and its derived-budget lease;
+dense canonical bytes are materialized only for persistence or another explicit
+linear export.
+
+The same update adds an application-wide LRU for fully replayed and pair-validated
+sidecar targets. Its configurable byte budget is 0–1024 MiB (256 MiB default),
+it retains at most 64 clean targets, and an exact hit shares immutable document,
+asset and tile ownership through COW. Both normalized pair paths and both complete
+file stamps are part of the key. Changed stamps invalidate the old pair entry;
+recovered, dirty, pending, missing-companion and unproven targets are never
+published. The byte figure is a conservative logical cache weight, not a promise
+to count shared COW pages twice. A first sidecar visit still performs the required
+read, replay and raster-pair validation; only subsequent exact visits skip them.
 
 A single current x64 Release product run at 1280×960, 192 DPI and 60 Hz passes
 both 64-switch scenarios in 39.02 seconds. Every measured switch is foreground;

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <cmath>
 #include <cstdio>
 #include <new>
 #include <string>
@@ -347,6 +348,31 @@ int Run(app::ApplicationHost& state) {
     const HWND list = GetDlgItem(state.Workspace().sequence_palette, IDC_SEQUENCE_CELLS);
     if (list == nullptr || state.Workspace().sequence_dialog.view.cells.size() != 3U) {
         return 18005;
+    }
+    InkpodIoCacheInfo io_after_sequence_import{sizeof(InkpodIoCacheInfo)};
+    constexpr std::uint64_t kTileSize = 64U;
+    const std::uint64_t tiled_width =
+        (static_cast<std::uint64_t>(kWidth) + kTileSize - 1U) / kTileSize * kTileSize;
+    const std::uint64_t tiled_height =
+        (static_cast<std::uint64_t>(kHeight) + kTileSize - 1U) / kTileSize * kTileSize;
+    const double thumbnail_scale = std::max(
+        static_cast<double>(kWidth) / 64.0,
+        static_cast<double>(kHeight) / 64.0);
+    const std::uint64_t thumbnail_width = static_cast<std::uint64_t>(
+        std::llround(static_cast<double>(kWidth) / thumbnail_scale));
+    const std::uint64_t thumbnail_height = static_cast<std::uint64_t>(
+        std::llround(static_cast<double>(kHeight) / thumbnail_scale));
+    const std::uint64_t expected_sequence_residency = fixtures.paths.size()
+        * ((tiled_width * tiled_height + thumbnail_width * thumbnail_height) * 4U);
+    if (inkpod_io_manager_get_cache_info(
+            state.file_io.Manager(), &io_after_sequence_import)
+            != INKPOD_STATUS_OK
+        || io_after_sequence_import.decoded_bytes != expected_sequence_residency) {
+        std::fprintf(stderr,
+            "sequence residency mismatch decoded=%llu expected=%llu; "
+            "dense source copies must not remain beside resident tiles\n",
+            io_after_sequence_import.decoded_bytes, expected_sequence_residency);
+        return 18017;
     }
     KeyboardState keyboard;
     SetFocus(list);

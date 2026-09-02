@@ -35,7 +35,30 @@ pub unsafe extern "C" fn inkpod_io_manager_create(
         };
         let manager = IoManager::new(config).map_err(|error| map_core_error(error.into()))?;
         // SAFETY: This transfers Box ownership to the validated empty output slot.
-        unsafe { out_manager.write(Box::into_raw(Box::new(InkpodIoManager { manager }))) };
+        unsafe {
+            out_manager.write(Box::into_raw(Box::new(InkpodIoManager {
+                manager,
+                validated_targets: ValidatedTargetCache::default(),
+            })))
+        };
+        Ok(INKPOD_STATUS_OK)
+    })
+}
+
+/// Changes the application-wide validated sidecar-target cache byte limit.
+/// # Safety
+/// Manager is live and release does not race this call.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn inkpod_io_manager_set_validated_target_cache_bytes(
+    manager: *mut InkpodIoManager,
+    maximum_bytes: u64,
+) -> u32 {
+    io_boundary(|| {
+        // SAFETY: The caller retains the manager for this complete operation.
+        unsafe { manager_handle_ref(manager)? }
+            .validated_targets
+            .set_maximum_bytes(maximum_bytes)
+            .map_err(map_core_error)?;
         Ok(INKPOD_STATUS_OK)
     })
 }

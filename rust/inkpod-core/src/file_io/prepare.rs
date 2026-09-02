@@ -1,11 +1,12 @@
 use super::job::{Discovery, PairRepairTarget, Prepared};
 use super::model::*;
+use super::target_cache::{ValidatedTargetCache, ValidatedTargetKey};
 use crate::{
     CommonRasterFormat, Core, CoreError, DocumentSaveSnapshot, LightTableItemInfo,
     LightTableItemInput, LightTableSource, RectI32, SequenceCellSource,
 };
 use inkpod_io::{FileIdentity, IoManager, JobContext, LoadedImage};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 const MAX_NATIVE_BYTES: u64 = 1_073_741_824;
 
@@ -161,9 +162,128 @@ fn validate_canonical_companion(
     Ok(())
 }
 
+fn validate_tiled_canonical_companion(
+    staged: &Core,
+    format: CommonRasterFormat,
+    info: inkpod_format::CommonRasterInfo,
+    raster: &crate::TileRaster,
+) -> Result<(), CoreError> {
+    if staged.document_info()?.dirty {
+        return Err(CoreError::FileConflict);
+    }
+    let encoded = staged.export_native_save_raster(format)?;
+    let expected = inkpod_format::decode_common_raster(format, &encoded)?;
+    if !crate::raster_pair_validation::canonical_raster_pair_eq_tiled(
+        format, &expected, format, info, raster,
+    )? {
+        return Err(CoreError::FileConflict);
+    }
+    Ok(())
+}
+
+struct PairRasterSource {
+    path: PathBuf,
+    name: String,
+    format: CommonRasterFormat,
+    stamp: inkpod_io::FileStamp,
+    generation: u64,
+    loaded: Option<LoadedImage>,
+    managed: crate::asset::ManagedRasterDecision,
+}
+
+impl PairRasterSource {
+    fn loaded(image: LoadedImage, managed: crate::asset::ManagedRasterDecision) -> Self {
+        Self {
+            path: image.path().to_path_buf(),
+            name: image.name().to_owned(),
+            format: image.format(),
+            stamp: image.source().stamp(),
+            generation: image.generation(),
+            loaded: Some(image),
+            managed,
+        }
+    }
+
+    fn managed(
+        path: PathBuf,
+        format: CommonRasterFormat,
+        stamp: inkpod_io::FileStamp,
+        generation: u64,
+        input: crate::asset::ManagedRasterAssetInput,
+    ) -> Self {
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("")
+            .to_owned();
+        Self {
+            path,
+            name,
+            format,
+            stamp,
+            generation,
+            loaded: None,
+            managed: crate::asset::ManagedRasterDecision::Reuse(input),
+        }
+    }
+
+    fn validate_companion(
+        &self,
+        staged: &Core,
+        format: CommonRasterFormat,
+    ) -> Result<(), CoreError> {
+        if let Some(image) = &self.loaded {
+            validate_canonical_companion(staged, format, image)
+        } else if let crate::asset::ManagedRasterDecision::Reuse(input) = &self.managed {
+            validate_tiled_canonical_companion(staged, format, input.info, &input.raster)
+        } else {
+            Err(CoreError::InvalidState(
+                "managed pair source is missing canonical pixels",
+            ))
+        }
+    }
+
+    fn import(self, document_uuid: u128) -> Result<Core, CoreError> {
+        let mut staged = Core::new();
+        match self.managed {
+            crate::asset::ManagedRasterDecision::Reuse(raster) => {
+                staged.import_managed_sequence_raster(self.format, raster, document_uuid)?;
+            }
+            crate::asset::ManagedRasterDecision::Ineligible => {
+                let image = self.loaded.ok_or(CoreError::InvalidState(
+                    "owned pair import is missing decoded pixels",
+                ))?;
+                staged.import_decoded_common_raster(self.format, image.raster(), document_uuid)?;
+                staged.record_cow_fallback(
+                    image.raster().pixels.len() as u64,
+                    u64::from(image.raster().info.width)
+                        .saturating_mul(u64::from(image.raster().info.height)),
+                );
+            }
+            crate::asset::ManagedRasterDecision::NotRequested => {
+                let image = self.loaded.ok_or(CoreError::InvalidState(
+                    "owned pair import is missing decoded pixels",
+                ))?;
+                staged.import_decoded_common_raster(self.format, image.raster(), document_uuid)?;
+            }
+        }
+        Ok(staged)
+    }
+}
+
+#[derive(Clone, Copy)]
 enum RasterPairNativeProof {
     Existing(inkpod_io::FileStamp),
     Missing(FileIdentity),
+}
+
+impl RasterPairNativeProof {
+    const fn native_bytes(&self) -> u64 {
+        match self {
+            Self::Existing(stamp) => stamp.length,
+            Self::Missing(_) => 0,
+        }
+    }
 }
 
 struct NativeCompanionProof {
@@ -173,6 +293,32 @@ struct NativeCompanionProof {
     raster: Option<inkpod_io::FileStamp>,
     identity: FileIdentity,
     identity_physical: bool,
+}
+
+pub(super) struct ManagedPairRasterSource {
+    path: PathBuf,
+    format: CommonRasterFormat,
+    stamp: inkpod_io::FileStamp,
+    generation: u64,
+    input: crate::asset::ManagedRasterAssetInput,
+}
+
+impl ManagedPairRasterSource {
+    pub(super) fn new(
+        path: PathBuf,
+        format: CommonRasterFormat,
+        stamp: inkpod_io::FileStamp,
+        generation: u64,
+        input: crate::asset::ManagedRasterAssetInput,
+    ) -> Self {
+        Self {
+            path,
+            format,
+            stamp,
+            generation,
+            input,
+        }
+    }
 }
 
 /// Resolves one editable raster and its same-stem native candidate as a coherent pair.
@@ -187,18 +333,71 @@ pub(super) fn raster_pair(
     image: &LoadedImage,
     document_uuid: u128,
     context: &JobContext,
-    validate_final_image: impl FnOnce(&LoadedImage) -> Result<(), CoreError>,
-    managed_final_image: impl FnOnce(
+    target_cache: Option<&ValidatedTargetCache>,
+    mut validate_final_image: impl FnMut(&LoadedImage) -> Result<(), CoreError>,
+    mut managed_final_image: impl FnMut(
         &LoadedImage,
     ) -> Result<crate::asset::ManagedRasterDecision, CoreError>,
 ) -> Result<(Prepared, Vec<FileIoItem>), CoreError> {
-    let raster_path = image.path().to_path_buf();
+    validate_final_image(image)?;
+    let managed = managed_final_image(image)?;
+    raster_pair_source(
+        manager,
+        PairRasterSource::loaded(image.clone(), managed),
+        document_uuid,
+        context,
+        target_cache,
+        &mut validate_final_image,
+        &mut managed_final_image,
+    )
+}
+
+pub(super) fn raster_pair_managed(
+    manager: &IoManager,
+    source: ManagedPairRasterSource,
+    document_uuid: u128,
+    context: &JobContext,
+    target_cache: Option<&ValidatedTargetCache>,
+    mut validate_final_image: impl FnMut(&LoadedImage) -> Result<(), CoreError>,
+    mut managed_final_image: impl FnMut(
+        &LoadedImage,
+    ) -> Result<crate::asset::ManagedRasterDecision, CoreError>,
+) -> Result<(Prepared, Vec<FileIoItem>), CoreError> {
+    raster_pair_source(
+        manager,
+        PairRasterSource::managed(
+            source.path,
+            source.format,
+            source.stamp,
+            source.generation,
+            source.input,
+        ),
+        document_uuid,
+        context,
+        target_cache,
+        &mut validate_final_image,
+        &mut managed_final_image,
+    )
+}
+
+fn raster_pair_source(
+    manager: &IoManager,
+    mut source: PairRasterSource,
+    document_uuid: u128,
+    context: &JobContext,
+    target_cache: Option<&ValidatedTargetCache>,
+    validate_final_image: &mut impl FnMut(&LoadedImage) -> Result<(), CoreError>,
+    managed_final_image: &mut impl FnMut(
+        &LoadedImage,
+    ) -> Result<crate::asset::ManagedRasterDecision, CoreError>,
+) -> Result<(Prepared, Vec<FileIoItem>), CoreError> {
+    let raster_path = source.path.clone();
     let default_native_path = raster_path.with_extension("inkpod");
     let (native_candidates, raster_candidates) = manager
         .discover_pair_companion_candidates(
             &raster_path,
             &default_native_path,
-            image.format(),
+            source.format,
             context,
         )
         .map_err(io_pair_conflict)?;
@@ -215,15 +414,16 @@ pub(super) fn raster_pair(
     let recovery = manager
         .recover_pairs(&native_path, context)
         .map_err(io_pair_conflict)?;
-    let image = if recovery == inkpod_io::PairRecovery::NotNeeded {
-        image.clone()
-    } else {
-        manager
+    if recovery != inkpod_io::PairRecovery::NotNeeded {
+        let image = manager
             .read_image_with_reload(&raster_path, true, context)
-            .map_err(io_pair_conflict)?
-    };
+            .map_err(io_pair_conflict)?;
+        validate_final_image(&image)?;
+        let managed = managed_final_image(&image)?;
+        source = PairRasterSource::loaded(image, managed);
+    }
     let (native_candidates, raster_candidates) = manager
-        .discover_pair_companion_candidates(&raster_path, &native_path, image.format(), context)
+        .discover_pair_companion_candidates(&raster_path, &native_path, source.format, context)
         .map_err(io_pair_conflict)?;
     if native_candidates.len() > 1 {
         return Err(CoreError::FileConflict);
@@ -238,48 +438,79 @@ pub(super) fn raster_pair(
     if raster_candidates.as_slice() != [raster_path.clone()] {
         return Err(CoreError::FileConflict);
     }
-    validate_final_image(&image)?;
+    let raster_stamp = source.stamp;
+    let raster_name = source.name.clone();
+    let raster_format = source.format;
+    let raster_generation = source.generation;
+    enum NativeTarget {
+        Cached(Box<Core>),
+        Loaded(inkpod_format::NativeFile),
+    }
     let loaded_native = manager
         .with_file_locks(
             &[raster_path.clone(), native_path.clone()],
             context,
             |files| {
-                if files.metadata(&raster_path)? != image.source().stamp() {
+                if files.metadata(&raster_path)? != raster_stamp {
                     return Err(inkpod_io::IoError::ChangedDuringRead);
                 }
                 if !files.exists(&native_path)? {
                     return Ok(None);
                 }
                 let stamp = files.metadata(&native_path)?;
+                let cache_key = ValidatedTargetKey {
+                    native_path: native_path.clone(),
+                    native: stamp,
+                    raster_path: raster_path.clone(),
+                    raster: raster_stamp,
+                };
+                if let Some(target) = target_cache.and_then(|cache| cache.lookup(&cache_key)) {
+                    return Ok(Some((NativeTarget::Cached(Box::new(target)), stamp)));
+                }
                 let file = files.with_reader(&native_path, MAX_NATIVE_BYTES, |reader| {
                     Ok(inkpod_format::read_procedure_from_reader(reader, || {
                         context.is_cancelled()
                     })?)
                 })?;
                 if stamp != files.metadata(&native_path)?
-                    || files.metadata(&raster_path)? != image.source().stamp()
+                    || files.metadata(&raster_path)? != raster_stamp
                 {
                     return Err(inkpod_io::IoError::ChangedDuringRead);
                 }
-                Ok(Some((file, stamp)))
+                Ok(Some((NativeTarget::Loaded(file), stamp)))
             },
         )
         .map_err(io_pair_conflict)?;
     context.check_cancelled()?;
 
-    let (staged, normal_path, native_identity, native_physical, uuid, native_proof) =
+    let (staged, normal_path, native_identity, native_physical, uuid, native_proof, cache_insert) =
         if let Some((native, native_stamp)) = loaded_native {
-            let mut staged = Core::from_native_file(native, false).map_err(pair_conflict)?;
+            let (staged, cache_insert) = match native {
+                NativeTarget::Cached(staged) => (*staged, None),
+                NativeTarget::Loaded(native) => {
+                    let mut staged =
+                        Core::from_native_file(native, false).map_err(pair_conflict)?;
+                    let format = staged.raster_file_format().map_err(pair_conflict)?;
+                    source
+                        .validate_companion(&staged, format)
+                        .map_err(pair_conflict)?;
+                    staged.io_pair_authority = Some(SavedPair {
+                        native_path: native_path.clone(),
+                        native: native_stamp,
+                        raster_path: raster_path.clone(),
+                        raster: Some(raster_stamp),
+                        raster_missing: None,
+                    });
+                    let key = ValidatedTargetKey {
+                        native_path: native_path.clone(),
+                        native: native_stamp,
+                        raster_path: raster_path.clone(),
+                        raster: raster_stamp,
+                    };
+                    (staged, Some(key))
+                }
+            };
             let uuid = staged.document_info().map_err(pair_conflict)?.document_uuid;
-            let format = staged.raster_file_format().map_err(pair_conflict)?;
-            validate_canonical_companion(&staged, format, &image).map_err(pair_conflict)?;
-            staged.io_pair_authority = Some(SavedPair {
-                native_path: native_path.clone(),
-                native: native_stamp,
-                raster_path: raster_path.clone(),
-                raster: Some(image.source().stamp()),
-                raster_missing: None,
-            });
             (
                 staged,
                 Some(native_path.clone()),
@@ -287,8 +518,12 @@ pub(super) fn raster_pair(
                 true,
                 uuid,
                 RasterPairNativeProof::Existing(native_stamp),
+                cache_insert,
             )
         } else {
+            if let Some(cache) = target_cache {
+                cache.invalidate_pair_paths(&native_path, &raster_path);
+            }
             let (identity, physical) = manager
                 .resolve_identity(&native_path)
                 .map_err(io_pair_conflict)?;
@@ -299,37 +534,12 @@ pub(super) fn raster_pair(
             // resolver has established that there is no sidecar to replay. The
             // result selects an equivalent construction strategy; it never
             // changes pair authority or pristine-source registration.
-            let managed_raster = managed_final_image(&image)?;
-            let mut staged = Core::new();
-            match managed_raster {
-                crate::asset::ManagedRasterDecision::Reuse(raster) => {
-                    staged.import_managed_sequence_raster(image.format(), raster, document_uuid)?;
-                }
-                crate::asset::ManagedRasterDecision::Ineligible => {
-                    staged.import_decoded_common_raster(
-                        image.format(),
-                        image.raster(),
-                        document_uuid,
-                    )?;
-                    staged.record_cow_fallback(
-                        image.raster().pixels.len() as u64,
-                        u64::from(image.raster().info.width)
-                            .saturating_mul(u64::from(image.raster().info.height)),
-                    );
-                }
-                crate::asset::ManagedRasterDecision::NotRequested => {
-                    staged.import_decoded_common_raster(
-                        image.format(),
-                        image.raster(),
-                        document_uuid,
-                    )?;
-                }
-            }
+            let mut staged = source.import(document_uuid)?;
             staged.io_pair_plan = Some(PlannedPair {
                 native_path: native_path.clone(),
                 native_missing: identity,
                 raster_path: raster_path.clone(),
-                raster: image.source().stamp(),
+                raster: raster_stamp,
             });
             (
                 staged,
@@ -338,17 +548,18 @@ pub(super) fn raster_pair(
                 false,
                 document_uuid,
                 RasterPairNativeProof::Missing(identity),
+                None,
             )
         };
     context.check_cancelled()?;
 
     let raster_item = FileIoItem {
         path: raster_path.clone(),
-        name: image.name().to_owned(),
-        format: Some(image.format()),
-        identity: image.identity(),
+        name: raster_name,
+        format: Some(raster_format),
+        identity: raster_stamp.identity,
         identity_physical: true,
-        source_generation: image.generation(),
+        source_generation: raster_generation,
         document_uuid: uuid,
     };
     let native_item = FileIoItem {
@@ -370,7 +581,7 @@ pub(super) fn raster_pair(
                 &[raster_path.clone(), native_path.clone()],
                 context,
                 |files| {
-                    if files.metadata(&raster_path)? != image.source().stamp()
+                    if files.metadata(&raster_path)? != raster_stamp
                         || files.metadata(&native_path)? != expected_native
                     {
                         return Err(inkpod_io::IoError::ChangedDuringRead);
@@ -385,7 +596,7 @@ pub(super) fn raster_pair(
                     &[raster_path.clone(), native_path.clone()],
                     context,
                     |files| {
-                        if files.metadata(&raster_path)? != image.source().stamp()
+                        if files.metadata(&raster_path)? != raster_stamp
                             || files.exists(&native_path)?
                         {
                             return Err(inkpod_io::IoError::ChangedDuringRead);
@@ -403,12 +614,15 @@ pub(super) fn raster_pair(
         }
     }
     let final_candidates = manager
-        .discover_pair_companion_candidates(&raster_path, &native_path, image.format(), context)
+        .discover_pair_companion_candidates(&raster_path, &native_path, raster_format, context)
         .map_err(io_pair_conflict)?;
     if final_candidates != (native_candidates, raster_candidates) {
         return Err(CoreError::FileConflict);
     }
     context.check_cancelled()?;
+    if let (Some(cache), Some(key)) = (target_cache, cache_insert) {
+        cache.insert(key, &staged, native_proof.native_bytes());
+    }
     Ok((
         Prepared::Open(Box::new(staged), None, normal_path),
         vec![raster_item, native_item],
@@ -726,6 +940,7 @@ pub(super) fn images(
             image,
             item.document_uuid,
             context,
+            None,
             |_| Ok(()),
             |_| Ok(crate::asset::ManagedRasterDecision::NotRequested),
         );
@@ -754,6 +969,7 @@ pub(super) fn images(
                     &image,
                     item.document_uuid,
                 )?);
+                manager.discard_cached_decoded(&image)?;
                 context.set_work(index as u64 + 1, total);
             }
             Prepared::Sequence(sources)

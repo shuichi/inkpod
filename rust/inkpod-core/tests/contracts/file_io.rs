@@ -4104,6 +4104,120 @@ fn io_003_sequence_pair_switch_replays_existing_sidecar_history() {
 }
 
 #[test]
+fn io_003_sequence_pair_switch_reuses_validated_sidecar_target_without_io_or_replay() {
+    let files = Files::new();
+    let first = files.image("cell1.png", CommonRasterFormat::Png);
+    let second = files.image("cell2.png", CommonRasterFormat::Png);
+    let second_native = second.with_extension("inkpod");
+    let manager = manager();
+
+    let mut saved_target = Core::new();
+    open(&mut saved_target, &manager, &second);
+    saved_target
+        .apply_stroke(&super::line_stroke(vec![StrokeSample {
+            x: 0.0,
+            y: 0.0,
+            pressure: 1.0,
+        }]))
+        .unwrap();
+    let expected_digest = saved_target.document_state_digest().unwrap();
+    save_paths(
+        &mut saved_target,
+        &manager,
+        vec![second_native, second.clone()],
+        true,
+    );
+
+    let mut core = Core::new();
+    let mut opened = FileIoJob::start(
+        Some(&core),
+        manager.clone(),
+        FileIoRequest::new(FileIoKind::OpenRasterPair, vec![first.clone()]),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut opened).state, FileIoState::Ready);
+    opened.apply(&mut core).unwrap();
+    let mut sequence = FileIoJob::start(
+        Some(&core),
+        manager.clone(),
+        FileIoRequest::new(
+            FileIoKind::SequenceFiles,
+            vec![first.clone(), second.clone()],
+        ),
+    )
+    .unwrap();
+    assert_eq!(ready(&mut sequence).state, FileIoState::Ready);
+    sequence.apply(&mut core).unwrap();
+
+    let cache = ValidatedTargetCache::default();
+    let to_second = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let mut first_visit = FileIoJob::start_sequence_raster_pair_switch_with_cache(
+        &core,
+        manager.clone(),
+        cache.clone(),
+        to_second,
+        None,
+        second.clone(),
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut first_visit).state, FileIoState::Ready);
+    first_visit.apply(&mut core).unwrap();
+    assert_eq!(core.document_state_digest().unwrap(), expected_digest);
+    let after_first_visit = cache.stats();
+    assert_eq!(after_first_visit.target_count, 1);
+    assert_eq!(after_first_visit.hits, 0);
+    assert_eq!(after_first_visit.misses, 1);
+
+    let to_first = core
+        .sequence_switch_request(0, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let mut back = FileIoJob::start_sequence_raster_pair_switch_with_cache(
+        &core,
+        manager.clone(),
+        cache.clone(),
+        to_first,
+        None,
+        first,
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut back).state, FileIoState::Ready);
+    back.apply(&mut core).unwrap();
+
+    let io_before_revisit = manager.cache_stats();
+    let revisit = core
+        .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
+        .unwrap();
+    let mut second_visit = FileIoJob::start_sequence_raster_pair_switch_with_cache(
+        &core,
+        manager.clone(),
+        cache.clone(),
+        revisit,
+        None,
+        second,
+        None,
+    )
+    .unwrap();
+    assert_eq!(ready(&mut second_visit).state, FileIoState::Ready);
+    let io_after_revisit = manager.cache_stats();
+    assert_eq!(
+        io_after_revisit.physical_reads,
+        io_before_revisit.physical_reads
+    );
+    assert_eq!(io_after_revisit.decodes, io_before_revisit.decodes);
+    second_visit.apply(&mut core).unwrap();
+    assert_eq!(core.document_state_digest().unwrap(), expected_digest);
+    let after_revisit = cache.stats();
+    assert_eq!(after_revisit.target_count, 1);
+    assert_eq!(after_revisit.hits, 1);
+    assert_eq!(after_revisit.misses, 1);
+    manager.shutdown_and_wait();
+}
+
+#[test]
 fn io_003_sequence_pair_switch_reopens_a_cell_after_its_normal_pair_save() {
     let files = Files::new();
     let first = files.image("cell1.png", CommonRasterFormat::Png);
@@ -4357,8 +4471,8 @@ fn io_003_sequence_pair_switch_retains_missing_sidecar_first_save_proof() {
         core.revert(),
         Err(CoreError::InvalidState("document has no normal-save path"))
     );
-    // A managed target must own both canonical ASST bytes and tiled Genesis
-    // independently of the image cache that proved the initial reuse.
+    // A managed target owns one tiled canonical backing and materializes dense
+    // persistence bytes only while saving, independently of the decode cache.
     manager.clear_cache();
     save_paths(
         &mut core,
@@ -4374,7 +4488,7 @@ fn io_003_sequence_pair_switch_retains_missing_sidecar_first_save_proof() {
 
 #[cfg(feature = "test-support")]
 #[test]
-fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
+fn io_003_sequence_pair_cow_survives_decoded_cache_eviction() {
     let files = Files::new();
     let first = files.image("cell1.png", CommonRasterFormat::Png);
     let second = files.image("cell2.png", CommonRasterFormat::Png);
@@ -4400,9 +4514,21 @@ fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
     .unwrap();
     assert_eq!(ready(&mut sequence).state, FileIoState::Ready);
     sequence.apply(&mut initial).unwrap();
+    let sequence_usage = initial.resource_usage();
+    assert_eq!(initial.sequence_catalog_info().cell_count, 2);
+    assert_eq!(initial.sequence_cell(0).unwrap().cell_number, 1);
+    assert_eq!(initial.sequence_cell(1).unwrap().cell_number, 2);
+    assert_eq!(
+        manager.cache_stats().decoded_bytes,
+        sequence_usage
+            .sequence_source_bytes
+            .saturating_add(sequence_usage.thumbnail_cache_bytes),
+        "all sequence tiles stay resident but dense decode-cache copies do not"
+    );
 
     let mut managed = initial.clone();
     let mut fallback = initial.clone();
+    let io_before_switch = manager.cache_stats();
     let request = managed
         .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
         .unwrap();
@@ -4416,13 +4542,18 @@ fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
     )
     .unwrap();
     assert_eq!(ready(&mut managed_switch).state, FileIoState::Ready);
+    let io_after_prepare = manager.cache_stats();
+    assert_eq!(
+        io_after_prepare.physical_reads,
+        io_before_switch.physical_reads
+    );
+    assert_eq!(io_after_prepare.decodes, io_before_switch.decodes);
     managed_switch.apply(&mut managed).unwrap();
     drop(managed_switch);
     assert_eq!(
         managed.cow_optimization_counters(),
         CowOptimizationCounters {
             cow_hits: 1,
-            asset_hash_bytes: 16,
             ..CowOptimizationCounters::default()
         }
     );
@@ -4490,8 +4621,8 @@ fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
         }
     );
 
-    // Cache eviction makes the captured weak allocation proof ineligible. The
-    // ordinary owned path must remain byte-for-byte and state-for-state equal.
+    // Decode-cache eviction must not invalidate the exact source provenance or
+    // force a dense copy/hash/retile pass: the sequence source owns the tiles.
     manager.clear_cache();
     let fallback_request = fallback
         .sequence_switch_request(1, SequenceSwitchPolicy::AutosaveBeforeSwitch)
@@ -4510,10 +4641,7 @@ fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
     assert_eq!(
         fallback.cow_optimization_counters(),
         CowOptimizationCounters {
-            cow_fallbacks: 1,
-            dense_payload_copy_bytes: 16,
-            asset_hash_bytes: 16,
-            full_tile_materialization_pixels: 4,
+            cow_hits: 1,
             ..CowOptimizationCounters::default()
         }
     );
@@ -4527,7 +4655,7 @@ fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
             fallback.document_info().unwrap().document_uuid,
             fallback.sequence_cell(1).unwrap().source_generation,
         ),
-        "owned fallback must preserve the same resolver-proven pristine registration"
+        "cache-independent COW must preserve resolver-proven pristine registration"
     );
     let (fallback_native, _) = fallback
         .capture_document_save()
@@ -4547,7 +4675,7 @@ fn io_003_sequence_pair_cow_and_forced_cache_miss_are_semantically_identical() {
     manager.shutdown_and_wait();
 
     // Asset persistence is independent of a live manager/cache once the exact
-    // decoded allocation has been adopted by the staged Core.
+    // tiled source has been adopted by the staged Core.
     let (after_shutdown_native, _) = managed
         .capture_document_save()
         .unwrap()

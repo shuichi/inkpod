@@ -132,6 +132,27 @@ impl FileIoJob {
         request: SequenceSwitchRequest,
         source_recovery: Option<PathBuf>,
         target_raster: PathBuf,
+        metadata: Option<RecoveryMetadata>,
+    ) -> Result<Self, CoreError> {
+        Self::start_sequence_raster_pair_switch_with_cache(
+            core,
+            manager,
+            super::ValidatedTargetCache::default(),
+            request,
+            source_recovery,
+            target_raster,
+            metadata,
+        )
+    }
+
+    /// Uses an application-owned validated-target cache for a raster-pair switch.
+    pub fn start_sequence_raster_pair_switch_with_cache(
+        core: &Core,
+        manager: IoManager,
+        target_cache: super::ValidatedTargetCache,
+        request: SequenceSwitchRequest,
+        source_recovery: Option<PathBuf>,
+        target_raster: PathBuf,
         mut metadata: Option<RecoveryMetadata>,
     ) -> Result<Self, CoreError> {
         if target_raster.as_os_str().is_empty() {
@@ -173,15 +194,34 @@ impl FileIoJob {
         job.pending = Some(Pending::Prepare(manager.clone().submit(
             move |context| {
                 let result = (|| {
-                    let image = manager.read_image(&target_raster, &context)?;
-                    let (prepared, items) = super::prepare::raster_pair(
-                        &manager,
-                        &image,
-                        request.target_document_uuid,
-                        &context,
-                        |_| snapshot.validate_target_source(),
-                        |image| snapshot.managed_target_raster(&manager, image),
-                    )?;
+                    let normalized = manager.normalize_path(&target_raster)?;
+                    let stamp = manager.metadata(&normalized, &context)?;
+                    let managed =
+                        snapshot.managed_target_raster_from_stamp(&manager, &normalized, stamp)?;
+                    let (prepared, items) = if let Some((format, generation, input)) = managed {
+                        super::prepare::raster_pair_managed(
+                            &manager,
+                            super::prepare::ManagedPairRasterSource::new(
+                                normalized, format, stamp, generation, input,
+                            ),
+                            request.target_document_uuid,
+                            &context,
+                            Some(&target_cache),
+                            |_| snapshot.validate_target_source(),
+                            |image| snapshot.managed_target_raster(&manager, image),
+                        )?
+                    } else {
+                        let image = manager.read_image(&target_raster, &context)?;
+                        super::prepare::raster_pair(
+                            &manager,
+                            &image,
+                            request.target_document_uuid,
+                            &context,
+                            Some(&target_cache),
+                            |_| snapshot.validate_target_source(),
+                            |image| snapshot.managed_target_raster(&manager, image),
+                        )?
+                    };
                     let (staged, normal_path) = match prepared {
                         Prepared::Open(staged, None, normal_path) => (staged, normal_path),
                         _ => {
@@ -217,6 +257,27 @@ impl FileIoJob {
     pub fn start_sequence_switch(
         core: &Core,
         manager: IoManager,
+        request: SequenceSwitchRequest,
+        source_recovery: Option<PathBuf>,
+        target_recovery: Option<(PathBuf, RecoveryArtifactProof)>,
+        metadata: Option<RecoveryMetadata>,
+    ) -> Result<Self, CoreError> {
+        Self::start_sequence_switch_with_cache(
+            core,
+            manager,
+            super::ValidatedTargetCache::default(),
+            request,
+            source_recovery,
+            target_recovery,
+            metadata,
+        )
+    }
+
+    /// Uses an application-owned validated-target cache for recovery-aware switching.
+    pub fn start_sequence_switch_with_cache(
+        core: &Core,
+        manager: IoManager,
+        target_cache: super::ValidatedTargetCache,
         request: SequenceSwitchRequest,
         source_recovery: Option<PathBuf>,
         target_recovery: Option<(PathBuf, RecoveryArtifactProof)>,
@@ -349,25 +410,44 @@ impl FileIoJob {
                             return Err(CoreError::FileConflict);
                         }
                         let source_path = PathBuf::from(recovery_metadata.source_path);
-                        let image =
-                            manager
-                                .read_image(&source_path, &context)
-                                .map_err(|error| {
-                                    if matches!(error, inkpod_io::IoError::Cancelled) {
-                                        CoreError::Cancelled
-                                    } else {
-                                        CoreError::FileConflict
-                                    }
-                                })?;
-                        let (prepared, items) = super::prepare::raster_pair(
+                        let normalized = manager
+                            .normalize_path(&source_path)
+                            .map_err(CoreError::from)?;
+                        let stamp = manager
+                            .metadata(&normalized, &context)
+                            .map_err(CoreError::from)?;
+                        let managed = snapshot.managed_target_raster_from_stamp(
                             &manager,
-                            &image,
-                            request.target_document_uuid,
-                            &context,
-                            |_| snapshot.validate_target_source(),
-                            |_| Ok(crate::asset::ManagedRasterDecision::NotRequested),
-                        )
-                        .map_err(|error| {
+                            &normalized,
+                            stamp,
+                        )?;
+                        let resolution = if let Some((format, generation, input)) = managed {
+                            super::prepare::raster_pair_managed(
+                                &manager,
+                                super::prepare::ManagedPairRasterSource::new(
+                                    normalized, format, stamp, generation, input,
+                                ),
+                                request.target_document_uuid,
+                                &context,
+                                Some(&target_cache),
+                                |_| snapshot.validate_target_source(),
+                                |image| snapshot.managed_target_raster(&manager, image),
+                            )
+                        } else {
+                            let image = manager
+                                .read_image(&source_path, &context)
+                                .map_err(CoreError::from)?;
+                            super::prepare::raster_pair(
+                                &manager,
+                                &image,
+                                request.target_document_uuid,
+                                &context,
+                                Some(&target_cache),
+                                |_| snapshot.validate_target_source(),
+                                |_| Ok(crate::asset::ManagedRasterDecision::NotRequested),
+                            )
+                        };
+                        let (prepared, items) = resolution.map_err(|error| {
                             if error == CoreError::Cancelled {
                                 CoreError::Cancelled
                             } else {

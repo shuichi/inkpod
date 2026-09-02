@@ -9129,6 +9129,20 @@
       "resource": false
     },
     {
+      "id": "PreferencesValidatedSidecarCache",
+      "kind": "text",
+      "ja": "検証済み sidecar キャッシュ (MiB、0で無効)",
+      "en": "Validated sidecar cache (MiB, 0 disables)",
+      "resource": false
+    },
+    {
+      "id": "PreferencesValidatedSidecarCacheInvalid",
+      "kind": "text",
+      "ja": "検証済み sidecar キャッシュは 0～1024 MiB の範囲で入力してください。",
+      "en": "Enter a validated sidecar cache size from 0 through 1024 MiB.",
+      "resource": false
+    },
+    {
       "id": "PreferencesEndpointStop",
       "kind": "text",
       "ja": "停止する",

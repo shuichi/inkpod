@@ -84,7 +84,9 @@ pub unsafe extern "C" fn inkpod_core_io_sequence_switch_submit(
         }
         // SAFETY: The live handles satisfy owner affinity and shared service lifetime.
         let owner = &unsafe { owner_core(core)? }.core;
-        let manager = unsafe { manager_ref(manager)? }.clone();
+        let handle = unsafe { manager_handle_ref(manager)? };
+        let manager = handle.manager.clone();
+        let target_cache = handle.validated_targets.clone();
         let job = if resolve_raster_pair {
             if target_proof.is_some() {
                 return Err(fail(
@@ -98,8 +100,14 @@ pub unsafe extern "C" fn inkpod_core_io_sequence_switch_submit(
                     "sequence raster-pair target path is missing",
                 )
             })?;
-            FileIoJob::start_sequence_raster_pair_switch(
-                owner, manager, request, source, target, metadata,
+            FileIoJob::start_sequence_raster_pair_switch_with_cache(
+                owner,
+                manager,
+                target_cache,
+                request,
+                source,
+                target,
+                metadata,
             )
         } else {
             let target = if request.requires_switch() {
@@ -116,7 +124,15 @@ pub unsafe extern "C" fn inkpod_core_io_sequence_switch_submit(
             } else {
                 None
             };
-            FileIoJob::start_sequence_switch(owner, manager, request, source, target, metadata)
+            FileIoJob::start_sequence_switch_with_cache(
+                owner,
+                manager,
+                target_cache,
+                request,
+                source,
+                target,
+                metadata,
+            )
         }
         .map_err(map_core_error)?;
         // SAFETY: Unique ownership transfers to the validated empty output slot.

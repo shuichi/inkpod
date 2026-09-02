@@ -64,6 +64,7 @@ struct GeneralPageControls final {
     HWND sequence_switch_label{};
     HWND sequence_endpoint_label{};
     HWND sequence_thumbnail_width_label{};
+    HWND validated_sidecar_cache_label{};
     HWND color_profile_label{};
 };
 
@@ -838,6 +839,8 @@ void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
         ReadableWidth(model, model.general.sequence_endpoint_label, 210, 12),
         ReadableWidth(
             model, model.general.sequence_thumbnail_width_label, 210, 12),
+        ReadableWidth(
+            model, model.general.validated_sidecar_cache_label, 210, 12),
         ReadableWidth(model, model.general.color_profile_label, 210, 12)});
     const int control_x = field_x + label_width + dip(8);
     const int control_width = std::max(
@@ -936,6 +939,10 @@ void LayoutGeneralPage(DialogModel& model, const RECT& page) noexcept {
         model.general.sequence_thumbnail_width_label,
         IDC_PREFERENCES_SEQUENCE_THUMBNAIL_WIDTH,
         IDC_PREFERENCES_SEQUENCE_THUMBNAIL_SPIN);
+    place_numeric(
+        model.general.validated_sidecar_cache_label,
+        IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE,
+        IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE_SPIN);
     y += section_gap - row_gap;
 
     place_heading(model.general.section_headings[4]);
@@ -1279,6 +1286,34 @@ void CreateGeneralPage(DialogModel& model) {
         UDM_SETRANGE32,
         app::kMinimumSequenceThumbnailWidthDip,
         app::kMaximumSequenceThumbnailWidthDip);
+    model.general.validated_sidecar_cache_label = AddLabel(
+        model, kGeneralPage, UiStringId::PreferencesValidatedSidecarCache);
+    HWND sidecar_cache = AddControl(
+        model,
+        kGeneralPage,
+        WS_EX_CLIENTEDGE,
+        WC_EDITW,
+        L"",
+        ES_NUMBER | ES_AUTOHSCROLL | WS_TABSTOP,
+        IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE);
+    HWND sidecar_cache_spin = AddControl(
+        model,
+        kGeneralPage,
+        0U,
+        UPDOWN_CLASSW,
+        L"",
+        UDS_ARROWKEYS | UDS_SETBUDDYINT,
+        IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE_SPIN);
+    SendMessageW(
+        sidecar_cache_spin,
+        UDM_SETBUDDY,
+        reinterpret_cast<WPARAM>(sidecar_cache),
+        0U);
+    SendMessageW(
+        sidecar_cache_spin,
+        UDM_SETRANGE32,
+        0U,
+        app::kMaximumValidatedSidecarCacheMiB);
 
     model.general.section_headings[4] = AddSectionHeading(
         model, UiStringId::PreferencesTabColor);
@@ -1555,6 +1590,12 @@ void LoadControls(DialogModel& model) noexcept {
         UDM_SETPOS32,
         0U,
         static_cast<LPARAM>(model.working.sequence_thumbnail_width_dip));
+    SendDlgItemMessageW(
+        model.dialog,
+        IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE_SPIN,
+        UDM_SETPOS32,
+        0U,
+        static_cast<LPARAM>(model.working.validated_sidecar_cache_mib));
     SendDlgItemMessageW(model.dialog, IDC_PREFERENCES_COLOR_PROFILE, CB_SETCURSEL, 0U, 0U);
     SendDlgItemMessageW(
         model.dialog,
@@ -1623,6 +1664,27 @@ bool ReadControls(DialogModel& model) noexcept {
     }
     model.working.sequence_thumbnail_width_dip =
         static_cast<std::uint32_t>(width);
+    BOOL invalid_cache{};
+    const LRESULT cache_mib = SendDlgItemMessageW(
+        model.dialog,
+        IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE_SPIN,
+        UDM_GETPOS32,
+        0U,
+        reinterpret_cast<LPARAM>(&invalid_cache));
+    if (invalid_cache != FALSE || cache_mib < 0
+        || cache_mib
+            > static_cast<LRESULT>(app::kMaximumValidatedSidecarCacheMiB)) {
+        MessageBoxW(
+            model.dialog,
+            UiText(UiStringId::PreferencesValidatedSidecarCacheInvalid),
+            UiText(UiStringId::PreferencesTitle),
+            MB_OK | MB_ICONWARNING);
+        SetFocus(GetDlgItem(
+            model.dialog, IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE));
+        return false;
+    }
+    model.working.validated_sidecar_cache_mib =
+        static_cast<std::uint32_t>(cache_mib);
     return true;
 }
 
@@ -2437,6 +2499,34 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
             != static_cast<LRESULT>(model.working.sequence_thumbnail_width_dip)) {
         return false;
     }
+    const HWND sidecar_cache_edit = GetDlgItem(
+        model.dialog, IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE);
+    const HWND sidecar_cache_spin = GetDlgItem(
+        model.dialog, IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE_SPIN);
+    int minimum_cache{};
+    int maximum_cache{};
+    BOOL invalid_cache{};
+    const LRESULT current_cache = SendMessageW(
+        sidecar_cache_spin,
+        UDM_GETPOS32,
+        0U,
+        reinterpret_cast<LPARAM>(&invalid_cache));
+    SendMessageW(
+        sidecar_cache_spin,
+        UDM_GETRANGE32,
+        reinterpret_cast<WPARAM>(&minimum_cache),
+        reinterpret_cast<LPARAM>(&maximum_cache));
+    if (sidecar_cache_edit == nullptr || sidecar_cache_spin == nullptr
+        || reinterpret_cast<HWND>(SendMessageW(
+               sidecar_cache_spin, UDM_GETBUDDY, 0U, 0U)) != sidecar_cache_edit
+        || minimum_cache != 0
+        || maximum_cache
+            != static_cast<int>(app::kMaximumValidatedSidecarCacheMiB)
+        || invalid_cache != FALSE
+        || current_cache
+            != static_cast<LRESULT>(model.working.validated_sidecar_cache_mib)) {
+        return false;
+    }
 
     const int selected_page = model.selected_page;
     const int tolerance = Scale(model.dialog, 2);
@@ -2491,7 +2581,7 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
             }
         }
         if (page == kGeneralPage) {
-            const std::array<HWND, 16U> vertical_order{{
+            const std::array<HWND, 17U> vertical_order{{
                 model.general.section_headings[0],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_LANGUAGE),
                 model.general.language_restart,
@@ -2507,6 +2597,8 @@ bool ValidateSmokeLayout(DialogModel& model) noexcept {
                 GetDlgItem(model.dialog, IDC_PREFERENCES_SEQUENCE_ENDPOINT),
                 GetDlgItem(
                     model.dialog, IDC_PREFERENCES_SEQUENCE_THUMBNAIL_WIDTH),
+                GetDlgItem(
+                    model.dialog, IDC_PREFERENCES_VALIDATED_SIDECAR_CACHE),
                 model.general.section_headings[4],
                 GetDlgItem(model.dialog, IDC_PREFERENCES_COLOR_PROFILE)}};
             RECT previous{};

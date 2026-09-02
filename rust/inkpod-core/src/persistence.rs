@@ -352,7 +352,7 @@ impl Core {
         let proc_records = encode_journal_records(&self.journal)?;
         let journal_digest = journal_prefix_digest(&proc_records);
         let counters = self.persistence_counters()?;
-        let assets = self.assets.persistent_records();
+        let assets = self.assets.persistent_records()?;
         let asset_records = encode_asset_records(&assets)?;
         let document_digest = self.document_state_digest()?;
         let genesis_digest = primitive::canonical_document_state(&genesis.document)?.1;
@@ -872,10 +872,11 @@ fn decode_checkpoint(bytes: &[u8]) -> Result<DecodedCheckpoint, CoreError> {
 }
 
 fn encode_asset_records(
-    assets: &[(AssetId, AssetDescriptor, &[u8])],
+    assets: &[(AssetId, AssetDescriptor, std::borrow::Cow<'_, [u8]>)],
 ) -> Result<Vec<inkpod_format::NativeRecord>, CoreError> {
     let mut records = Vec::new();
     for (id, descriptor, payload) in assets {
+        let payload = payload.as_ref();
         if descriptor.logical_payload_length != payload.len() as u64 {
             return Err(format_error(
                 "asset descriptor payload length is inconsistent",

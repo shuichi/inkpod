@@ -12,12 +12,14 @@
 
 namespace inkpod::app {
 
-inline constexpr std::uint32_t kApplicationSettingsFormatVersion = 4U;
+inline constexpr std::uint32_t kApplicationSettingsFormatVersion = 5U;
 inline constexpr std::size_t kMaximumApplicationSettingsBytes =
     16U * 1024U * 1024U;
 inline constexpr std::uint32_t kMinimumSequenceThumbnailWidthDip = 32U;
 inline constexpr std::uint32_t kDefaultSequenceThumbnailWidthDip = 64U;
 inline constexpr std::uint32_t kMaximumSequenceThumbnailWidthDip = 96U;
+inline constexpr std::uint32_t kDefaultValidatedSidecarCacheMiB = 256U;
+inline constexpr std::uint32_t kMaximumValidatedSidecarCacheMiB = 1024U;
 
 struct PersistedWorkspace final {
     std::uint32_t slot{};
@@ -42,6 +44,8 @@ struct ApplicationSettings final {
         SequenceEndpointPolicy::Stop};
     std::uint32_t sequence_thumbnail_width_dip{
         kDefaultSequenceThumbnailWidthDip};
+    std::uint32_t validated_sidecar_cache_mib{
+        kDefaultValidatedSidecarCacheMiB};
     OutputColorGuardProfileSetting output_color_guard_profile{
         OutputColorGuardProfileSetting::Bt709ConservativeYcbcr};
     windows::ui::ShortcutProfileSet shortcuts;

@@ -1802,6 +1802,14 @@ bool BuildSettingsJson(const ApplicationSettings& settings, JsonValue& output) {
         animation,
         "sequenceThumbnailWidthDip",
         NumberValue(settings.sequence_thumbnail_width_dip));
+    if (settings.validated_sidecar_cache_mib
+        > kMaximumValidatedSidecarCacheMiB) {
+        return false;
+    }
+    Add(
+        animation,
+        "validatedSidecarCacheMiB",
+        NumberValue(settings.validated_sidecar_cache_mib));
     Add(output, "animation", std::move(animation));
 
     JsonValue color_management = ObjectValue();
@@ -1901,7 +1909,7 @@ bool ParseSettingsJson(
         if (!HasOnlyMembers(
                 *animation,
                 {"sequenceCellSwitch", "sequenceEndpoint",
-                 "sequenceThumbnailWidthDip"})
+                 "sequenceThumbnailWidthDip", "validatedSidecarCacheMiB"})
             || !StringMember(
                 *animation, "sequenceCellSwitch", switch_policy)
             || !StringMember(
@@ -1912,6 +1920,12 @@ bool ParseSettingsJson(
                 kMinimumSequenceThumbnailWidthDip,
                 kMaximumSequenceThumbnailWidthDip,
                 candidate.sequence_thumbnail_width_dip)
+            || !IntegerMember(
+                *animation,
+                "validatedSidecarCacheMiB",
+                0U,
+                kMaximumValidatedSidecarCacheMiB,
+                candidate.validated_sidecar_cache_mib)
             || !ParseEnum(
                 switch_policy,
                 kSequenceSwitchNames,

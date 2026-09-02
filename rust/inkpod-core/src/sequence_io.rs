@@ -1,7 +1,8 @@
 //! Detached autosave-before-switch preparation and atomic owner publication.
 
 use crate::{
-    Core, CoreError, DocumentInfo, DocumentSaveSnapshot, DocumentSaveToken, SequenceSwitchRequest,
+    CommonRasterFormat, Core, CoreError, DocumentInfo, DocumentSaveSnapshot, DocumentSaveToken,
+    SequenceSwitchRequest,
 };
 use inkpod_format::NativeFile;
 use inkpod_io::RecoveryPairProof;
@@ -169,6 +170,32 @@ impl SequenceSwitchSnapshot {
             crate::asset::ManagedRasterDecision::Ineligible,
             crate::asset::ManagedRasterDecision::Reuse,
         ))
+    }
+
+    pub(crate) fn managed_target_raster_from_stamp(
+        &self,
+        manager: &inkpod_io::IoManager,
+        path: &std::path::Path,
+        stamp: inkpod_io::FileStamp,
+    ) -> Result<
+        Option<(
+            CommonRasterFormat,
+            u64,
+            crate::asset::ManagedRasterAssetInput,
+        )>,
+        CoreError,
+    > {
+        self.validate_target_source()?;
+        let source = self
+            .document
+            .core
+            .sequence
+            .as_ref()
+            .and_then(|sequence| sequence.cells.get(self.request.target_index as usize))
+            .ok_or(CoreError::InvalidState("sequence switch request is stale"))?;
+        Ok(source
+            .managed_raster_input_from_stamp(manager, path, stamp)
+            .map(|input| (source.raster_file_format, source.source_generation, input)))
     }
 
     /// Prepares the old source recovery and a fully validated target without I/O.

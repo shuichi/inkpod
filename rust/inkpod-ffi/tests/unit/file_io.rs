@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 static PATH_SEQUENCE: AtomicU64 = AtomicU64::new(1);
 
 #[test]
-fn io_003_public_protocol_constants_match_abi_v30() {
+fn io_003_public_protocol_constants_match_abi_v31() {
     assert_eq!(INKPOD_IO_OPEN_RASTER_PAIR, 22);
     assert_eq!(INKPOD_IO_REVERT_CURRENT, 1_u64 << 4);
     assert_eq!(INKPOD_IO_RECOVERY_ARTIFACT_READONLY, 1_u32 << 0);
@@ -1997,6 +1997,54 @@ fn io_003_ffi_manager_paths_poll_apply_and_ownership_are_connected() {
         assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
     }
     std::fs::remove_dir_all(directory).unwrap();
+}
+
+#[test]
+fn io_003_validated_target_cache_limit_is_bounded_and_observable() {
+    // SAFETY: Manager/output pointers are live and all records advertise their
+    // complete current layout for the duration of each call.
+    unsafe {
+        let mut manager = ptr::null_mut();
+        assert_eq!(
+            inkpod_io_manager_create(ptr::null(), &mut manager),
+            INKPOD_STATUS_OK
+        );
+        let mut cache = InkpodIoCacheInfo {
+            struct_size: size_of::<InkpodIoCacheInfo>() as u32,
+            ..Default::default()
+        };
+        assert_eq!(
+            inkpod_io_manager_get_cache_info(manager, &mut cache),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(cache.validated_target_maximum_bytes, 256 * 1024 * 1024);
+        assert_eq!(cache.validated_target_count, 0);
+
+        assert_eq!(
+            inkpod_io_manager_set_validated_target_cache_bytes(manager, 0),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_io_manager_get_cache_info(manager, &mut cache),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(cache.validated_target_maximum_bytes, 0);
+
+        assert_eq!(
+            inkpod_io_manager_set_validated_target_cache_bytes(manager, 1024 * 1024 * 1024),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(
+            inkpod_io_manager_set_validated_target_cache_bytes(manager, 1024 * 1024 * 1024 + 1),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            inkpod_io_manager_get_cache_info(manager, &mut cache),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(cache.validated_target_maximum_bytes, 1024 * 1024 * 1024);
+        assert_eq!(inkpod_io_manager_release(&mut manager), INKPOD_STATUS_OK);
+    }
 }
 
 #[test]
