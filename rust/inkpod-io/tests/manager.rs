@@ -83,6 +83,27 @@ fn wait<T>(job: &inkpod_io::IoJob<T>) -> inkpod_io::IoResult<T> {
     }
 }
 
+fn wait_for_later_file_change_time(manager: &IoManager, directory: &Directory, changed: i128) {
+    // ChangeTime/ctime is a filesystem timestamp, not a per-write sequence.
+    // Probe the same filesystem before mutating the cached file so this test
+    // exercises a changed stamp even when several writes share one clock tick.
+    // A wall-clock sleep alone cannot establish that precondition.
+    let probe = directory.path("change-time-probe");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        fs::write(&probe, [0]).unwrap();
+        let observed = manager.metadata(&probe, &JobContext::new()).unwrap();
+        if observed.changed > changed {
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "filesystem change time did not advance: cached={changed}, probe={observed:?}"
+        );
+        std::thread::sleep(Duration::from_millis(1));
+    }
+}
+
 #[test]
 fn same_size_timestamp_preserved_tga_rewrite_invalidates_cache() {
     let directory = Directory::new();
@@ -92,6 +113,7 @@ fn same_size_timestamp_preserved_tga_rewrite_invalidates_cache() {
     let first = manager.read_image(&path, &JobContext::new()).unwrap();
     let first_stamp = first.source().stamp();
     let original_modified = fs::metadata(&path).unwrap().modified().unwrap();
+    wait_for_later_file_change_time(&manager, &directory, first_stamp.changed);
     let replacement = encoded(&path, 84, CommonRasterFormat::Tga);
     assert_eq!(replacement.len(), original.len());
     File::options()
@@ -104,7 +126,8 @@ fn same_size_timestamp_preserved_tga_rewrite_invalidates_cache() {
     assert_eq!(rewritten_stamp.identity, first_stamp.identity);
     assert_eq!(rewritten_stamp.length, first_stamp.length);
     assert_eq!(rewritten_stamp.modified, first_stamp.modified);
-    assert_ne!(rewritten_stamp, first_stamp);
+    assert_eq!(rewritten_stamp.readonly, first_stamp.readonly);
+    assert_ne!(rewritten_stamp.changed, first_stamp.changed);
     let second = manager.read_image(&path, &JobContext::new()).unwrap();
     assert_ne!(first.generation(), second.generation());
     assert_eq!(second.raster().pixels, [84, 84, 84, 255]);

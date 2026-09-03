@@ -204,6 +204,12 @@ Replacement invalidates affected cache entries. External writes are not locked
 by the application: stamp/content validation detects changes and rejects stale
 reads or unauthorized overwrite instead of trusting a filename or timestamp
 alone.
+`FileStamp` is a metadata observation, not a monotonic content revision. Its
+change time has the platform filesystem's clock resolution; a rapid same-size
+external rewrite with restored modification time can leave every observed field
+equal. Stamp-based cache validation cannot distinguish those bytes. An explicit
+`read_image_with_reload(..., true, ...)` invalidates the cached bytes before
+reading when a caller requires a refresh despite equal metadata.
 Paired save additionally proves that each same-stem native/raster candidate set
 contains only the selected member after staging, after native publication but
 before raster publication, and after both publications before success cleanup.

@@ -123,6 +123,45 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+### File change-time regression fixture (`IO-003`, 2026-09-03)
+
+The v0.3.1 Windows Debug failure came from the fixture's assumption that two
+nearby writes must produce different `ChangeTime` values. Windows reports a
+[filesystem timestamp](https://learn.microsoft.com/en-us/windows/win32/api/winbase/ns-winbase-file_basic_info),
+not a per-write revision. The test restored modification time while retaining
+identity, length and permissions, so a shared clock tick left the entire stamp
+equal before the cache-invalidating read was exercised.
+
+The fixture now writes and closes a separate one-byte probe on the same
+filesystem until its observed change time advances beyond the cached stamp.
+The five-second deadline fails with both observations if that precondition
+cannot be established; one-millisecond polling avoids a busy loop. Only then
+does the test rewrite the original TGA and restore its modification time. It
+asserts unchanged identity, length, modification time and read-only attribute,
+a different change time, a new cache generation, exact replacement pixels, and
+exactly two physical reads/decodes. The tested rewrite and assertions are not
+retried.
+
+In a temporary diagnostic build, quantizing Windows change-time observations to
+100 ms reproduces the original failure at line 107; the corrected fixture passes
+all 16 independent runs under that same injected clock. Temporarily ignoring
+change time in encoded-cache equality makes the corrected fixture fail at the
+generation assertion. Both diagnostic mutations were restored. This corrects
+the test precondition and documents `FileStamp` semantics; runtime invalidation,
+ABI and persistence are unchanged. Equal complete stamps still cannot prove
+content equality; explicit reload remains the bypass for such external edits.
+
+Normal no-profile validation passes `cargo fmt --check`, workspace/all-target/
+all-feature Clippy with warnings denied, all 801 workspace tests (one existing
+Release-only ignore), the unchanged Core quick benchmark, and warnings-denied
+Core rustdoc. The exact hosted I/O command, `cargo test --locked --package
+inkpod-io --all-features`, also passes locally. `windows-x64-debug` configure,
+build, static-CRT/package validation and all 49 CTests pass in 339.11 seconds,
+including English/Japanese product smokes in 135.95/152.85 seconds. The initial
+sandboxed configure could not execute Ninja; the no-profile retry completed with
+exit code 0. Logs are under `build/file-stamp-diagnosis/`. New hosted CI,
+non-Windows and ARM64 runs have not been performed for this fixture-only fix.
+
 ### Current release: 0.3.1 (`PKG-001`, 2026-09-03)
 
 GitHub prerelease `v0.3.1` points to `41c0367be2b5bad34e4371e537041a5fcdad6abd`.
@@ -145,8 +184,9 @@ before CMake in `same_size_timestamp_preserved_tga_rewrite_invalidates_cache`
 (`rust/inkpod-io/tests/manager.rs:107`), both initially and on one unchanged-job
 retry: the rewrite preserves identity, length, modified time and change time,
 so the required unequal `FileStamp` assertion fails. The same test passes locally
-and in the tag-triggered CI's I/O step, but the two failures remain unresolved;
-no test or acceptance gate was relaxed for publication.
+and in the tag-triggered CI's I/O step. The post-release fixture correction is
+recorded above; the published tag and its original CI observations are unchanged.
+No test or acceptance gate was relaxed for publication.
 
 Local logs are under `build/release-validation-0.3.1/`. ARM64 native execution,
 the optional administrator MSIX install/uninstall test, and the physical

@@ -14,6 +14,10 @@ pub struct FileIdentity {
 }
 
 /// File identity and a version observation, captured from an open handle.
+///
+/// The time fields use the platform filesystem's clock and resolution. They
+/// are not monotonic revision counters: multiple changes can share a timestamp.
+/// Equal stamps therefore do not prove that file contents are identical.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct FileStamp {
     pub identity: FileIdentity,
