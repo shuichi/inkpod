@@ -21,7 +21,6 @@ fn shooting_frame_abi_validates_numeric_input_and_borrows_snapshot_records() {
             height: 18.0,
             rotation_degrees: 33.75,
             visible: 1,
-            include_in_instruction_export: 1,
         };
         let mut revision = 0;
         let mut frame_id = 0;
@@ -133,19 +132,14 @@ fn shooting_frame_abi_validates_numeric_input_and_borrows_snapshot_records() {
         );
         assert!(revision > stable.document_revision);
 
-        let mut instruction_buffer = ptr::null_mut();
+        let mut raster_buffer = ptr::null_mut();
         assert_eq!(
-            inkpod_core_export_instruction_common_raster(
-                core,
-                INKPOD_COMMON_RASTER_PNG,
-                0,
-                &mut instruction_buffer,
-            ),
+            inkpod_core_export_common_raster(core, INKPOD_COMMON_RASTER_PNG, 0, &mut raster_buffer,),
             INKPOD_STATUS_OK
         );
-        assert!(!instruction_buffer.is_null());
+        assert!(!raster_buffer.is_null());
         assert_eq!(
-            inkpod_byte_buffer_release(&mut instruction_buffer),
+            inkpod_byte_buffer_release(&mut raster_buffer),
             INKPOD_STATUS_OK
         );
 
@@ -4302,8 +4296,8 @@ fn replay_contract_and_snapshot_digest_are_bounded_side_effect_free_queries() {
             inkpod_core_get_replay_contract(core, &mut contract),
             INKPOD_STATUS_OK
         );
-        assert_eq!(contract.replay_epoch, 27);
-        assert_eq!(contract.procedure_format_version, 32);
+        assert_eq!(contract.replay_epoch, 28);
+        assert_eq!(contract.procedure_format_version, 33);
         assert_eq!(contract.canonical_numeric_version, 1);
         assert!(contract.primitive_count > 0);
         assert_ne!(contract.primitive_catalog_digest, [0; 32]);
@@ -5160,7 +5154,6 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     let v3_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/v3.rs"));
     let batch_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/batch.rs"));
     let file_io_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/file_io.rs"));
-    let cut_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/cut.rs"));
     let inkscript_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/inkscript.rs"));
     let cpp_tests = read(&repository.join("tests/abi_smoke.cpp"));
 
@@ -5178,7 +5171,6 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     referenced.extend(names_followed_by_parenthesis(&v3_tests));
     referenced.extend(names_followed_by_parenthesis(&batch_tests));
     referenced.extend(names_followed_by_parenthesis(&file_io_tests));
-    referenced.extend(names_followed_by_parenthesis(&cut_tests));
     referenced.extend(names_followed_by_parenthesis(&inkscript_tests));
     referenced.extend(names_followed_by_parenthesis(&contract_tests));
     referenced.extend(names_followed_by_parenthesis(&cpp_tests));
@@ -5415,5 +5407,50 @@ fn sequence_catalog_and_snapshot_source_abi_preserve_immutable_provenance() {
         assert_eq!(inkpod_snapshot_release(&mut first), INKPOD_STATUS_OK);
         assert_eq!(inkpod_snapshot_release(&mut first), INKPOD_STATUS_OK);
         assert_eq!(inkpod_snapshot_release(&mut ordinary), INKPOD_STATUS_OK);
+    }
+}
+
+#[test]
+fn document_thumbnail_query_copy_and_invalid_buffer_are_bounded() {
+    let (mut core, _) = create_core(32, 24, 0x5f21);
+    let before = queried_document_info(core);
+    // SAFETY: This test owns the live Core and every complete output buffer.
+    unsafe {
+        let mut thumbnail = InkpodDocumentThumbnailBuffer {
+            struct_size: size_of::<InkpodDocumentThumbnailBuffer>() as u32,
+            ..InkpodDocumentThumbnailBuffer::default()
+        };
+        assert_eq!(
+            inkpod_core_document_thumbnail_get(core, &mut thumbnail),
+            INKPOD_STATUS_OK
+        );
+        assert_eq!(thumbnail.stride_bytes, thumbnail.width * 4);
+        assert_eq!(
+            thumbnail.required_bytes,
+            u64::from(thumbnail.stride_bytes) * u64::from(thumbnail.height)
+        );
+        assert_ne!(thumbnail.checksum, 0);
+        let mut pixels = vec![0_u8; thumbnail.required_bytes as usize];
+        thumbnail.pixels_rgba8 = pixels.as_mut_ptr();
+        thumbnail.pixel_capacity = pixels.len() as u64 - 1;
+        assert_eq!(
+            inkpod_core_document_thumbnail_get(core, &mut thumbnail),
+            INKPOD_STATUS_BUFFER_TOO_SMALL
+        );
+        thumbnail.pixel_capacity += 1;
+        assert_eq!(
+            inkpod_core_document_thumbnail_get(core, &mut thumbnail),
+            INKPOD_STATUS_OK
+        );
+        thumbnail.reserved = 1;
+        assert_eq!(
+            inkpod_core_document_thumbnail_get(core, &mut thumbnail),
+            INKPOD_STATUS_INVALID_ARGUMENT
+        );
+        assert_eq!(
+            queried_document_info(core).document_revision,
+            before.document_revision
+        );
+        assert_eq!(inkpod_core_destroy(&mut core), INKPOD_STATUS_OK);
     }
 }

@@ -1,9 +1,9 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 32, replay epoch 27,
+The current runtime replay contract is procedure format 33, replay epoch 28,
 canonical numeric version 1, and the digest of the closed 75-entry primitive
-catalog. The separate public InkScript catalog/owner manifest is v5 with 73
-commands. Production `.inkpod` is exact-current v32; an optional verified
+catalog. The separate public InkScript catalog/owner manifest is v6 with 73
+commands. Production `.inkpod` is exact-current v33; an optional verified
 checkpoint preserves this contract and never replaces the authoritative journal.
 
 Epoch 27 and format 31 closed the standard image-tree model. Format 32 changes
@@ -17,9 +17,7 @@ protection are document-owned rasters outside the image tree. Layer kinds,
 Selection planes, vanishing-point objects, adjustment layers, and their former
 procedures are absent; retired primitive codes remain rejected tombstones.
 `.inkbatch` v5/operation schema 4 and its private `ApplyBatchOperations/canonical-v3` target Color
-or Raster plane roles without a layer-kind selector. Cut payload schema 3 retains
-its independent replay epoch 25. Every older top-level, replay, Batch, and Cut
-schema is rejected without migration.
+or Raster plane roles without a layer-kind selector. Cut descriptors and instruction export are removed. Format 33/epoch 28 uses DOCM schema 9, document digest schema 13/domain 11 and EditShootingFrame schema 3/semantics 2 with no export-policy field. Every older top-level/replay contract and every Cut descriptor is rejected without migration. Snapshot-composite goldens and numeric semantics are unchanged.
 
 The optional angled shooting frame retains its fixed-point CORDIC geometry and
 independent document ownership. Floating transforms, output-color guard, Color
@@ -70,7 +68,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 32 and replay epoch 27. A replay-semantic change that updates
+together with format version 33 and replay epoch 28. A replay-semantic change that updates
 the catalog or any replay golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

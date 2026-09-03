@@ -1,10 +1,9 @@
 use inkpod_format::{
     BATCH_GRAPH_VERSION, BATCH_OPERATION_VERSION, CommonRaster, CommonRasterFormat, FileBatchGraph,
-    FileBatchInput, FileBatchOperation, FileBatchOutput, FileBatchTarget, FileCutDefaults,
-    FileCutDescriptor, FileCutMetadata, NativeFile, NativeRecord, NativeSection, SECTION_CRITICAL,
-    decode_batch_graph, decode_common_raster, decode_cut_descriptor, decode_procedure_file,
-    encode_batch_graph, encode_common_raster, encode_cut_descriptor, encode_procedure_file,
-    read_batch_graph, read_cut_descriptor, read_procedure_file,
+    FileBatchInput, FileBatchOperation, FileBatchOutput, FileBatchTarget, NativeFile, NativeRecord,
+    NativeSection, SECTION_CRITICAL, decode_batch_graph, decode_common_raster,
+    decode_procedure_file, encode_batch_graph, encode_common_raster, encode_procedure_file,
+    read_batch_graph, read_procedure_file,
 };
 use inkpod_image::PixelFormat;
 use std::fs;
@@ -15,7 +14,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 #[derive(Clone, Copy, Debug)]
 enum Decoder {
     Native,
-    Cut,
     Batch,
     Raster(CommonRasterFormat),
 }
@@ -32,7 +30,6 @@ fn parse_hex(source: &str) -> Vec<u8> {
 fn decode_without_panic(decoder: Decoder, bytes: &[u8]) -> Result<(), inkpod_format::FormatError> {
     catch_unwind(AssertUnwindSafe(|| match decoder {
         Decoder::Native => decode_procedure_file(bytes).map(|_| ()),
-        Decoder::Cut => decode_cut_descriptor(bytes).map(|_| ()),
         Decoder::Batch => decode_batch_graph(bytes).map(|_| ()),
         Decoder::Raster(format) => decode_common_raster(format, bytes).map(|_| ()),
     }))
@@ -117,48 +114,6 @@ fn batch_seed() -> Vec<u8> {
     .expect("batch mutation seed must encode")
 }
 
-fn cut_seed() -> Vec<u8> {
-    let metadata = FileCutMetadata {
-        work_title: "corrupted-corpus".to_owned(),
-        episode: "1".to_owned(),
-        scene: "A".to_owned(),
-        cut_name: "C001".to_owned(),
-        instruction: String::new(),
-        duration_frames: 24,
-    };
-    let defaults = FileCutDefaults {
-        sizing_mode: 1,
-        size_a: 1920,
-        size_b: 1080,
-        dpi_x_milli: 96_000,
-        dpi_y_milli: 96_000,
-        margin_milli: 50,
-        safe_frame_ratio_milli: 900,
-        maximum_close_ratio_milli: 500,
-        anchor: 3,
-        pixel_format: 5,
-    };
-    encode_cut_descriptor(&FileCutDescriptor {
-        cut_id: 1,
-        cut_uuid: [1; 16],
-        current_state_id: 1,
-        savepoint_state_id: 1,
-        next_state_id: 2,
-        next_procedure_id: 1,
-        history_cursor: 0,
-        genesis_metadata: metadata.clone(),
-        genesis_defaults: defaults,
-        genesis_members: Vec::new(),
-        metadata,
-        defaults,
-        member_assets: Vec::new(),
-        members: Vec::new(),
-        active_history: Vec::new(),
-        inactive_history: Vec::new(),
-    })
-    .expect("Cut mutation seed must encode")
-}
-
 fn raster_seed(format: CommonRasterFormat) -> Vec<u8> {
     let raster = CommonRaster::new(
         2,
@@ -182,10 +137,10 @@ fn acceptance_corrupted_file_corpus_is_bounded_and_non_destructive() {
             "native header is truncated",
         ),
         (
-            "cut_descriptor_length_overflow",
-            Decoder::Cut,
+            "retired_cut_descriptor",
+            Decoder::Native,
             include_str!("corpus/corrupted/cut_descriptor_length_overflow.hex"),
-            "Cut descriptor lengths are inconsistent",
+            "native header is truncated",
         ),
         (
             "batch_body_overflow",
@@ -235,7 +190,6 @@ fn acceptance_corrupted_file_corpus_is_bounded_and_non_destructive() {
         );
         let file_result = catch_unwind(AssertUnwindSafe(|| match decoder {
             Decoder::Native => read_procedure_file(&input).map(|_| ()),
-            Decoder::Cut => read_cut_descriptor(&input).map(|_| ()),
             Decoder::Batch => read_batch_graph(&input).map(|_| ()),
             Decoder::Raster(format) => decode_common_raster(format, &bytes).map(|_| ()),
         }));
@@ -273,7 +227,6 @@ fn acceptance_corrupted_file_corpus_is_bounded_and_non_destructive() {
 fn mutation_fuzz_all_file_decoders_never_panics() {
     let mut seeds = vec![
         (Decoder::Native, native_seed()),
-        (Decoder::Cut, cut_seed()),
         (Decoder::Batch, batch_seed()),
     ];
     for format in [
@@ -296,7 +249,6 @@ fn mutation_fuzz_all_file_decoders_never_panics() {
                 mutated[index] ^= mask;
                 let result = catch_unwind(AssertUnwindSafe(|| match decoder {
                     Decoder::Native => decode_procedure_file(&mutated).map(|_| ()),
-                    Decoder::Cut => decode_cut_descriptor(&mutated).map(|_| ()),
                     Decoder::Batch => decode_batch_graph(&mutated).map(|_| ()),
                     Decoder::Raster(format) => decode_common_raster(format, &mutated).map(|_| ()),
                 }));

@@ -42,10 +42,10 @@ Core supplies owned detached work to its generic executor.
 | Crate           | Responsibility                                                                                                                                                                     |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, and deterministic raster/filter/effect operations |
-| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v32 Cell/Cut containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
+| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v33 Cell containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v32 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, bounded validated-sidecar-target cache control/telemetry, complete sequence-resident target transfer, render preparation telemetry, and immutable prepared-source snapshot accessors, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v33 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, bounded validated-sidecar-target cache control/telemetry, complete sequence-resident target transfer, render preparation telemetry, and immutable prepared-source snapshot accessors, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -78,8 +78,7 @@ codec/replay work. Workers hold no live Core handle and call no C++ callback.
 The shared boundary covers editable native/recovery and raster open, automatic
 and explicit sequences, Subpalette/Reference catalogs, Light Table add/reload,
 and Batch file/folder/preview inputs and outputs. Icons, palette/chart files,
-shortcuts/settings, clipboard memory images, test fixtures, and Cut member
-validation are outside this migration. Raster input is PNG, TIFF, TGA, or BMP;
+shortcuts/settings, clipboard memory images, and test fixtures are outside this migration. Raster input is PNG, TIFF, TGA, or BMP;
 reference-only loading never creates an editable document or native file.
 
 Each temporary-job lease owns and removes only its exclusively created child
@@ -164,9 +163,7 @@ sequence catalog share the immutable tile-map backing. `TileRaster` COW detaches
 the map and then only a touched tile on the first effective edit. A provenance
 mismatch is ordinary ineligibility and uses the unchanged owned import.
 Persistence and InkScript export materialize a temporary canonical dense byte
-stream only when those operations actually request it. Native v32, replay epoch
-27, digests, history, and savepoints are unchanged; ABI v32 adds resident-target
-transfer and render-preparation accessors without changing canonical state.
+stream only when those operations actually request it. These resident caches do not alter the native v33/epoch-28 contract, digests, history or savepoints. The resident-target transfer and render-preparation accessors introduced in ABI v32 remain in v33 without changing canonical state.
 Private test-support counters require
 the managed switch to report zero dense-copy, hash, and full-tile-materialization
 work.
@@ -429,13 +426,13 @@ cache release, and later history movement reconstructs the cache on demand.
 
 This is deliberately not a generic snapshot- or diff-procedure bridge. Every
 production history entry references its route-specific canonical procedure,
-and there is no supported incomplete-journal state. The v32 writer serializes
+and there is no supported incomplete-journal state. The v33 writer serializes
 Genesis, retained assets, the complete journal/control-event sequence, editor
 state, savepoints, cursor, branch graph, and ID authorities. Open validates and
 either fully replays that graph or uses a prefix/state/policy-verified optional
 checkpoint in a staged Core before one replacement of the live generation.
 Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
-The journal remains authoritative and every non-v32 Cell version is rejected.
+The journal remains authoritative and every non-v33 Cell version is rejected.
 
 History visualization is a read-only derived view of that journal. Core replays
 the complete retained graph through the canonical executor, visits only `Commit`
@@ -460,25 +457,19 @@ selection mask. `BaseSurface::Asset` instead names one immutable canonical raste
 asset whose dimensions and pixel semantics match the document paper. Replacing
 the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
 maximum-close frames change canonical document-state bytes. The current document-state
-commitment is schema 12/domain 10, the replay contract is epoch 27, and the native
-format is version 32. Every image layer has one standard topology: exactly one
+commitment is schema 13/domain 11, the replay contract is epoch 28, and the native
+format is version 33. Every image layer has one standard topology: exactly one
 MainLine plane, exactly one Color plane, and zero or more Raster planes. Layer kinds
 do not exist. Current selection, ordered named saved-selection masks, and the sparse
 fill-protection mask are document-owned rasters outside the image tree; only their
-materialized tiles allocate. Cut payload schema 3 separates immutable member assets from
-ordered membership and records membership before/after states in Cut history, while
-retaining Cell-document primitive semantics. Sequence edits stage bounded ordered
-insert/remove/move/renumber operations and publish one Cut revision only after final
-validation. Removed members are not physically deleted and remain addressable by
-stable `(CellId, document UUID)` while retained Cut history can restore them. The
-optional angled shooting frame is an independent document object; its canonical edits,
-preview, transform rules, snapshot overlay, and output policy are persisted by v32.
-Flat normal output excludes the overlay, while explicit instruction export may include
-the shooting-frame outline. Vanishing-point and adjustment-layer document objects are
-absent from the current model and format. Epoch 19/version 22 added the independent
-current-only Cut descriptor and Cut metadata/
-default history. Epoch
-18/version 21 added the canonical floating-transform v3 procedure with
+materialized tiles allocate. Cut management, its descriptor codec, independent session,
+membership history and export-only shooting-frame flags have been removed.
+The optional angled shooting frame remains a Canvas-only document object; its
+canonical edits, preview and transform rules are retained. Normal output and
+thumbnails exclude it. Native v33/replay epoch 28 use metadata schema 9 and
+document-state schema 13/domain 11. The versioned EditShootingFrame payload is
+schema 3/semantics 2 and contains no instruction-export policy.
+Epoch 18/version 21 added the canonical floating-transform v3 procedure with
 half-open five-point absolute-anchor semantics. Epoch 17/version 20 added the
 canonical output-color guard selection procedure
 over the committed visible straight-alpha composite. The document-owned Color
@@ -520,7 +511,7 @@ Cache-free verification first builds a detached asset archive from every semanti
 retention root, deep-copies each logical payload, and re-ingests it into an empty
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
-`AssetRecord`, payload, or `TileRaster` ownership. Production v32 persists the
+`AssetRecord`, payload, or `TileRaster` ownership. Production v33 persists the
 same rooted graph in GENS/ASST.
 
 The present ABI is v30. `InkpodObjectId` separates Core, snapshot, task, color,
@@ -666,7 +657,7 @@ controls, or silently change selection and focus.
 A Bottom zone containing only the Sequence pane is a measured fixed-extent
 exception. The pane measures its current-DPI thumbnail box, three vertical
 image/text paddings, one text line, native horizontal-scrollbar and border
-metrics, page margins, target/import row, visible Cut action rows, and the
+metrics, page margins, target/import row and the
 28-DIP DockHost header in device pixels, then rounds the total up to DIPs with
 a 168-DIP floor. `DockLayoutRuntimeMetrics` carries this transient value; it is
 not persisted. The pure dock projection omits both the Bottom zone-extent
@@ -822,32 +813,6 @@ unpublished preparations, closes any published prefix, and restores the prior
 active view before the command returns; recent files are never touched. Untitled
 display numbers remain frontend presentation values and are not Cell IDs or
 future sequence numbers.
-
-Cut ownership is deliberately separate from that Cell graph. Each
-`WorkspaceWindow` has at most one `CutSession`; it owns one opaque `InkpodCut*`,
-the descriptor path, and presentation-only cached Cut name/member file names.
-The handle is created, queried, edited, saved, opened, recovered, and destroyed
-only through `CoreHost::Invoke` on the Core engine thread. It has its own
-revision, canonical metadata/defaults history, dirty state, and savepoint.
-`DocumentSession` continues to own each member Cell Core and file/recovery shell,
-so a Cut edit cannot enter Cell history and a Cell edit cannot enter Cut history.
-Workspace close and CoreHost shutdown destroy every Cut handle before the Core
-engine thread stops; no process-global active Cut pointer exists.
-
-The selected persistence topology is an individually referenced descriptor.
-The Cut `.inkpod` stores ordered `(CellId, document UUID, display number,
-relative file name)` records; every member is an independently saved Cell
-`.inkpod` in the descriptor directory. New Cut first uses the existing bounded
-Cell creation plan, publishes and saves each independent Cell, then creates and
-atomically saves the descriptor from those returned identities. This is an
-explicit multi-step boundary, not a fabricated cross-file transaction. Cut
-defaults are copied into the creation request only at that boundary; changing
-defaults later never mutates an existing Cell. Open/recovery decodes into a
-staged Cut, canonicalizes the descriptor directory and every member, opens each
-Cell with the current Cell reader, and compares both stable identities before
-publishing the Cut handle. Missing, renamed, duplicate, self, traversal, or
-directory-escaping members reject the staged Cut without retargeting any live
-session.
 
 `CoreHost` queries the selected session/generation on the Core owner thread and
 copies an `InkpodEditorStateInfo` presentation record into the matching
@@ -1085,7 +1050,7 @@ Inactive-session notifications validate their captured session/generation and
 update only tab dirty/processing presentation; they do not retarget the active
 view or request continuous snapshots.
 
-The fixed command-state catalog assigns all 324 production commands exactly one
+The fixed command-state catalog assigns all 312 production commands exactly one
 state owner. Pure providers compute enabled/checked state without calling Core or
 Win32 or mutating tools, previews, or documents. Menus, shortcuts, and palette
 entry points consume the same cached result. The main frame deliberately has no
@@ -1126,13 +1091,12 @@ bounded reload path. A zero catalog owner disables reuse.
 
 The native owner-drawn multicolumn ListBox is constrained to one row and scrolls
 horizontally. Its native item text retains the complete accessible frame name.
-Left/Right navigation is local to list focus, and Cut member activation uses its
-stable member identity rather than the ordinary-sequence command. Selection and
+Left/Right navigation is local to list focus and uses the ordinary-sequence command. Selection and
 thumbnail updates retain the viewport; geometry-only resize does not repopulate
-the list. Cut-only controls occupy a compact row only when visible. The pane
+the list. No Cut-only action row or drag-reorder route exists. The pane
 descriptor has a 168-DIP minimum and a 184-DIP preferred height. Closing its dock
 tab hides the pane through a captured pane identity without closing a document
-or deleting the sequence/Cut.
+or deleting the sequence.
 
 Fresh sequence-cell replacement initializes both the document and editor-state
 clean baselines after selecting the imported plane. Merely constructing this
@@ -1149,14 +1113,6 @@ retains its transform, Fit recomputes fitting, and 1:1 recenters. The Windows
 adapter does not issue a second Fit or publish an intermediate reset transform.
 This view preparation also applies to the staged autosave/recovery switch;
 it does not replace recovered history or editor state with a flattened source.
-
-For a Cut descriptor, the pane keeps a derived thumbnail cache keyed by the
-member's stable `(CellId, document UUID)` pair rather than its order or display
-number. A cache miss opens that same-directory Cell in a staged temporary Core,
-revalidates the identity, and requests one bounded visible-document thumbnail;
-the bytes are never persisted in the Cut descriptor. Reorder, renumber, Cut
-Undo/Redo, and save/reopen therefore preserve the thumbnail-to-member binding,
-while an invalid or mismatched source never substitutes pixels from another Cell.
 
 Normal previous/next navigation has a separate application-level endpoint
 policy. It is stored once as the readable `animation.sequenceEndpoint` field in
@@ -1844,7 +1800,7 @@ invalidates an ordinary map before reuse, including recovery with equal tile
 IDs/revisions. The epoch is an invalidation condition, not part of the source
 bank's lookup key.
 
-These are derived display caches only. Native v32, document replay epoch 27,
+These are derived display caches only. Native v33, document replay epoch 28,
 the canonical revision-max formula below, its payload-access gates, and existing
 benchmark workloads/envelopes are unchanged. Source-hit and upload counters
 describe which work was reused; they do not replace end-to-end Present checks.
@@ -2045,7 +2001,7 @@ converted into an implicit queued save. Internal Sequence/recovery continuations
 may serialize after same-session work only when they retain their captured
 session/generation and exact reservation token.
 
-The current `.inkpod` v32 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
+The current `.inkpod` v33 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
 and `EDIT`. META section/record schema 2 requires the closed raster-format value:
 PNG, TIFF, TGA, or BMP. Raster import records its actual codec; a new cell uses
 PNG unless the application supplies a different creation default. Changing that
@@ -2070,10 +2026,12 @@ byte-for-byte retention or regeneration of the encoded source container,
 compression, palette representation, optional metadata, provenance, name, or
 path.
 
+The subsequent user-approved Cut removal advances native to v33/replay epoch 28, DOCM to schema 9, document digest to schema 13/domain 11, ABI to v33 and InkScript catalog/owner to v6. Angled shooting frames retain Canvas geometry/visibility only; Cut descriptors, ownership and export-policy fields are absent.
+
 Pair paths, filesystem identities, and the `Planned`/`Committed`/`None` state are
 runtime authority and are not serialized. The resolver uses existing META field
 21, Genesis/assets, and the ordinary composite contract, so this change does not
-alter native v32, replay epoch 27, or a section/payload schema. Persisting a pair
+alter native v33, replay epoch 28, or a section/payload schema. Persisting a pair
 path, filesystem identity, or source digest later would require the normal
 top-level format-version update.
 
@@ -2103,7 +2061,7 @@ marker. Therefore a crash after both member renames but before that marker rolls
 both members back; recovery recognizes completion only from the exact marker.
 Cleanup removes the prepared journal before the marker, whose full record also
 supports safe orphan-marker cleanup after a crash in that final interval. This
-runtime journal revision does not change native Cell format v32.
+runtime journal revision does not change native Cell format v33.
 
 Installation and rollback do not path-overwrite an existing member after a
 check. A durable rollback marker is published first; Windows then verifies and
@@ -2137,7 +2095,7 @@ remain dirty/recovered. Partial selection revert reconstructs the saved document
 this same current-version reader and commits the selected delta as one new
 canonical undo unit.
 
-Whole-document Revert is the explicit ABI v30 `OPEN_NATIVE` request, retained by ABI v32, carrying both
+Whole-document Revert is the explicit ABI v30 `OPEN_NATIVE` request, retained by ABI v33, carrying both
 force-reload and `REVERT_CURRENT`; ordinary forced open is not inferred to be a
 Revert. Preparation resolves the current native pair and captures its logical
 identity. Apply requires the exact live current native path and document UUID,

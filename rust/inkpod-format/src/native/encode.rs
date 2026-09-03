@@ -269,10 +269,7 @@ fn encode_document_metadata(metadata: &FileDocumentMetadata) -> Result<Vec<u8>, 
                 FileShootingFrameAnchor::BottomRight => 5,
             },
         );
-        push_u32(
-            &mut output,
-            u32::from(frame.visible) | (u32::from(frame.include_in_instruction_export) << 1),
-        );
+        push_u32(&mut output, u32::from(frame.visible));
         push_u32(&mut output, 0);
     }
     for saved_selection in &metadata.saved_selections {

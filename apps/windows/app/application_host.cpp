@@ -515,9 +515,6 @@ bool ApplicationHost::RemoveWorkspaceWindow(WorkspaceWindowId id) noexcept {
             return false;
         }
     }
-    if (!DestroyCutSession(*workspace)) {
-        return false;
-    }
     UnregisterWorkspacePanes(*workspace);
     if (!routing.targets.RemoveWorkspace(id)
         || !workspaces_.Remove(id)) {
@@ -1308,39 +1305,6 @@ std::size_t ApplicationHost::RecentDocumentCount() const noexcept {
 
 void ApplicationHost::DetachCoreSessions() noexcept {
     documents_.ClearCoreBindings();
-}
-
-bool ApplicationHost::DestroyCutSession(WorkspaceWindow& workspace) noexcept {
-    if (workspace.cut.handle == nullptr) {
-        workspace.cut.current_path.clear();
-        workspace.cut.cut_name.clear();
-        workspace.cut.members.clear();
-        return true;
-    }
-    if (engine == nullptr) {
-        return false;
-    }
-    const InkpodStatus status = engine->InvokeOwnerThread(
-        [&workspace]() {
-            return inkpod_cut_destroy(&workspace.cut.handle);
-        });
-    if (status != INKPOD_STATUS_OK) {
-        return false;
-    }
-    workspace.cut.current_path.clear();
-    workspace.cut.cut_name.clear();
-    workspace.cut.members.clear();
-    return true;
-}
-
-bool ApplicationHost::DestroyAllCutSessions() noexcept {
-    bool destroyed = true;
-    for (std::size_t index = 0U; index < workspaces_.Count(); ++index) {
-        WorkspaceWindow* workspace = workspaces_.At(index);
-        destroyed = workspace != nullptr
-            && DestroyCutSession(*workspace) && destroyed;
-    }
-    return destroyed;
 }
 
 }  // namespace inkpod::app

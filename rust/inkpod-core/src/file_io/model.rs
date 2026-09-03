@@ -90,7 +90,6 @@ pub struct FileIoRequest {
     /// The user authorized replacement of both existing normal-save destinations.
     pub overwrite_confirmed: bool,
     /// Include instructions only for an explicitly requested raster export.
-    pub instructions: bool,
     /// Existing Light Table item ID for reload; zero for unrelated operations.
     pub object_id: u64,
     /// Optional externally generated UUID for a newly imported editable source.
@@ -112,7 +111,6 @@ impl FileIoRequest {
             revert_current: false,
             composite_white: false,
             overwrite_confirmed: false,
-            instructions: false,
             object_id: 0,
             document_uuid: 0,
             raster_format: None,
@@ -205,8 +203,6 @@ pub struct FileIoProgress {
     pub truncated: bool,
     /// An authorized save is installing; its owner must finalize before closing.
     pub installing: bool,
-    /// The source is a Cut descriptor; the frontend should route to its Cut owner.
-    pub cut_descriptor: bool,
     /// A failed pair installation restored bytes under new identities and has a
     /// verified same-target runtime authority repair pending or applied.
     pub authority_repaired: bool,

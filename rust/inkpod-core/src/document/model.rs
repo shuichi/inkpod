@@ -328,7 +328,6 @@ impl CellDocument {
                         ShootingFrameAnchor::BottomRight => FileShootingFrameAnchor::BottomRight,
                     },
                     visible: frame.input.visible,
-                    include_in_instruction_export: frame.input.include_in_instruction_export,
                 }),
                 saved_selections: self
                     .saved_selection_masks
@@ -516,7 +515,6 @@ impl CellDocument {
                         FileShootingFrameAnchor::BottomRight => ShootingFrameAnchor::BottomRight,
                     },
                     visible: frame.visible,
-                    include_in_instruction_export: frame.include_in_instruction_export,
                 },
             })
         });

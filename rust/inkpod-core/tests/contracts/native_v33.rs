@@ -1,4 +1,4 @@
-//! Current native container v32 and replay epoch 27 public persistence contracts.
+//! Current native container v33 and replay epoch 28 public persistence contracts.
 
 use super::*;
 use inkpod_format::{
@@ -46,6 +46,31 @@ fn frame_field(payload: &[u8], wanted: u32) -> std::ops::Range<usize> {
         }
         cursor = end;
     }
+}
+
+#[test]
+fn retired_cut_magic_is_rejected_without_replacing_the_cell() {
+    let mut core = Core::new();
+    core.new_cell(32, 24, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    let path = native_path("retired-cut");
+    core.save(&path).unwrap();
+    let mut bytes = fs::read(&path).unwrap();
+    bytes[..8].copy_from_slice(b"INKCUT\0\0");
+    fs::write(&path, &bytes).unwrap();
+    let stable = core.document_info().unwrap();
+    let pixels = core
+        .export_common_raster(CommonRasterFormat::Png, false)
+        .unwrap();
+    assert!(core.open(&path).is_err());
+    assert_eq!(core.document_info().unwrap(), stable);
+    assert_eq!(
+        core.export_common_raster(CommonRasterFormat::Png, false)
+            .unwrap(),
+        pixels
+    );
+    assert_eq!(fs::read(&path).unwrap(), bytes);
+    fs::remove_file(path).unwrap();
 }
 
 #[test]
@@ -132,9 +157,9 @@ fn io_001_imported_genesis_source_rejects_wrong_asset_plane_and_underlay() {
     assert!(Core::from_native_file(wrong_opaque_underlay, false).is_err());
 
     let encoded = inkpod_format::encode_procedure_file(&native).unwrap();
-    assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 32);
+    assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 33);
     let mut previous = encoded;
-    previous[8..12].copy_from_slice(&31_u32.to_le_bytes());
+    previous[8..12].copy_from_slice(&32_u32.to_le_bytes());
     assert!(inkpod_format::decode_procedure_file(&previous).is_err());
 }
 
@@ -183,19 +208,12 @@ fn io_001_native_raster_format_is_persisted_without_changing_pixel_asset_identit
             .prepare_normal_save(|| false)
             .unwrap();
         assert_eq!(core.document_info().unwrap(), state);
-        for instructions in [false, true] {
-            let exported = core
-                .capture_document_save()
-                .unwrap()
-                .prepare_raster_export(format, true, instructions, || false)
-                .unwrap();
-            let expected = if instructions {
-                core.export_instruction_common_raster(format, true).unwrap()
-            } else {
-                core.export_common_raster(format, true).unwrap()
-            };
-            assert_eq!(exported, expected);
-        }
+        let exported = core
+            .capture_document_save()
+            .unwrap()
+            .prepare_raster_export(format, true, || false)
+            .unwrap();
+        assert_eq!(exported, core.export_common_raster(format, true).unwrap());
         assert_eq!(core.document_info().unwrap(), state);
         let (native, output_format, output, token) = prepared.into_parts();
         assert_eq!(output_format, format);
@@ -441,8 +459,8 @@ fn io_001_save_reopen_restores_full_journal_editor_and_all_next_id_authorities()
 }
 
 #[test]
-fn io_001_v32_rejects_v31_and_corrupt_open_is_atomic_for_the_live_core() {
-    let path = native_path("v31-rejected");
+fn io_001_v33_rejects_v32_and_corrupt_open_is_atomic_for_the_live_core() {
+    let path = native_path("v32-rejected");
     let mut legacy = vec![0_u8; 128];
     legacy[0..8].copy_from_slice(b"INKPOD\0\0");
     legacy[8..12].copy_from_slice(&(inkpod_format::FORMAT_VERSION - 1).to_le_bytes());

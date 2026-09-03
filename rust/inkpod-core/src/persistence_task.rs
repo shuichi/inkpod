@@ -202,24 +202,17 @@ impl DocumentSaveSnapshot {
     ///
     /// This consumes only the detached snapshot and never updates live path or
     /// savepoint authority. Cancellation is checked before and after the bounded
-    /// encode. `instructions` selects the existing instruction-overlay export
-    /// semantics; the requested codec may differ from the persisted save format.
+    /// encode. The requested codec may differ from the persisted save format.
     pub fn prepare_raster_export(
         self,
         format: CommonRasterFormat,
         composite_white: bool,
-        instructions: bool,
         mut cancelled: impl FnMut() -> bool,
     ) -> Result<Vec<u8>, CoreError> {
         if cancelled() {
             return Err(CoreError::Cancelled);
         }
-        let bytes = if instructions {
-            self.core
-                .export_instruction_common_raster(format, composite_white)?
-        } else {
-            self.core.export_common_raster(format, composite_white)?
-        };
+        let bytes = self.core.export_common_raster(format, composite_white)?;
         if cancelled() {
             return Err(CoreError::Cancelled);
         }

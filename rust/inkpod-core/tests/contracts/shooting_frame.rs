@@ -1,5 +1,40 @@
 use super::*;
 
+#[test]
+fn shooting_frame_is_canvas_only_for_every_raster_export() {
+    let mut core = Core::new();
+    core.new_cell(32, 24, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
+        .unwrap();
+    for format in [
+        CommonRasterFormat::Png,
+        CommonRasterFormat::Tiff,
+        CommonRasterFormat::Tga,
+        CommonRasterFormat::Bmp,
+    ] {
+        for white in [false, true] {
+            let before = core.export_common_raster(format, white).unwrap();
+            let initial = core.document_info().unwrap();
+            let frame = core
+                .edit_shooting_frame(
+                    initial.document_revision,
+                    ShootingFrameEdit::Create(input(0x1800_0000)),
+                )
+                .unwrap();
+            assert_eq!(core.build_snapshot().shooting_frames().len(), 1);
+            let committed = core.document_info().unwrap();
+            assert_eq!(core.export_common_raster(format, white).unwrap(), before);
+            assert_eq!(core.document_info().unwrap(), committed);
+            core.edit_shooting_frame(
+                committed.document_revision,
+                ShootingFrameEdit::Delete {
+                    frame_id: frame.frame_id().unwrap(),
+                },
+            )
+            .unwrap();
+        }
+    }
+}
+
 fn input(rotation_turns: u32) -> ShootingFrameInput {
     ShootingFrameInput {
         center_x_milli: 10_000,
@@ -9,7 +44,6 @@ fn input(rotation_turns: u32) -> ShootingFrameInput {
         rotation_turns,
         anchor: ShootingFrameAnchor::Center,
         visible: true,
-        include_in_instruction_export: true,
     }
 }
 
@@ -55,11 +89,6 @@ fn shooting_frame_001_edit_preview_export_and_history_contract() {
     assert_eq!(core.build_snapshot().shooting_frames(), &[committed]);
     assert_eq!(
         core.export_common_raster(CommonRasterFormat::Png, false)
-            .unwrap(),
-        ordinary_before
-    );
-    assert_ne!(
-        core.export_instruction_common_raster(CommonRasterFormat::Png, false)
             .unwrap(),
         ordinary_before
     );

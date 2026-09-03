@@ -223,7 +223,7 @@ impl LegacySimpleScriptStep {
     ) -> Result<Self, LegacySimpleAdapterError> {
         let (command, binding, arguments) = lift_arguments(invocation)?;
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 5; replay_epoch = 27; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 6; replay_epoch = 28; }\n",
         );
         let mut bindings = InkScriptRuntimeReferences::default();
         if let Some((entity, persistent_id)) = binding {
@@ -880,7 +880,7 @@ mod tests {
 
     #[test]
     fn unknown_field_type_enum_and_format_mismatch_are_rejected() {
-        let prefix = "inkscript_fragment 2; requires { procedure_catalog = 5; replay_epoch = 27; }";
+        let prefix = "inkscript_fragment 2; requires { procedure_catalog = 6; replay_epoch = 28; }";
         let unknown_field = format!(
             "{prefix} program {{ step \"Bad\" {{ enabled = true; invoke mirror_document {{ axis = horizontal; extra = true; }}; }} }}"
         );

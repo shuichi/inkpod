@@ -12,7 +12,6 @@ pub struct InkpodShootingFrameInput {
     pub height: f64,
     pub rotation_degrees: f64,
     pub visible: u32,
-    pub include_in_instruction_export: u32,
 }
 
 #[repr(C)]
@@ -35,7 +34,6 @@ pub struct InkpodShootingFrameInfo {
     pub height_milli: u64,
     pub rotation_turns: u32,
     pub visible: u32,
-    pub include_in_instruction_export: u32,
     pub reserved: u32,
     pub corners: [InkpodShootingFramePoint; 4],
 }

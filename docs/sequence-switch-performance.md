@@ -3,7 +3,7 @@
 This record covers the user-approved response-time work for `SEQ-001`,
 `PERF-001` and `IO-003`: selecting already loaded, unedited 1754×1240
 images with the sequence pane's Left/Right keys. The current implementation is
-native v32, replay epoch 27 and exact-current ABI v32. The canonical
+native v33, replay epoch 28 and exact-current ABI v33. The canonical
 `revision-max` expression and existing benchmark workloads/envelopes are unchanged.
 
 ## Cause and implementation
@@ -121,7 +121,7 @@ unobserved run or proof of a particular OS/driver cause.
 
 ## 2026-09-02 COW construction follow-up
 
-The current native v32/replay epoch 27 implementation adds an exact-provenance
+The current native v33/replay epoch 28 implementation adds an exact-provenance
 construction optimization for sidecar-less Sequence targets. Sequence import
 materializes each source once into its tiled COW representation, retains every
 source tile set and thumbnail under the decoded budget, and immediately releases

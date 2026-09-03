@@ -4,7 +4,7 @@ This document is the M00 traceability authority connecting the product requireme
 [`SPEC.md`](../SPEC.md), the normative language contract in
 [`INKSCRIPT.md`](../INKSCRIPT.md), the machine-readable registries, milestones, and
 planned evidence. It is not a command reference. The exact-current command signatures are in
-[`catalog-v5.json`](../schemas/inkscript/catalog-v5.json); the derived presentation is
+[`catalog-v6.json`](../schemas/inkscript/catalog-v6.json); the derived presentation is
 [`inkscript-command-reference.md`](inkscript-command-reference.md).
 
 ## Ratified contract
@@ -15,8 +15,8 @@ rebaseline, and the layer/plane contract rebaseline were separately approved bef
 implementation:
 
 - InkScript registry schema/language/file version 2, procedure catalog and owner
-  manifest version 5, replay epoch 27, `.inkpod` top-level version 32, and C ABI
-  version 31 are the exact-current values. Catalog/owner v5 expose the same 73 public
+  manifest version 6, replay epoch 28, `.inkpod` top-level version 33, and C ABI
+  version 33 are the exact-current values. Catalog/owner v6 expose the same 73 public
   commands; the private `ApplyBatchOperations` canonical procedure is not an InkScript command.
   ABI v31 changes only application-owned validated-sidecar cache control/telemetry and does not
   change InkScript syntax, catalog entries, procedure semantics, replay, or native payloads.
@@ -37,7 +37,7 @@ implementation:
   `edit_vanishing_points`; those primitive IDs remain tombstones and cannot be reused.
   It adds the four document-owned saved-selection-mask commands, producing catalog/owner
   v5 and a 73-way bijection. Older catalog/owner resources are rejected; generated
-  reference and fingerprints are regenerated from v5.
+  reference and fingerprints are regenerated from v6. The user-approved Cut removal also removes the shooting-frame instruction-export field, advancing its schema/semantics to 3/2 and catalog/owner to v6 without changing the 73-command count or language/file v2.
 - Exact-source equivalence compares canonical state/pixel digests, ID high-watermarks,
   typed result roles and output ordinals, pre/post state digests, stable input/output/asset
   roles, and canonical invocations. Rebound execution guarantees deterministic execution
@@ -86,7 +86,7 @@ atomicity parity. Batch v5 itself does not imply that product route.
 
 ## Current machine-readable ownership
 
-[`owner-manifest-v5.json`](../schemas/inkscript/owner-manifest-v5.json) assigns all 73
+[`owner-manifest-v6.json`](../schemas/inkscript/owner-manifest-v6.json) assigns all 73
 current command owners exactly once. The allocation is deliberately
 reviewable before signatures are added:
 

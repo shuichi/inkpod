@@ -74,7 +74,6 @@ pub(super) enum Prepared {
     Output(Option<RecoveryArtifactProof>),
     Batch(Box<BatchPrepared>),
     Recovery(Vec<inkpod_io::RecoveryCandidate>),
-    CutDescriptor,
     SequenceSwitch(Box<crate::PreparedSequenceSwitch>),
     NativeOutput(inkpod_format::NativeFile, DocumentSaveToken),
 }
@@ -360,7 +359,6 @@ impl FileIoJob {
                 result_count: 0,
                 truncated: false,
                 installing: false,
-                cut_descriptor: false,
                 authority_repaired: false,
                 authority_revoked: false,
             },
@@ -549,9 +547,6 @@ impl FileIoJob {
                     }
                     if let Prepared::Recovery(recoveries) = prepared {
                         self.recoveries = recoveries;
-                        self.progress.state = FileIoState::Complete;
-                    } else if matches!(prepared, Prepared::CutDescriptor) {
-                        self.progress.cut_descriptor = true;
                         self.progress.state = FileIoState::Complete;
                     } else {
                         self.ready = Some(prepared);

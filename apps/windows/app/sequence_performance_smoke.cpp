@@ -21,7 +21,7 @@
 #include "ui/main_window_runtime.h"
 
 namespace inkpod::windows::ui::runtime {
-InkpodStatus ImportCommonRasterFromPath(
+InkpodStatus OpenDocumentFromPath(
     app::ApplicationHost& state, const std::wstring& path) noexcept;
 bool RefreshSequencePane(app::ApplicationHost& state) noexcept;
 }
@@ -350,7 +350,7 @@ int Run(app::ApplicationHost& state) {
     runtime::ShowInitialPalettes(state);
     UpdateWindow(window);
     PumpMessages(state);
-    if (runtime::ImportCommonRasterFromPath(state, fixtures.paths[0]) != INKPOD_STATUS_OK) {
+    if (runtime::OpenDocumentFromPath(state, fixtures.paths[0]) != INKPOD_STATUS_OK) {
         return 18003;
     }
     state.lifetime.sequence_switch_policy = app::SequenceCellSwitchPolicy::Prompt;

@@ -1983,7 +1983,7 @@ mod tests {
             InkScriptSourceId::new(211),
             format!(
                 r#"inkscript 2;
-requires {{ procedure_catalog = 5; replay_epoch = 27; }}
+requires {{ procedure_catalog = 6; replay_epoch = 28; }}
 inputs {{ {inputs} }}
 program {{}}
 output {{ {output} }}

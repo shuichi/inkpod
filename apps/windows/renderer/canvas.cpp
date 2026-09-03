@@ -1395,7 +1395,7 @@ private:
             && frame.struct_size <= view.frame_stride_bytes
             && frame.feature_flags == 0U && frame.frame_id <= INT64_MAX
             && frame.width_milli != 0U && frame.height_milli != 0U
-            && frame.visible <= 1U && frame.include_in_instruction_export <= 1U
+            && frame.visible <= 1U
             && frame.reserved == 0U
             && frame.anchor >= INKPOD_SHOOTING_FRAME_ANCHOR_TOP_LEFT
             && frame.anchor <= INKPOD_SHOOTING_FRAME_ANCHOR_BOTTOM_RIGHT;

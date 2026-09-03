@@ -52,8 +52,6 @@ pub struct ShootingFrameInput {
     pub anchor: ShootingFrameAnchor,
     /// Whether the object is visible on the editing Canvas.
     pub visible: bool,
-    /// Whether explicit instruction export includes the object.
-    pub include_in_instruction_export: bool,
 }
 
 /// One synchronous create, complete replacement, or delete operation.
@@ -103,8 +101,6 @@ pub struct ShootingFrameInfo {
     pub anchor: ShootingFrameAnchor,
     /// Canvas visibility.
     pub visible: bool,
-    /// Explicit instruction-export participation.
-    pub include_in_instruction_export: bool,
 }
 
 impl ShootingFrameInfo {
@@ -119,7 +115,6 @@ impl ShootingFrameInfo {
             rotation_turns: self.rotation_turns,
             anchor: self.anchor,
             visible: self.visible,
-            include_in_instruction_export: self.include_in_instruction_export,
         }
     }
 
@@ -178,7 +173,6 @@ impl ShootingFrameObject {
             rotation_turns: self.input.rotation_turns,
             anchor: self.input.anchor,
             visible: self.input.visible,
-            include_in_instruction_export: self.input.include_in_instruction_export,
         }
     }
 }
@@ -725,57 +719,6 @@ pub(crate) fn translate_shooting_frame(
             "shooting-frame translation overflows",
         ))?;
     validate_shooting_frame_input(frame.input)
-}
-
-pub(crate) fn instruction_overlay(
-    document: &CellDocument,
-) -> Result<Option<Vec<[u8; 4]>>, CoreError> {
-    let Some(frame) = document
-        .shooting_frame
-        .filter(|frame| frame.input.include_in_instruction_export)
-    else {
-        return Ok(None);
-    };
-    let pixel_count = usize::try_from(u64::from(document.width) * u64::from(document.height))
-        .map_err(|_| {
-            CoreError::InvalidState("shooting-frame export raster is not representable")
-        })?;
-    let mut pixels = vec![[0_u8; 4]; pixel_count];
-    let input = frame.input;
-    let (cosine, sine) = sin_cos_turns(input.rotation_turns);
-    let half_width = i128::from(input.width_milli) / 2;
-    let half_height = i128::from(input.height_milli) / 2;
-    const HALF_STROKE_MILLI: i128 = 707;
-    for y in 0..document.height {
-        let point_y = i128::from(y) * 1_000 + 500 - i128::from(input.center_y_milli);
-        for x in 0..document.width {
-            let point_x = i128::from(x) * 1_000 + 500 - i128::from(input.center_x_milli);
-            let local_x = div_round_ties_even_i128(
-                point_x * i128::from(cosine) + point_y * i128::from(sine),
-                Q30_ONE,
-            )
-            .ok_or(CoreError::InvalidArgument(
-                "shooting-frame export calculation overflows",
-            ))?
-            .abs();
-            let local_y = div_round_ties_even_i128(
-                -point_x * i128::from(sine) + point_y * i128::from(cosine),
-                Q30_ONE,
-            )
-            .ok_or(CoreError::InvalidArgument(
-                "shooting-frame export calculation overflows",
-            ))?
-            .abs();
-            let on_outline = ((local_x - half_width).abs() <= HALF_STROKE_MILLI
-                && local_y <= half_height + HALF_STROKE_MILLI)
-                || ((local_y - half_height).abs() <= HALF_STROKE_MILLI
-                    && local_x <= half_width + HALF_STROKE_MILLI);
-            if on_outline {
-                pixels[y as usize * document.width as usize + x as usize] = [255, 64, 64, 255];
-            }
-        }
-    }
-    Ok(Some(pixels))
 }
 
 fn scale_i64_ratio(value: i64, numerator: u32, denominator: u32) -> Result<i64, CoreError> {

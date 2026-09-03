@@ -31,7 +31,6 @@ const SHOOTING_FRAME_INPUT_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("rotation_turns", "u32", 4),
     InkScriptFieldSchema::required("anchor", "shooting_frame_anchor", 5),
     InkScriptFieldSchema::required("visible", "bool", 6),
-    InkScriptFieldSchema::required("include_in_instruction_export", "bool", 7),
 ];
 const SHOOTING_FRAME_EDIT_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("operation", "u32", 0),
@@ -152,7 +151,6 @@ fn shooting_frame_input(
             _ => return Err(FrameAdapterError::InvalidValue),
         },
         visible: boolean(field(fields, "visible")?)?,
-        include_in_instruction_export: boolean(field(fields, "include_in_instruction_export")?)?,
     })
 }
 

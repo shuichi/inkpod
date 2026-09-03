@@ -35,7 +35,7 @@ unsafe fn parse_input(input: *const InkpodShootingFrameInput) -> Result<Shooting
             "shooting-frame input feature flags are unsupported",
         ));
     }
-    if input.visible > 1 || input.include_in_instruction_export > 1 {
+    if input.visible > 1 {
         return Err(fail(
             INKPOD_STATUS_INVALID_ARGUMENT,
             "shooting-frame Boolean field is invalid",
@@ -73,7 +73,6 @@ unsafe fn parse_input(input: *const InkpodShootingFrameInput) -> Result<Shooting
         rotation_turns,
         anchor: parse_anchor(input.anchor)?,
         visible: input.visible != 0,
-        include_in_instruction_export: input.include_in_instruction_export != 0,
     })
 }
 
@@ -116,7 +115,6 @@ pub(crate) fn shooting_frame_info_record(
         height_milli: info.height_milli,
         rotation_turns: info.rotation_turns,
         visible: u32::from(info.visible),
-        include_in_instruction_export: u32::from(info.include_in_instruction_export),
         reserved: 0,
         corners: corners.map(|point| InkpodShootingFramePoint {
             x_milli: point.x_milli,

@@ -9,10 +9,6 @@ pub(super) fn progress_flags(progress: &inkpod_core::FileIoProgress) -> u64 {
         INKPOD_IO_RESULT_INSTALLING
     } else {
         0
-    }) | (if progress.cut_descriptor {
-        INKPOD_IO_RESULT_CUT_DESCRIPTOR
-    } else {
-        0
     }) | (if progress.authority_repaired {
         INKPOD_IO_RESULT_AUTHORITY_REPAIRED
     } else {

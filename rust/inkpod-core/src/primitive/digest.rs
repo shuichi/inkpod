@@ -5,12 +5,12 @@ use crate::*;
 use blake3::hazmat::HasherExt;
 use std::sync::LazyLock;
 
-const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v10";
+const DOCUMENT_STATE_CONTEXT: &str = "org.inkpod.digest.document-state.v11";
 const DOCUMENT_METADATA_CONTEXT: &str = "org.inkpod.digest.document-metadata.v7";
 const DOCUMENT_RASTER_CONTEXT: &str = "org.inkpod.digest.document-raster.v1";
 const DOCUMENT_TILE_CONTEXT: &str = "org.inkpod.digest.document-raster-tile.v1";
 const PROCEDURE_PAYLOAD_CONTEXT: &str = "org.inkpod.digest.procedure-payload.v1";
-const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 12;
+const DOCUMENT_STATE_SCHEMA_VERSION: u32 = 13;
 const DOCUMENT_TILE_SCHEMA_VERSION: u32 = 1;
 const PROCEDURE_PAYLOAD_SCHEMA_VERSION: u32 = 1;
 
@@ -368,7 +368,6 @@ fn canonical_document_metadata_bytes(
                     .to_le_bytes(),
                 ),
                 present(boolean_bytes(input.visible)),
-                present(boolean_bytes(input.include_in_instruction_export)),
             ])
         })
         .transpose()?;
@@ -1236,10 +1235,10 @@ mod tests {
         assert_eq!(
             digest.as_bytes(),
             &[
-                203, 191, 214, 136, 15, 167, 240, 11, 217, 13, 9, 87, 136, 228, 137, 226, 233, 22,
-                92, 214, 78, 114, 51, 58, 147, 183, 169, 231, 235, 199, 166, 238,
+                16, 224, 128, 100, 79, 15, 122, 185, 145, 22, 203, 61, 70, 89, 201, 75, 216, 29,
+                51, 246, 106, 8, 222, 69, 217, 113, 231, 24, 225, 105, 218, 188,
             ],
-            "schema-12 digest changes require an explicit golden update"
+            "schema-13 digest changes require an explicit golden update"
         );
     }
 

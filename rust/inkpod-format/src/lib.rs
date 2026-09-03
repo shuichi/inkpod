@@ -3,7 +3,6 @@
 mod application_data;
 mod batch;
 mod common_formats;
-mod cut;
 mod inkscript;
 mod light_table;
 mod native;
@@ -28,12 +27,6 @@ pub use common_formats::{
     common_raster_decoded_byte_limit, decode_common_raster, decode_tga_document,
     encode_common_raster, encode_tga_document, encode_tga_with_options,
     save_common_raster_bytes_atomic_with_cancel,
-};
-pub use cut::{
-    CUT_DESCRIPTOR_REPLAY_EPOCH, FileCutDefaults, FileCutDescriptor, FileCutHistoryEntry,
-    FileCutMemberAsset, FileCutMembership, FileCutMetadata, decode_cut_descriptor,
-    encode_cut_descriptor, read_cut_descriptor, save_cut_descriptor_atomic,
-    save_cut_recovery_atomic,
 };
 use inkpod_image::PixelValue;
 #[cfg(test)]

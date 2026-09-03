@@ -163,7 +163,7 @@ public:
         bool publish_snapshot,
         bool refresh_document_info,
         ScrollRangeResetRequest scroll_range_reset = {}) noexcept;
-    // Dispatch a session-independent operation (for example a workspace Cut)
+    // Dispatch a session-independent operation (for example an application query)
     // on the Core owner thread, including while no document session exists.
     InkpodStatus InvokeOwnerThread(std::function<InkpodStatus()> operation) noexcept;
     InkpodStatus InvokeAll(

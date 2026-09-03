@@ -93,7 +93,6 @@ void ApplySystemDarkTitleBar(HWND window) noexcept {
 
 using inkpod::windows::ui::HistoryDialogState;
 using inkpod::windows::ui::CellCreationDialogState;
-using inkpod::windows::ui::CutPropertiesDialogState;
 using inkpod::windows::ui::EffectEditorState;
 using inkpod::windows::ui::ShortcutDialogState;
 using inkpod::windows::ui::PreferencesDialogState;
@@ -103,7 +102,6 @@ using inkpod::windows::ui::ViewOptionsDialogState;
 using inkpod::windows::ui::ShootingFrameDialogState;
 using inkpod::windows::ui::ShowAboutDialog;
 using inkpod::windows::ui::ShowCellCreationOptions;
-using inkpod::windows::ui::ShowCutProperties;
 using inkpod::windows::ui::ShowHistoryDialog;
 using inkpod::windows::ui::ShowEffectEditor;
 using inkpod::windows::ui::SetEffectEditorPreviewStatus;
@@ -138,8 +136,6 @@ using inkpod::app::CommandContext;
 using inkpod::app::CommandResolveStatus;
 using inkpod::app::CommandTargetScope;
 using inkpod::app::CommandTimerKind;
-using inkpod::app::CutSession;
-using inkpod::app::CutMemberCache;
 using inkpod::app::DocumentSessionId;
 using inkpod::app::DocumentSession;
 using inkpod::app::DocumentView;
@@ -245,11 +241,6 @@ constexpr UINT kSequenceResidentRefreshDelayMilliseconds = 75U;
 using FileIoWorkflowCompletion =
     std::function<InkpodStatus(inkpod::app::FileIoResult&&)>;
 using SaveContinuation = std::function<void(InkpodStatus)>;
-
-enum class NativeSaveOverwritePolicy {
-    Prompt,
-    Reject,
-};
 
 void DestroyEmptyWorkspaceWindow(
     ApplicationHost& state,
@@ -689,7 +680,6 @@ bool BuildCellCreationDialogPreview(
 InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& context,
     const std::wstring& path, bool overwrite_confirmed,
     SaveContinuation continuation = {},
-    NativeSaveOverwritePolicy overwrite_policy = NativeSaveOverwritePolicy::Prompt,
     std::wstring raster_path = {},
     bool wait_for_smoke = true) noexcept;
 InkpodStatus SaveToPath(
@@ -751,8 +741,6 @@ void RefreshLocatorPane(ApplicationHost& state) noexcept;
 std::wstring LocatorDocumentName(const DocumentSession& document);
 void DispatchSequencePaneCommand(void* context, UINT command) noexcept;
 void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept;
-void ReorderCutSequenceCell(
-    void* context, std::uint32_t from, std::uint32_t to) noexcept;
 void DispatchLightTablePaneCommand(void* context, UINT command) noexcept;
 void SelectLightTablePaneEntry(
     void* context,
@@ -2324,92 +2312,6 @@ bool RefreshLightTablePane(ApplicationHost& state) noexcept {
     return true;
 }
 
-bool LoadCutMemberThumbnail(
-    ApplicationHost& state,
-    const std::wstring& path,
-    CutMemberCache& member) noexcept {
-    if (member.width != 0U && member.height != 0U
-        && member.thumbnail_width != 0U && member.thumbnail_height != 0U
-        && member.thumbnail_stride_bytes == member.thumbnail_width * 4U
-        && member.thumbnail_checksum != 0U
-        && member.thumbnail_rgba.size()
-            == static_cast<std::size_t>(member.thumbnail_stride_bytes)
-                * member.thumbnail_height) {
-        return true;
-    }
-    if (state.engine == nullptr) {
-        return false;
-    }
-    std::vector<std::uint8_t> encoded_path;
-    if (!WidePathToUtf8(path, encoded_path)) {
-        return false;
-    }
-    InkpodDocumentInfo info{};
-    info.struct_size = sizeof(info);
-    InkpodDocumentThumbnailBuffer thumbnail{};
-    thumbnail.struct_size = sizeof(thumbnail);
-    std::vector<std::uint8_t> pixels;
-    const InkpodStatus status = state.engine->Invoke(
-        [&encoded_path, &info, &thumbnail, &pixels, &member](InkpodCore*) {
-            const InkpodCoreConfig config{
-                sizeof(InkpodCoreConfig),
-                INKPOD_ABI_VERSION,
-                INKPOD_FEATURE_NONE};
-            InkpodCore* probe{};
-            InkpodStatus result = inkpod_core_create(&config, &probe);
-            if (result == INKPOD_STATUS_OK) {
-                result = inkpod_core_open(
-                    probe, encoded_path.data(), encoded_path.size(), &info);
-            }
-            if (result == INKPOD_STATUS_OK
-                && (info.cell_id != member.cell_id
-                    || info.document_uuid_high != member.document_uuid_high
-                    || info.document_uuid_low != member.document_uuid_low)) {
-                result = INKPOD_STATUS_INVALID_STATE;
-            }
-            if (result == INKPOD_STATUS_OK) {
-                result = inkpod_core_document_thumbnail_get(probe, &thumbnail);
-            }
-            if (result == INKPOD_STATUS_OK
-                && (thumbnail.required_bytes == 0U
-                    || thumbnail.required_bytes > 64U * 64U * 4U
-                    || thumbnail.stride_bytes != thumbnail.width * 4U
-                    || thumbnail.required_bytes
-                        != static_cast<std::uint64_t>(thumbnail.stride_bytes)
-                            * thumbnail.height)) {
-                result = INKPOD_STATUS_INVALID_STATE;
-            }
-            if (result == INKPOD_STATUS_OK) {
-                try {
-                    pixels.resize(
-                        static_cast<std::size_t>(thumbnail.required_bytes));
-                } catch (const std::bad_alloc&) {
-                    result = INKPOD_STATUS_INVALID_STATE;
-                }
-            }
-            if (result == INKPOD_STATUS_OK) {
-                thumbnail.pixels_rgba8 = pixels.data();
-                thumbnail.pixel_capacity = pixels.size();
-                result = inkpod_core_document_thumbnail_get(probe, &thumbnail);
-            }
-            const InkpodStatus destroy_status = inkpod_core_destroy(&probe);
-            return result == INKPOD_STATUS_OK ? destroy_status : result;
-        },
-        false,
-        false);
-    if (status != INKPOD_STATUS_OK) {
-        return false;
-    }
-    member.width = info.width;
-    member.height = info.height;
-    member.thumbnail_width = thumbnail.width;
-    member.thumbnail_height = thumbnail.height;
-    member.thumbnail_stride_bytes = thumbnail.stride_bytes;
-    member.thumbnail_checksum = thumbnail.checksum;
-    member.thumbnail_rgba = std::move(pixels);
-    return true;
-}
-
 bool RefreshSequencePane(ApplicationHost& state) noexcept {
     using inkpod::windows::ui::panes::SequencePaneCatalogKey;
     using inkpod::windows::ui::panes::SequencePaneCellView;
@@ -2419,132 +2321,10 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
     using inkpod::windows::ui::panes::UpdateSequencePaneSelection;
     SequencePaneView pane{};
     pane.empty_text = UiText(UiStringId::SequenceNoCells);
-    pane.wrap_navigation = state.lifetime.sequence_endpoint_policy
-        == SequenceEndpointPolicy::Wrap;
     const auto* binding = state.routing.pane_targets.Find(
         state.routing.sequence_pane);
     pane.pinned = binding != nullptr
         && binding->policy == PaneTargetPolicy::PinnedDocument;
-    if (state.Workspace().cut.handle != nullptr) {
-        state.Thumbnails().RemovePane(state.Workspace().pane_ids.sequence);
-        pane.target_available = true;
-        pane.cut_editable = true;
-        const auto* display_document = state.Documents().Find(
-            state.routing.targets.DocumentSession());
-        try {
-            pane.target_text = UiTextWithUserText(
-                UiStringId::CutPrefix, state.Workspace().cut.cut_name)
-                + L" — "
-                + std::to_wstring(state.Workspace().cut.members.size())
-                + UiText(UiStringId::CellsSuffix);
-            const std::wstring& descriptor = state.Workspace().cut.current_path;
-            const std::size_t slash = descriptor.find_last_of(L"\\/");
-            const std::wstring directory = slash == std::wstring::npos
-                ? std::wstring{}
-                : descriptor.substr(0U, slash + 1U);
-            pane.cells.reserve(state.Workspace().cut.members.size());
-            for (std::size_t index = 0U;
-                 index < state.Workspace().cut.members.size();
-                 ++index) {
-                auto& member = state.Workspace().cut.members[index];
-                if (display_document != nullptr && !LoadCutMemberThumbnail(
-                        state, directory + member.relative_path, member)) {
-                    pane.cells.clear();
-                    pane.empty_text = UiText(UiStringId::SequenceThumbnailLoadFailed);
-                    UpdateSequencePaneDialog(
-                        state.Workspace().sequence_palette, std::move(pane));
-                    return false;
-                }
-                const std::wstring& relative = member.relative_path;
-                std::wstring name = relative;
-                const std::size_t dot = name.find_last_of(L'.');
-                if (dot != std::wstring::npos) {
-                    name.erase(dot);
-                }
-                std::uint64_t content_id = member.cell_id
-                    ^ member.document_uuid_high ^ member.document_uuid_low;
-                if (content_id == 0U) {
-                    content_id = member.cell_id;
-                }
-                ThumbnailCacheKey thumbnail_key{};
-                if (display_document != nullptr) {
-                    thumbnail_key = ThumbnailCacheKey{
-                        state.Workspace().pane_ids.sequence,
-                        display_document->id,
-                        display_document->generation,
-                        content_id,
-                        member.thumbnail_checksum,
-                        ThumbnailKind::Sequence};
-                    std::vector<std::uint8_t> thumbnail_pixels = member.thumbnail_rgba;
-                    if (!state.Thumbnails().Put(
-                            thumbnail_key,
-                            member.thumbnail_width,
-                            member.thumbnail_height,
-                            member.thumbnail_stride_bytes,
-                            ThumbnailPixelLayout::Rgba8,
-                            std::move(thumbnail_pixels))) {
-                        pane.cells.clear();
-                        pane.empty_text = UiText(UiStringId::SequenceThumbnailRegisterFailed);
-                        UpdateSequencePaneDialog(
-                            state.Workspace().sequence_palette, std::move(pane));
-                        return false;
-                    }
-                }
-                pane.cells.push_back(SequencePaneCellView{
-                    static_cast<std::uint32_t>(index),
-                    member.display_number,
-                    member.width,
-                    member.height,
-                    member.thumbnail_width,
-                    member.thumbnail_height,
-                    member.thumbnail_stride_bytes,
-                    member.thumbnail_checksum,
-                    std::move(name),
-                    thumbnail_key,
-                    member.document_uuid_high,
-                    member.document_uuid_low});
-            }
-            InkpodDocumentInfo active_document{};
-            active_document.struct_size = sizeof(active_document);
-            const bool has_active_document = display_document != nullptr
-                && QueryDocument(state, active_document);
-            if (has_active_document) {
-                for (std::size_t index = 0U;
-                     index < state.Workspace().cut.members.size();
-                     ++index) {
-                    const auto& member = state.Workspace().cut.members[index];
-                    if (active_document.cell_id == member.cell_id
-                        && active_document.document_uuid_high
-                            == member.document_uuid_high
-                        && active_document.document_uuid_low
-                            == member.document_uuid_low) {
-                        pane.active_index = static_cast<std::uint32_t>(index);
-                        break;
-                    }
-                }
-            }
-            if (pane.active_index == UINT32_MAX
-                && has_active_document
-                && !state.Document().shell.current_path.empty()
-                && state.Document().shell.current_path.size() > directory.size()
-                && _wcsnicmp(
-                       state.Document().shell.current_path.c_str(),
-                       directory.c_str(),
-                       directory.size()) == 0) {
-                pane.target_text += L" — ";
-                pane.target_text += UiText(UiStringId::CurrentCellOutsideMembers);
-            }
-        } catch (const std::bad_alloc&) {
-            pane.cells.clear();
-            pane.empty_text = UiText(UiStringId::CutDisplayOutOfMemory);
-            UpdateSequencePaneDialog(
-                state.Workspace().sequence_palette, std::move(pane));
-            return false;
-        }
-        UpdateSequencePaneDialog(
-            state.Workspace().sequence_palette, std::move(pane));
-        return true;
-    }
     const PaneActionTarget target = state.routing.pane_targets.CaptureAction(
         state.routing.sequence_pane,
         state.routing.targets.Capture(),
@@ -2608,7 +2388,7 @@ bool RefreshSequencePane(ApplicationHost& state) noexcept {
                 catalog_key, catalog.active_index,
                 pane.target_text + L" — " + std::to_wstring(catalog.cell_count)
                     + UiText(UiStringId::CellsSuffix),
-                pane.pinned, pane.auto_sequence_truncated, pane.wrap_navigation};
+                pane.pinned, pane.auto_sequence_truncated};
             if (UpdateSequencePaneSelection(
                     state.Workspace().sequence_palette, std::move(selection))) {
                 if (document->id == state.routing.targets.DocumentSession()) {
@@ -7668,37 +7448,6 @@ void UpdateMenuState(
     // This is the only state computation. Every interactive surface below reads
     // the same immutable result; no tool or preview transition happens here.
     state.Workspace().command_states = ComputeCommandStates(inputs);
-    const bool has_cut = state.Workspace().cut.handle != nullptr;
-    const std::uint32_t cut_flags = state.Workspace().cut.flags;
-    for (auto& command_state : state.Workspace().command_states) {
-        switch (command_state.command) {
-            case IDM_FILE_NEW_CUT:
-                command_state.enabled = state.engine != nullptr;
-                break;
-            case IDM_CUT_PROPERTIES:
-            case IDM_CUT_SAVE:
-            case IDM_CUT_SEQUENCE_ADD:
-                command_state.enabled = has_cut;
-                break;
-            case IDM_CUT_SEQUENCE_REMOVE:
-            case IDM_CUT_SEQUENCE_MOVE_UP:
-            case IDM_CUT_SEQUENCE_MOVE_DOWN:
-            case IDM_CUT_SEQUENCE_RENUMBER:
-                command_state.enabled = has_cut
-                    && !state.Workspace().cut.members.empty();
-                break;
-            case IDM_CUT_UNDO:
-                command_state.enabled = has_cut
-                    && (cut_flags & INKPOD_CUT_FLAG_CAN_UNDO) != 0U;
-                break;
-            case IDM_CUT_REDO:
-                command_state.enabled = has_cut
-                    && (cut_flags & INKPOD_CUT_FLAG_CAN_REDO) != 0U;
-                break;
-            default:
-                break;
-        }
-    }
     if (has_document && state.engine != nullptr) {
         std::uint64_t edit_target_count{};
         InkpodEditTargetCapabilities capabilities{};
@@ -9518,39 +9267,6 @@ InkpodStatus CreateCellsFromOptions(
     return status;
 }
 
-struct CutSnapshot final {
-    InkpodCutInfo info{};
-    std::array<std::uint8_t, 4096U> work_title{};
-    std::array<std::uint8_t, 4096U> episode{};
-    std::array<std::uint8_t, 4096U> scene{};
-    std::array<std::uint8_t, 4096U> cut_name{};
-    std::array<std::uint8_t, 4096U> instruction{};
-    std::array<std::array<std::uint8_t, 256U>, INKPOD_MAX_CELL_CREATION_COUNT>
-        member_paths{};
-    std::array<std::uint64_t, INKPOD_MAX_CELL_CREATION_COUNT> member_path_bytes{};
-    std::array<InkpodCutMemberInfo, INKPOD_MAX_CELL_CREATION_COUNT> member_infos{};
-};
-
-struct CutCoreTarget final {
-    WorkspaceWindowId workspace{};
-    Generation workspace_generation{};
-    InkpodCut* cut{};
-};
-
-std::optional<CutCoreTarget> CaptureCutCoreTarget(
-    ApplicationHost& state, InkpodCut* requested_cut = nullptr) noexcept {
-    const CommandContext context = state.routing.targets.Capture();
-    InkpodCut* const cut = requested_cut != nullptr
-        ? requested_cut : state.Workspace().cut.handle;
-    if (state.engine == nullptr || cut == nullptr || !context.workspace.has_value()
-        || context.workspace.value() != state.Workspace().id
-        || state.routing.targets.Resolve(context, inkpod::app::kWorkspaceCommandScope)
-            != CommandResolveStatus::Ok) {
-        return std::nullopt;
-    }
-    return CutCoreTarget{state.Workspace().id, state.Workspace().generation, cut};
-}
-
 bool Utf8ToWideText(
     const std::uint8_t* bytes,
     std::size_t byte_count,
@@ -9587,133 +9303,6 @@ bool Utf8ToWideText(
         == required;
 }
 
-bool QueryCutSnapshot(
-    ApplicationHost& state,
-    const CutCoreTarget& target,
-    CutSnapshot& snapshot) noexcept {
-    const auto* workspace = state.FindWorkspace(target.workspace);
-    if (state.engine == nullptr || workspace == nullptr
-        || workspace->generation != target.workspace_generation) {
-        return false;
-    }
-    snapshot.info = {};
-    snapshot.info.struct_size = sizeof(snapshot.info);
-    return state.engine->InvokeOwnerThread(
-               [cut = target.cut, &snapshot]() {
-                   InkpodStatus status = inkpod_cut_info(cut, &snapshot.info);
-                   if (status != INKPOD_STATUS_OK
-                       || snapshot.info.member_count
-                           > INKPOD_MAX_CELL_CREATION_COUNT) {
-                       return status == INKPOD_STATUS_OK
-                           ? INKPOD_STATUS_INVALID_STATE
-                           : status;
-                   }
-                   InkpodCutMetadataBuffer metadata{};
-                   metadata.struct_size = sizeof(metadata);
-                   metadata.work_title = {
-                       snapshot.work_title.data(), snapshot.work_title.size(), 0U};
-                   metadata.episode = {
-                       snapshot.episode.data(), snapshot.episode.size(), 0U};
-                   metadata.scene = {
-                       snapshot.scene.data(), snapshot.scene.size(), 0U};
-                   metadata.cut_name = {
-                       snapshot.cut_name.data(), snapshot.cut_name.size(), 0U};
-                   metadata.instruction = {
-                       snapshot.instruction.data(), snapshot.instruction.size(), 0U};
-                   status = inkpod_cut_metadata_copy(cut, &metadata);
-                   if (status != INKPOD_STATUS_OK) {
-                       return status;
-                   }
-                   for (std::uint32_t index = 0U;
-                        index < snapshot.info.member_count;
-                        ++index) {
-                       InkpodCutMemberInfo member{};
-                       member.struct_size = sizeof(member);
-                       member.relative_path = {
-                           snapshot.member_paths[index].data(),
-                           snapshot.member_paths[index].size(),
-                           0U};
-                       status = inkpod_cut_member_get(cut, index, &member);
-                       if (status != INKPOD_STATUS_OK) {
-                           return status;
-                       }
-                       snapshot.member_path_bytes[index] =
-                           member.relative_path.byte_count;
-                       snapshot.member_infos[index] = member;
-                   }
-                   return INKPOD_STATUS_OK;
-               })
-        == INKPOD_STATUS_OK;
-}
-
-bool QueryCutSnapshot(
-    ApplicationHost& state,
-    CutSnapshot& snapshot,
-    InkpodCut* requested_cut = nullptr) noexcept {
-    const auto target = CaptureCutCoreTarget(state, requested_cut);
-    return target.has_value()
-        && QueryCutSnapshot(state, target.value(), snapshot);
-}
-
-bool BuildCutSessionCache(
-    const CutSnapshot& snapshot, CutSession& destination) noexcept {
-    std::wstring cut_name;
-    std::vector<CutMemberCache> members;
-    if (!Utf8ToWideText(
-            snapshot.cut_name.data(),
-            static_cast<std::size_t>(snapshot.info.cut_name_bytes),
-            cut_name)) {
-        return false;
-    }
-    try {
-        members.reserve(snapshot.info.member_count);
-        for (std::uint32_t index = 0U;
-             index < snapshot.info.member_count;
-             ++index) {
-            std::wstring path;
-            if (!Utf8ToWideText(
-                    snapshot.member_paths[index].data(),
-                    static_cast<std::size_t>(snapshot.member_path_bytes[index]),
-                    path)) {
-                return false;
-            }
-            const auto& info = snapshot.member_infos[index];
-            CutMemberCache member{};
-            member.display_number = info.display_number;
-            member.cell_id = info.cell_id;
-            member.document_uuid_high = info.document_uuid_high;
-            member.document_uuid_low = info.document_uuid_low;
-            member.relative_path = std::move(path);
-            const auto cached = std::find_if(
-                destination.members.cbegin(),
-                destination.members.cend(),
-                [&member](const CutMemberCache& candidate) {
-                    return candidate.cell_id == member.cell_id
-                        && candidate.document_uuid_high
-                            == member.document_uuid_high
-                        && candidate.document_uuid_low
-                            == member.document_uuid_low;
-                });
-            if (cached != destination.members.cend()) {
-                member.width = cached->width;
-                member.height = cached->height;
-                member.thumbnail_width = cached->thumbnail_width;
-                member.thumbnail_height = cached->thumbnail_height;
-                member.thumbnail_stride_bytes = cached->thumbnail_stride_bytes;
-                member.thumbnail_checksum = cached->thumbnail_checksum;
-                member.thumbnail_rgba = cached->thumbnail_rgba;
-            }
-            members.push_back(std::move(member));
-        }
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    destination.cut_name = std::move(cut_name);
-    destination.flags = snapshot.info.flags;
-    destination.members = std::move(members);
-    return true;
-}
-
 bool QueryShootingFrame(
     ApplicationHost& state,
     bool& present,
@@ -9737,848 +9326,6 @@ bool QueryShootingFrame(
         false);
     present = status == INKPOD_STATUS_OK && raw_present != 0U;
     return status == INKPOD_STATUS_OK;
-}
-
-bool RefreshCutSessionCache(
-    ApplicationHost& state, const CutSnapshot* existing = nullptr) noexcept {
-    CutSnapshot queried{};
-    const CutSnapshot* snapshot = existing;
-    if (snapshot == nullptr) {
-        if (!QueryCutSnapshot(state, queried)) {
-            return false;
-        }
-        snapshot = &queried;
-    }
-    return BuildCutSessionCache(*snapshot, state.Workspace().cut);
-}
-
-bool CutSnapshotToDialog(
-    const CutSnapshot& snapshot,
-    CutPropertiesDialogState& properties,
-    InkpodCellCreationOptions& defaults) noexcept {
-    if (!Utf8ToWideText(
-            snapshot.work_title.data(), snapshot.info.work_title_bytes,
-            properties.work_title)
-        || !Utf8ToWideText(
-            snapshot.episode.data(), snapshot.info.episode_bytes,
-            properties.episode)
-        || !Utf8ToWideText(
-            snapshot.scene.data(), snapshot.info.scene_bytes,
-            properties.scene)
-        || !Utf8ToWideText(
-            snapshot.cut_name.data(), snapshot.info.cut_name_bytes,
-            properties.cut_name)
-        || !Utf8ToWideText(
-            snapshot.instruction.data(), snapshot.info.instruction_bytes,
-            properties.instruction)) {
-        return false;
-    }
-    properties.duration_frames = snapshot.info.duration_frames;
-    defaults = InkpodCellCreationOptions{
-        sizeof(InkpodCellCreationOptions),
-        snapshot.info.sizing_mode,
-        INKPOD_FEATURE_NONE,
-        snapshot.info.width,
-        snapshot.info.height,
-        snapshot.info.dpi_x_milli,
-        snapshot.info.dpi_y_milli,
-        snapshot.info.margin_milli,
-        snapshot.info.safe_frame_ratio_milli,
-        snapshot.info.maximum_close_ratio_milli,
-        snapshot.info.anchor,
-        snapshot.info.pixel_format,
-        1U,
-        0U};
-    return true;
-}
-
-struct EncodedCutMetadata final {
-    std::array<std::vector<std::uint8_t>, 5U> text;
-    InkpodCutMetadataInput input{};
-};
-
-bool EncodeCutMetadata(
-    const CutPropertiesDialogState& source,
-    EncodedCutMetadata& encoded) noexcept {
-    const std::array<const std::wstring*, 5U> values{
-        &source.work_title,
-        &source.episode,
-        &source.scene,
-        &source.cut_name,
-        &source.instruction};
-    for (std::size_t index = 0U; index < values.size(); ++index) {
-        if (values[index]->empty()) {
-            encoded.text[index].clear();
-        } else if (!WidePathToUtf8(*values[index], encoded.text[index])) {
-            return false;
-        }
-        if (encoded.text[index].size() > 4096U) {
-            return false;
-        }
-    }
-    const auto span = [&encoded](std::size_t index) noexcept {
-        return InkpodUtf8Span{
-            encoded.text[index].empty() ? nullptr : encoded.text[index].data(),
-            encoded.text[index].size()};
-    };
-    encoded.input = InkpodCutMetadataInput{
-        sizeof(InkpodCutMetadataInput),
-        source.duration_frames,
-        span(0U),
-        span(1U),
-        span(2U),
-        span(3U),
-        span(4U)};
-    return true;
-}
-
-InkpodCutDefaultsInput CutDefaultsInput(
-    const InkpodCellCreationOptions& source) noexcept {
-    return InkpodCutDefaultsInput{
-        sizeof(InkpodCutDefaultsInput),
-        source.sizing_mode,
-        INKPOD_FEATURE_NONE,
-        source.width,
-        source.height,
-        source.dpi_x_milli,
-        source.dpi_y_milli,
-        source.margin_milli,
-        source.safe_frame_ratio_milli,
-        source.maximum_close_ratio_milli,
-        source.anchor,
-        source.pixel_format,
-        0U};
-}
-
-InkpodStatus SaveWorkspaceCut(ApplicationHost& state) noexcept {
-    auto& cut = state.Workspace().cut;
-    if (state.engine == nullptr || cut.handle == nullptr
-        || cut.current_path.empty()) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    std::vector<std::uint8_t> path;
-    if (!WidePathToUtf8(cut.current_path, path)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    InkpodCutInfo info{};
-    info.struct_size = sizeof(info);
-    InkpodCut* const handle = cut.handle;
-    return state.engine->InvokeOwnerThread(
-        [handle, &path, &info]() {
-            return inkpod_cut_save(
-                handle, path.data(), path.size(), &info);
-        });
-}
-
-bool PrepareWorkspaceCutReplacement(ApplicationHost& state) noexcept {
-    if (state.Workspace().cut.handle == nullptr) {
-        return true;
-    }
-    CutSnapshot snapshot{};
-    if (!QueryCutSnapshot(state, snapshot)) {
-        return false;
-    }
-    if ((snapshot.info.flags & INKPOD_CUT_FLAG_DIRTY) != 0U) {
-        const int choice = state.lifetime.smoke_test
-            ? IDNO
-            : MessageBoxW(
-                  state.Workspace().windows.window,
-                  UiText(UiStringId::Text0783),
-                  UiText(UiStringId::Text0151),
-                  MB_YESNOCANCEL | MB_ICONQUESTION);
-        if (choice == IDCANCEL
-            || (choice == IDYES
-                && SaveWorkspaceCut(state) != INKPOD_STATUS_OK)) {
-            return false;
-        }
-    }
-    return true;
-}
-
-void ReleaseCutHandle(ApplicationHost& state, InkpodCut*& cut) noexcept {
-    if (state.engine == nullptr || cut == nullptr) {
-        return;
-    }
-    (void)state.engine->InvokeOwnerThread(
-        [&cut]() { return inkpod_cut_destroy(&cut); });
-}
-
-InkpodStatus InstallCutSession(
-    ApplicationHost& state,
-    InkpodCut*& cut,
-    const std::wstring& path,
-    bool replacement_prepared) noexcept {
-    CutSnapshot snapshot{};
-    CutSession candidate{};
-    candidate.handle = cut;
-    if (!QueryCutSnapshot(state, snapshot, cut)
-        || !BuildCutSessionCache(snapshot, candidate)) {
-        ReleaseCutHandle(state, cut);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    try {
-        candidate.current_path = path;
-    } catch (const std::bad_alloc&) {
-        ReleaseCutHandle(state, cut);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    if (!replacement_prepared && !PrepareWorkspaceCutReplacement(state)) {
-        ReleaseCutHandle(state, cut);
-        return INKPOD_STATUS_CANCELLED;
-    }
-    if (!state.DestroyCutSession(state.Workspace())) {
-        ReleaseCutHandle(state, cut);
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    cut = nullptr;
-    state.Workspace().cut = std::move(candidate);
-    RefreshSequencePane(state);
-    UpdateMenuState(state);
-    return INKPOD_STATUS_OK;
-}
-
-InkpodStatus OpenCutDescriptor(
-    ApplicationHost& state, const std::wstring& path) noexcept {
-    if (state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    std::vector<std::uint8_t> encoded_path;
-    if (!WidePathToUtf8(path, encoded_path)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    InkpodCut* opened{};
-    InkpodStatus status = state.engine->InvokeOwnerThread(
-        [&encoded_path, &opened]() {
-            return inkpod_cut_open(
-                encoded_path.data(), encoded_path.size(), &opened);
-        });
-    if (status != INKPOD_STATUS_OK) {
-        return status;
-    }
-    return InstallCutSession(state, opened, path, false);
-}
-
-bool CutCellPaths(
-    const std::wstring& descriptor,
-    std::uint32_t count,
-    std::vector<std::wstring>& full_paths,
-    std::vector<std::wstring>& relative_paths) noexcept {
-    const std::size_t slash = descriptor.find_last_of(L"\\/");
-    const std::wstring directory = slash == std::wstring::npos
-        ? std::wstring{}
-        : descriptor.substr(0U, slash + 1U);
-    std::wstring stem = slash == std::wstring::npos
-        ? descriptor
-        : descriptor.substr(slash + 1U);
-    const std::size_t dot = stem.find_last_of(L'.');
-    if (dot != std::wstring::npos) {
-        stem.erase(dot);
-    }
-    if (stem.empty()) {
-        return false;
-    }
-    try {
-        full_paths.reserve(count);
-        relative_paths.reserve(count);
-        for (std::uint32_t index = 0U; index < count; ++index) {
-            std::array<wchar_t, 32U> suffix{};
-            _snwprintf_s(
-                suffix.data(), suffix.size(), _TRUNCATE,
-                L"-%04u.inkpod", index + 1U);
-            std::wstring relative = stem + suffix.data();
-            full_paths.push_back(directory + relative);
-            relative_paths.push_back(std::move(relative));
-        }
-    } catch (const std::bad_alloc&) {
-        return false;
-    }
-    return true;
-}
-
-InkpodStatus FinishNewCut(ApplicationHost& state,
-    const CutPropertiesDialogState& properties,
-    const InkpodCellCreationOptions& options, const std::wstring& descriptor,
-    const std::vector<std::wstring>& relative_paths,
-    const std::vector<InkpodDocumentInfo>& document_infos) {
-    EncodedCutMetadata metadata{};
-    if (!EncodeCutMetadata(properties, metadata)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    const InkpodCutDefaultsInput cut_defaults = CutDefaultsInput(options);
-    std::vector<std::vector<std::uint8_t>> encoded_names(relative_paths.size());
-    std::vector<InkpodCutMemberInput> members(relative_paths.size());
-    for (std::size_t index = 0U; index < relative_paths.size(); ++index) {
-        if (!WidePathToUtf8(relative_paths[index], encoded_names[index])) {
-            return INKPOD_STATUS_INVALID_ARGUMENT;
-        }
-        members[index] = InkpodCutMemberInput{
-            sizeof(InkpodCutMemberInput),
-            static_cast<std::uint32_t>(index + 1U),
-            document_infos[index].cell_id,
-            document_infos[index].document_uuid_high,
-            document_infos[index].document_uuid_low,
-            InkpodUtf8Span{
-                encoded_names[index].data(), encoded_names[index].size()}};
-    }
-    GUID uuid{};
-    if (FAILED(CoCreateGuid(&uuid))) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    std::uint64_t uuid_high{};
-    std::uint64_t uuid_low{};
-    std::memcpy(&uuid_high, &uuid, sizeof(uuid_high));
-    std::memcpy(
-        &uuid_low,
-        reinterpret_cast<const std::uint8_t*>(&uuid) + sizeof(uuid_high),
-        sizeof(uuid_low));
-    const InkpodCutCreateRequest request{
-        sizeof(InkpodCutCreateRequest),
-        0U,
-        INKPOD_FEATURE_NONE,
-        uuid_high,
-        uuid_low,
-        &metadata.input,
-        &cut_defaults,
-        members.data(),
-        members.size(),
-        sizeof(InkpodCutMemberInput)};
-    std::vector<std::uint8_t> descriptor_utf8;
-    if (!WidePathToUtf8(descriptor, descriptor_utf8)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    InkpodCut* created_cut{};
-    InkpodCutInfo info{};
-    info.struct_size = sizeof(info);
-    const InkpodStatus status = state.engine->InvokeOwnerThread(
-        [&request, &descriptor_utf8, &created_cut, &info]() {
-            InkpodStatus result = inkpod_cut_create(&request, &created_cut);
-            if (result == INKPOD_STATUS_OK) {
-                result = inkpod_cut_save(
-                    created_cut,
-                    descriptor_utf8.data(),
-                    descriptor_utf8.size(),
-                    &info);
-            }
-            return result;
-        });
-    if (status != INKPOD_STATUS_OK) {
-        ReleaseCutHandle(state, created_cut);
-        return status;
-    }
-    return InstallCutSession(state, created_cut, descriptor, true);
-}
-
-struct CutCreationSave final : std::enable_shared_from_this<CutCreationSave> {
-    ApplicationHost* state{};
-    CommandContext context;
-    Generation workspace_generation{};
-    InkpodCut* expected_cut{};
-    std::uint64_t expected_cut_revision{};
-    CutPropertiesDialogState properties;
-    InkpodCellCreationOptions options{};
-    std::wstring descriptor;
-    std::vector<std::wstring> paths;
-    std::vector<std::wstring> relative_paths;
-    std::vector<ApplicationHost::DocumentBinding> documents;
-    std::vector<InkpodDocumentInfo> document_infos;
-    std::size_t index{};
-    InkpodStatus status{INKPOD_STATUS_PENDING};
-
-    InkpodStatus Finish() {
-        auto* workspace = context.workspace.has_value()
-            ? state->FindWorkspace(context.workspace.value()) : nullptr;
-        if (workspace == nullptr || workspace->generation != workspace_generation
-            || workspace->cut.handle != expected_cut) {
-            return INKPOD_STATUS_CANCELLED;
-        }
-        if (expected_cut != nullptr) {
-            InkpodCutInfo info{};
-            info.struct_size = sizeof(info);
-            const InkpodStatus queried = state->engine->InvokeOwnerThread(
-                [cut = expected_cut, &info]() { return inkpod_cut_info(cut, &info); });
-            if (queried != INKPOD_STATUS_OK || info.revision != expected_cut_revision) {
-                return INKPOD_STATUS_CANCELLED;
-            }
-        }
-        const auto previous = state->routing.targets.ActiveDocumentView();
-        if (!state->ActivateWorkspaceWindow(workspace->id, false)) {
-            return INKPOD_STATUS_CANCELLED;
-        }
-        const InkpodStatus completed = FinishNewCut(*state, properties, options,
-            descriptor, relative_paths, document_infos);
-        if (previous) {
-            (void)ActivateDocumentTab(*state, previous);
-        }
-        return completed;
-    }
-
-    InkpodStatus Next() noexcept {
-        try {
-            if (index == documents.size()) {
-                status = Finish();
-                if (!FileIoAccepted(status) && status != INKPOD_STATUS_CANCELLED
-                    && !state->lifetime.smoke_test) {
-                    auto* workspace = context.workspace.has_value()
-                        ? state->FindWorkspace(context.workspace.value()) : nullptr;
-                    if (workspace != nullptr) {
-                        ShowCoreError(*state, workspace->windows.window, UiText(UiStringId::Text0710));
-                    }
-                }
-                return status;
-            }
-            const auto& binding = documents[index];
-            CommandContext target = context;
-            target.document_session = binding.session;
-            target.document_view = binding.view;
-            target.generation = binding.generation;
-            const auto self = shared_from_this();
-            const InkpodStatus queued = QueueNativeSave(*state, target, paths[index], false,
-                [self](InkpodStatus saved) {
-                    self->status = saved;
-                    if (saved == INKPOD_STATUS_OK) {
-                        ++self->index;
-                        (void)self->Next();
-                    }
-                }, NativeSaveOverwritePolicy::Reject);
-            if (!FileIoAccepted(queued)) {
-                status = queued;
-            }
-            return state->lifetime.smoke_test ? status : queued;
-        } catch (const std::bad_alloc&) {
-            status = INKPOD_STATUS_INVALID_STATE;
-            return status;
-        }
-    }
-};
-InkpodStatus CreateNewCut(ApplicationHost& state, HWND owner) noexcept {
-    if (state.engine == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    InkpodEditorDefaults editor_defaults{};
-    const InkpodStatus defaults_status =
-        state.engine->GetApplicationEditorDefaults(editor_defaults);
-    if (defaults_status != INKPOD_STATUS_OK) {
-        return defaults_status;
-    }
-    CutPropertiesDialogState properties{};
-    properties.work_title = L"inkpod";
-    properties.episode = L"01";
-    properties.scene = L"A";
-    properties.cut_name = state.lifetime.smoke_test ? L"SmokeCut" : L"C001";
-    properties.duration_frames = 24U;
-    if (ShowCutProperties(
-            state.lifetime.instance, owner, state.lifetime.smoke_test, properties)
-        != IDOK) {
-        return INKPOD_STATUS_CANCELLED;
-    }
-    CellCreationDialogState cells{};
-    cells.options = InkpodCellCreationOptions{
-        sizeof(InkpodCellCreationOptions),
-        INKPOD_CELL_SIZING_IMAGE_PIXELS,
-        INKPOD_FEATURE_NONE,
-        editor_defaults.width,
-        editor_defaults.height,
-        editor_defaults.dpi_x_milli,
-        editor_defaults.dpi_y_milli,
-        50U,
-        900U,
-        500U,
-        INKPOD_FRAME_ANCHOR_CENTER,
-        INKPOD_STORAGE_RGBA8,
-        state.lifetime.smoke_test ? 5U : 1U,
-        0U};
-    cells.build_preview = BuildCellCreationDialogPreview;
-    if (ShowCellCreationOptions(
-            state.lifetime.instance, owner, state.lifetime.smoke_test, cells)
-        != IDOK) {
-        return INKPOD_STATUS_CANCELLED;
-    }
-    std::wstring descriptor = state.lifetime.smoke_test
-        ? L"inkpod-cut-smoke.inkpod"
-        : std::wstring{};
-    if (!state.lifetime.smoke_test
-        && !ChooseInkpodPath(owner, true, descriptor)) {
-        return INKPOD_STATUS_CANCELLED;
-    }
-    if (!PrepareWorkspaceCutReplacement(state)) {
-        return INKPOD_STATUS_CANCELLED;
-    }
-    std::vector<std::wstring> full_paths;
-    std::vector<std::wstring> relative_paths;
-    if (!CutCellPaths(
-            descriptor, cells.options.count, full_paths, relative_paths)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    // Cut member validation remains a Windows adapter exception. Reject existing
-    // native members before creating any Cell; the Rust save also checks both
-    // native and companion destinations under its file locks before installing.
-    for (const auto& path : full_paths) {
-        if (GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
-            state.engine->SetLocalFailure(UiText(UiStringId::Text0142));
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-    }
-    std::vector<ApplicationHost::DocumentBinding> created;
-    InkpodStatus status = CreateCellsFromOptions(
-        state, cells.options, std::nullopt, &created);
-    if (status != INKPOD_STATUS_OK || created.size() != full_paths.size()) {
-        return status == INKPOD_STATUS_OK
-            ? INKPOD_STATUS_INVALID_STATE
-            : status;
-    }
-    try {
-        auto save = std::make_shared<CutCreationSave>();
-        save->state = &state;
-        save->context = state.routing.targets.Capture();
-        save->workspace_generation = state.Workspace().generation;
-        save->expected_cut = state.Workspace().cut.handle;
-        if (save->expected_cut != nullptr) {
-            InkpodCutInfo info{};
-            info.struct_size = sizeof(info);
-            if (state.engine->InvokeOwnerThread(
-                    [cut = save->expected_cut, &info]() { return inkpod_cut_info(cut, &info); }) != INKPOD_STATUS_OK) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-            save->expected_cut_revision = info.revision;
-        }
-        save->properties = std::move(properties);
-        save->options = cells.options;
-        save->descriptor = std::move(descriptor);
-        save->paths = std::move(full_paths);
-        save->relative_paths = std::move(relative_paths);
-        save->documents = std::move(created);
-        save->document_infos.resize(save->documents.size());
-        for (std::size_t index = 0U; index < save->documents.size(); ++index) {
-            auto& info = save->document_infos[index];
-            info.struct_size = sizeof(info);
-            if (!state.engine->GetDocumentInfo(save->documents[index].session,
-                    save->documents[index].generation, info)) {
-                return INKPOD_STATUS_INVALID_STATE;
-            }
-        }
-        return save->Next();
-    } catch (const std::bad_alloc&) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-}
-InkpodStatus EditCutProperties(ApplicationHost& state, HWND owner) noexcept {
-    CutSnapshot snapshot{};
-    CutPropertiesDialogState properties{};
-    InkpodCellCreationOptions defaults{};
-    if (!QueryCutSnapshot(state, snapshot)
-        || !CutSnapshotToDialog(snapshot, properties, defaults)) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    if (state.lifetime.smoke_test) {
-        properties.cut_name += L"-updated";
-        properties.duration_frames += 1U;
-    }
-    if (ShowCutProperties(
-            state.lifetime.instance, owner, state.lifetime.smoke_test, properties)
-        != IDOK) {
-        InkpodDispatchResult result{};
-        result.struct_size = sizeof(result);
-        return state.engine->InvokeOwnerThread(
-            [cut = state.Workspace().cut.handle, &result]() {
-                return inkpod_cut_cancel_update(cut, &result);
-            });
-    }
-    CellCreationDialogState cell_defaults{};
-    cell_defaults.options = defaults;
-    cell_defaults.build_preview = BuildCellCreationDialogPreview;
-    if (ShowCellCreationOptions(
-            state.lifetime.instance,
-            owner,
-            state.lifetime.smoke_test,
-            cell_defaults) != IDOK) {
-        InkpodDispatchResult result{};
-        result.struct_size = sizeof(result);
-        return state.engine->InvokeOwnerThread(
-            [cut = state.Workspace().cut.handle, &result]() {
-                return inkpod_cut_cancel_update(cut, &result);
-            });
-    }
-    EncodedCutMetadata metadata{};
-    if (!EncodeCutMetadata(properties, metadata)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    const InkpodCutDefaultsInput cut_defaults =
-        CutDefaultsInput(cell_defaults.options);
-    const InkpodCutUpdateRequest request{
-        sizeof(InkpodCutUpdateRequest),
-        0U,
-        INKPOD_FEATURE_NONE,
-        snapshot.info.revision,
-        &metadata.input,
-        &cut_defaults};
-    InkpodDispatchResult result{};
-    result.struct_size = sizeof(result);
-    const InkpodStatus status = state.engine->InvokeOwnerThread(
-        [cut = state.Workspace().cut.handle, &request, &result]() {
-            return inkpod_cut_update(cut, &request, &result);
-        });
-    if (status == INKPOD_STATUS_OK) {
-        (void)RefreshCutSessionCache(state);
-        RefreshSequencePane(state);
-        UpdateMenuState(state);
-    }
-    return status;
-}
-
-std::optional<std::uint32_t> SelectedCutSequenceIndex(
-    const ApplicationHost& state) noexcept {
-    const HWND pane = state.Workspace().sequence_palette;
-    if (pane == nullptr) {
-        return std::nullopt;
-    }
-    const LRESULT selected = SendDlgItemMessageW(
-        pane, IDC_SEQUENCE_CELLS, LB_GETCURSEL, 0, 0);
-    if (selected == LB_ERR
-        || static_cast<std::size_t>(selected)
-            >= state.Workspace().cut.members.size()) {
-        return std::nullopt;
-    }
-    return static_cast<std::uint32_t>(selected);
-}
-
-InkpodStatus CancelCutSequenceEdit(ApplicationHost& state) noexcept {
-    const auto target = CaptureCutCoreTarget(state);
-    if (!target.has_value()) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    InkpodCutSequenceEditResult result{};
-    result.struct_size = sizeof(result);
-    return state.engine->InvokeOwnerThread(
-        [cut = target->cut, &result]() {
-            return inkpod_cut_sequence_cancel(cut, &result);
-        });
-}
-
-InkpodStatus ApplyCutSequenceEdit(
-    ApplicationHost& state,
-    const std::vector<InkpodCutSequenceEditOperation>& operations) noexcept {
-    const auto target = CaptureCutCoreTarget(state);
-    CutSnapshot snapshot{};
-    if (!target.has_value()
-        || !QueryCutSnapshot(state, target.value(), snapshot)) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    const InkpodCutSequenceEditRequest request{
-        sizeof(InkpodCutSequenceEditRequest),
-        0U,
-        INKPOD_FEATURE_NONE,
-        snapshot.info.revision,
-        operations.empty() ? nullptr : operations.data(),
-        operations.size(),
-        sizeof(InkpodCutSequenceEditOperation)};
-    InkpodCutSequenceEditResult result{};
-    result.struct_size = sizeof(result);
-    const InkpodStatus status = state.engine->InvokeOwnerThread(
-        [cut = target->cut, &request, &result]() {
-            return inkpod_cut_sequence_edit(cut, &request, &result);
-        });
-    if (status == INKPOD_STATUS_OK) {
-        CutSnapshot committed{};
-        if (!QueryCutSnapshot(state, target.value(), committed)
-            || committed.info.revision != result.revision
-            || committed.info.state_id != result.state_id
-            || committed.info.member_count != result.member_count
-            || !RefreshCutSessionCache(state, &committed)) {
-            return INKPOD_STATUS_INVALID_STATE;
-        }
-        RefreshSequencePane(state);
-        UpdateMenuState(state);
-    }
-    return status;
-}
-
-InkpodCutSequenceEditOperation CutSequenceIdentityOperation(
-    std::uint32_t kind, const CutMemberCache& member) noexcept {
-    InkpodCutSequenceEditOperation operation{};
-    operation.struct_size = sizeof(operation);
-    operation.kind = kind;
-    operation.cell_id = member.cell_id;
-    operation.document_uuid_high = member.document_uuid_high;
-    operation.document_uuid_low = member.document_uuid_low;
-    return operation;
-}
-
-InkpodStatus ReorderCutSequence(
-    ApplicationHost& state,
-    std::uint32_t from,
-    std::uint32_t to) noexcept {
-    const auto& members = state.Workspace().cut.members;
-    if (from >= members.size() || to >= members.size()) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    if (from == to) {
-        return CancelCutSequenceEdit(state);
-    }
-    InkpodCutSequenceEditOperation operation = CutSequenceIdentityOperation(
-        from < to ? INKPOD_CUT_SEQUENCE_MOVE_AFTER
-                  : INKPOD_CUT_SEQUENCE_MOVE_BEFORE,
-        members[from]);
-    operation.anchor_cell_id = members[to].cell_id;
-    operation.anchor_document_uuid_high = members[to].document_uuid_high;
-    operation.anchor_document_uuid_low = members[to].document_uuid_low;
-    return ApplyCutSequenceEdit(state, {operation});
-}
-
-InkpodStatus AddCutSequenceMember(
-    ApplicationHost& state, HWND owner) noexcept {
-    std::wstring path;
-    if (state.lifetime.smoke_test) {
-        const std::wstring& descriptor = state.Workspace().cut.current_path;
-        const std::size_t slash = descriptor.find_last_of(L"\\/");
-        path = (slash == std::wstring::npos
-                ? std::wstring{}
-                : descriptor.substr(0U, slash + 1U))
-            + L"inkpod-cut-smoke-0002.inkpod";
-    } else if (!ChooseInkpodPath(owner, false, path)) {
-        (void)CancelCutSequenceEdit(state);
-        return INKPOD_STATUS_CANCELLED;
-    }
-    const std::wstring& descriptor = state.Workspace().cut.current_path;
-    const std::size_t descriptor_slash = descriptor.find_last_of(L"\\/");
-    const std::size_t member_slash = path.find_last_of(L"\\/");
-    const std::wstring descriptor_directory = descriptor_slash == std::wstring::npos
-        ? std::wstring{}
-        : descriptor.substr(0U, descriptor_slash + 1U);
-    const std::wstring member_directory = member_slash == std::wstring::npos
-        ? std::wstring{}
-        : path.substr(0U, member_slash + 1U);
-    if (_wcsicmp(
-            descriptor_directory.c_str(), member_directory.c_str()) != 0) {
-        state.engine->SetLocalFailure(
-            UiText(UiStringId::Text0952));
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    const std::wstring relative = member_slash == std::wstring::npos
-        ? path
-        : path.substr(member_slash + 1U);
-    std::vector<std::uint8_t> encoded_path;
-    std::vector<std::uint8_t> encoded_relative;
-    if (relative.empty() || !WidePathToUtf8(path, encoded_path)
-        || !WidePathToUtf8(relative, encoded_relative)) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    InkpodDocumentInfo info{};
-    info.struct_size = sizeof(info);
-    const InkpodStatus probe_status = state.engine->InvokeOwnerThread(
-        [&encoded_path, &info]() {
-            const InkpodCoreConfig config{
-                sizeof(InkpodCoreConfig),
-                INKPOD_ABI_VERSION,
-                INKPOD_FEATURE_NONE};
-            InkpodCore* probe{};
-            InkpodStatus status = inkpod_core_create(&config, &probe);
-            if (status == INKPOD_STATUS_OK) {
-                status = inkpod_core_open(
-                    probe, encoded_path.data(), encoded_path.size(), &info);
-            }
-            const InkpodStatus destroy_status = inkpod_core_destroy(&probe);
-            return status == INKPOD_STATUS_OK ? destroy_status : status;
-        });
-    if (probe_status != INKPOD_STATUS_OK) {
-        return probe_status;
-    }
-    std::uint32_t display_number{};
-    for (const auto& member : state.Workspace().cut.members) {
-        display_number = std::max(display_number, member.display_number);
-    }
-    if (display_number == UINT32_MAX
-        || state.Workspace().cut.members.size() >= UINT32_MAX) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    InkpodCutSequenceEditOperation operation{};
-    operation.struct_size = sizeof(operation);
-    operation.kind = INKPOD_CUT_SEQUENCE_INSERT;
-    operation.cell_id = info.cell_id;
-    operation.document_uuid_high = info.document_uuid_high;
-    operation.document_uuid_low = info.document_uuid_low;
-    operation.position = static_cast<std::uint32_t>(
-        state.Workspace().cut.members.size());
-    operation.display_number = display_number + 1U;
-    operation.relative_path = {
-        encoded_relative.data(), encoded_relative.size()};
-    return ApplyCutSequenceEdit(state, {operation});
-}
-
-InkpodStatus RemoveCutSequenceMember(ApplicationHost& state) noexcept {
-    const auto selected = SelectedCutSequenceIndex(state);
-    if (!selected.has_value()) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    const auto operation = CutSequenceIdentityOperation(
-        INKPOD_CUT_SEQUENCE_REMOVE,
-        state.Workspace().cut.members[selected.value()]);
-    return ApplyCutSequenceEdit(state, {operation});
-}
-
-InkpodStatus MoveCutSequenceMember(
-    ApplicationHost& state, bool down) noexcept {
-    const auto selected = SelectedCutSequenceIndex(state);
-    if (!selected.has_value()) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    const std::uint32_t index = selected.value();
-    if ((!down && index == 0U)
-        || (down && index + 1U >= state.Workspace().cut.members.size())) {
-        return CancelCutSequenceEdit(state);
-    }
-    return ReorderCutSequence(state, index, down ? index + 1U : index - 1U);
-}
-
-InkpodStatus RenumberCutSequence(
-    ApplicationHost& state, HWND owner) noexcept {
-    if (state.Workspace().cut.members.empty()) {
-        return CancelCutSequenceEdit(state);
-    }
-    ViewOptionsDialogState dialog{};
-    dialog.title = UiText(UiStringId::Text0237);
-    dialog.labels[0] = UiText(UiStringId::Text0493);
-    dialog.labels[1] = UiText(UiStringId::Text0606);
-    dialog.values[0] = 1;
-    dialog.values[1] = 1;
-    if (ShowViewOptions(
-            state.lifetime.instance,
-            owner,
-            state.lifetime.smoke_test,
-            dialog) != IDOK) {
-        (void)CancelCutSequenceEdit(state);
-        return INKPOD_STATUS_CANCELLED;
-    }
-    if (dialog.values[0] <= 0 || dialog.values[1] <= 0) {
-        return INKPOD_STATUS_INVALID_ARGUMENT;
-    }
-    InkpodCutSequenceEditOperation operation{};
-    operation.struct_size = sizeof(operation);
-    operation.kind = INKPOD_CUT_SEQUENCE_RENUMBER_RANGE;
-    operation.position = 0U;
-    operation.count = static_cast<std::uint32_t>(
-        state.Workspace().cut.members.size());
-    operation.first_number = static_cast<std::uint32_t>(dialog.values[0]);
-    operation.step = static_cast<std::uint32_t>(dialog.values[1]);
-    return ApplyCutSequenceEdit(state, {operation});
-}
-
-InkpodStatus MoveCutHistory(ApplicationHost& state, bool redo) noexcept {
-    if (state.engine == nullptr || state.Workspace().cut.handle == nullptr) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
-    InkpodDispatchResult result{};
-    result.struct_size = sizeof(result);
-    const InkpodStatus status = state.engine->InvokeOwnerThread(
-        [cut = state.Workspace().cut.handle, redo, &result]() {
-            return redo ? inkpod_cut_redo(cut, &result)
-                        : inkpod_cut_undo(cut, &result);
-        });
-    if (status == INKPOD_STATUS_OK) {
-        (void)RefreshCutSessionCache(state);
-        RefreshSequencePane(state);
-        UpdateMenuState(state);
-    }
-    return status;
 }
 
 bool BuildCellCreationDialogPreview(
@@ -10936,7 +9683,6 @@ DocumentSession* FindOpenDocumentForFile(ApplicationHost& state,
 struct OpenDocumentItems final {
     const inkpod::app::FileIoItem* primary{};
     const inkpod::app::FileIoItem* pair_raster{};
-    bool cut_descriptor{};
 };
 
 struct PreparedOpenNativeAuthority final {
@@ -10975,17 +9721,7 @@ bool ResolveOpenDocumentItems(const inkpod::app::FileIoResult& result,
                 || item.identity.kind
                     == inkpod::app::DocumentIdentityKind::NormalizedPath);
     };
-    const bool cut_descriptor =
-        (result.progress.flags & INKPOD_IO_RESULT_CUT_DESCRIPTOR) != 0U;
     if (kind == INKPOD_IO_OPEN_NATIVE) {
-        if (cut_descriptor) {
-            if (result.items.size() != 1U || !physical(result.items[0])) {
-                return false;
-            }
-            output.primary = &result.items[0];
-            output.cut_descriptor = true;
-            return true;
-        }
         // Direct Cell open reports native first and its raster companion second.
         if (result.items.size() != 2U || result.items[0].info.raster_format != 0U
             || result.items[1].info.raster_format == 0U
@@ -10995,9 +9731,6 @@ bool ResolveOpenDocumentItems(const inkpod::app::FileIoResult& result,
         output.primary = &result.items[0];
         output.pair_raster = &result.items[1];
         return true;
-    }
-    if (cut_descriptor) {
-        return false;
     }
     if (kind == INKPOD_IO_OPEN_RASTER_PAIR) {
         // Raster-driven open reports the opposite order: raster, then native.
@@ -11024,7 +9757,7 @@ bool IsExactLogicalPairDuplicate(
     const OpenDocumentItems& items) noexcept {
     if ((kind != INKPOD_IO_OPEN_NATIVE
             && kind != INKPOD_IO_OPEN_RASTER_PAIR)
-        || items.cut_descriptor || items.primary == nullptr
+        || items.primary == nullptr
         || items.pair_raster == nullptr) {
         return false;
     }
@@ -11122,7 +9855,7 @@ InkpodStatus QueueDocumentOpen(
                     return INKPOD_STATUS_FILE_CONFLICT;
                 }
             }
-            if (duplicate != nullptr && !items.cut_descriptor
+            if (duplicate != nullptr
                 && !IsExactLogicalPairDuplicate(*duplicate, kind, items)) {
                 return INKPOD_STATUS_FILE_CONFLICT;
             }
@@ -11162,11 +9895,6 @@ InkpodStatus QueueDocumentOpen(
                         (void)state.DiscardPreparedDocumentSession(binding);
                         return INKPOD_STATUS_FILE_CONFLICT;
                     }
-                }
-                if (open_items.cut_descriptor) {
-                    (void)state.DiscardPreparedDocumentSession(binding);
-                    return state.ActivateWorkspaceWindow(workspace_id, false)
-                        ? OpenCutDescriptor(state, path) : INKPOD_STATUS_CANCELLED;
                 }
                 if (kind == INKPOD_IO_OPEN_RECOVERY && !result.recovery_candidates.empty()
                     && result.recovery_candidates.front().has_metadata) {
@@ -11325,12 +10053,8 @@ InkpodStatus QueueDocumentOpen(
     }
 }
 
-InkpodStatus ImportCommonRasterFromPath(
-    ApplicationHost& state, const std::wstring& path) noexcept {
-    return QueueDocumentOpen(state, path, INKPOD_IO_OPEN_RASTER);
-}
 InkpodStatus QueueRasterExport(ApplicationHost& state, const std::wstring& path,
-    bool composite_white, bool instructions, const CommandContext& context) noexcept {
+    bool composite_white, const CommandContext& context) noexcept {
     if (state.engine == nullptr) {
         return INKPOD_STATUS_INVALID_STATE;
     }
@@ -11339,8 +10063,7 @@ InkpodStatus QueueRasterExport(ApplicationHost& state, const std::wstring& path,
         request.context = context;
         request.kind = INKPOD_IO_EXPORT_RASTER;
         request.flags = INKPOD_IO_OVERWRITE_CONFIRMED
-            | (composite_white ? INKPOD_IO_COMPOSITE_WHITE : 0U)
-            | (instructions ? INKPOD_IO_INSTRUCTIONS : 0U);
+            | (composite_white ? INKPOD_IO_COMPOSITE_WHITE : 0U);
         request.paths.push_back(path);
         request.raster_format = CommonRasterFormatFromPath(path);
         return QueueFileIoWork(state, std::move(request), {});
@@ -11351,13 +10074,9 @@ InkpodStatus QueueRasterExport(ApplicationHost& state, const std::wstring& path,
 
 InkpodStatus ExportCommonRasterToPath(
     ApplicationHost& state, const std::wstring& path, bool composite_white) noexcept {
-    return QueueRasterExport(state, path, composite_white, false, state.routing.targets.Capture());
+    return QueueRasterExport(state, path, composite_white, state.routing.targets.Capture());
 }
 
-InkpodStatus ExportInstructionCommonRasterToPath(
-    ApplicationHost& state, const std::wstring& path, bool composite_white) noexcept {
-    return QueueRasterExport(state, path, composite_white, true, state.routing.targets.Capture());
-}
 InkpodStatus ApplyLightTableEdit(
     ApplicationHost& state,
     const CommandContext& context,
@@ -12882,7 +11601,7 @@ bool RefreshPreparedRepairedIdentity(
 
 InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& context,
     const std::wstring& path, bool overwrite_confirmed,
-    SaveContinuation continuation, NativeSaveOverwritePolicy overwrite_policy,
+    SaveContinuation continuation,
     std::wstring raster_path, bool wait_for_smoke) noexcept {
     if (state.engine == nullptr || !context.document_session.has_value()
         || !context.generation.has_value()) {
@@ -12903,7 +11622,7 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
                         deferred_path = std::move(deferred_path),
                         raster_path = std::move(raster_path),
                         continuation = std::move(continuation),
-                        overwrite_confirmed, overwrite_policy,
+                        overwrite_confirmed,
                         wait_for_smoke,
                         deferred_persistence_epoch]() mutable {
                         const auto* current =
@@ -12923,7 +11642,7 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
                         (void)QueueNativeSave(
                             state, context, deferred_path,
                             overwrite_confirmed, std::move(continuation),
-                            overwrite_policy, std::move(raster_path),
+                            std::move(raster_path),
                             wait_for_smoke);
                     })) {
                 return INKPOD_STATUS_INVALID_STATE;
@@ -12964,7 +11683,7 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
         }
         return QueueFileIoWork(state, std::move(request),
             [&state, context, path, shell_recovery = std::move(shell_recovery),
-             overwrite_confirmed, overwrite_policy,
+             overwrite_confirmed,
              sequence_binding_target, prepared, wait_for_smoke,
              persistence_epoch,
              raster_path = std::move(raster_path),
@@ -13061,8 +11780,7 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
                 if (result.status == INKPOD_STATUS_FILE_CONFLICT
                     && !result.authority_revoked
                     && !result.authority_repaired
-                    && !overwrite_confirmed
-                    && overwrite_policy == NativeSaveOverwritePolicy::Prompt) {
+                    && !overwrite_confirmed) {
                     if (prepared->identity_reservation) {
                         (void)state.Documents().CancelIdentityReservation(
                             target->id, prepared->identity_reservation);
@@ -13080,7 +11798,7 @@ InkpodStatus QueueNativeSave(ApplicationHost& state, const CommandContext& conte
                             MB_YESNO | MB_ICONWARNING | MB_DEFBUTTON2));
                     if (choice == IDYES) {
                         return QueueNativeSave(state, context, path, true,
-                            std::move(continuation), overwrite_policy,
+                            std::move(continuation),
                             std::move(raster_path), wait_for_smoke);
                     }
                     if (continuation) {
@@ -13419,7 +12137,7 @@ InkpodStatus SaveToPath(ApplicationHost& state, const std::wstring& path) noexce
         return INKPOD_STATUS_INVALID_STATE;
     }
     return QueueNativeSave(state, state.routing.targets.Capture(), path, false,
-        {}, NativeSaveOverwritePolicy::Prompt, std::move(raster_path));
+        {}, std::move(raster_path));
 }
 
 InkpodStatus SaveDocumentForContext(ApplicationHost& state, const CommandContext& context,
@@ -13468,7 +12186,7 @@ InkpodStatus SaveDocumentForContext(ApplicationHost& state, const CommandContext
             return INKPOD_STATUS_INVALID_STATE;
         }
         return QueueNativeSave(state, context, path, false,
-            std::move(continuation), NativeSaveOverwritePolicy::Prompt,
+            std::move(continuation),
             std::move(raster_path), wait_for_smoke);
     } catch (const std::bad_alloc&) {
         return INKPOD_STATUS_INVALID_STATE;
@@ -15257,29 +13975,6 @@ void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept {
     if (state == nullptr) {
         return;
     }
-    if (state->Workspace().cut.handle != nullptr) {
-        if (index >= state->Workspace().cut.members.size()) {
-            return;
-        }
-        try {
-            const std::wstring& descriptor = state->Workspace().cut.current_path;
-            const std::size_t slash = descriptor.find_last_of(L"\\/");
-            const std::wstring path = (slash == std::wstring::npos
-                    ? std::wstring{}
-                    : descriptor.substr(0U, slash + 1U))
-                + state->Workspace().cut.members[index].relative_path;
-            if (OpenDocumentFromPath(*state, path) == INKPOD_STATUS_OK) {
-                RefreshSequencePane(*state);
-                UpdateMenuState(*state);
-            } else {
-                // Selection belongs to the committed Cell, including when an
-                // asynchronous open is pending or the dirty prompt was cancelled.
-                RefreshSequencePane(*state);
-            }
-        } catch (const std::bad_alloc&) {
-        }
-        return;
-    }
     const PaneActionTarget target = state->routing.pane_targets.CaptureAction(
         state->routing.sequence_pane,
         state->routing.targets.Capture(),
@@ -15296,22 +13991,6 @@ void ActivateSequencePaneCell(void* context, std::uint32_t index) noexcept {
         && !state->lifetime.smoke_test) {
         ShowCoreError(
             *state, state->Workspace().sequence_palette, UiText(UiStringId::Text0206));
-    }
-}
-
-void ReorderCutSequenceCell(
-    void* context, std::uint32_t from, std::uint32_t to) noexcept {
-    auto* state = ActivateWorkspaceContext(context);
-    if (state == nullptr || state->Workspace().cut.handle == nullptr) {
-        return;
-    }
-    const InkpodStatus status = ReorderCutSequence(*state, from, to);
-    if (status != INKPOD_STATUS_OK && status != INKPOD_STATUS_CANCELLED
-        && !state->lifetime.smoke_test) {
-        ShowCoreError(
-            *state,
-            state->Workspace().sequence_palette,
-            UiText(UiStringId::Text0145));
     }
 }
 
@@ -17698,8 +16377,6 @@ bool InitializeMainChrome(ApplicationHost& state) noexcept {
         DispatchSequencePaneCommand;
     state.Workspace().sequence_dialog.activate_cell =
         ActivateSequencePaneCell;
-    state.Workspace().sequence_dialog.reorder_cell =
-        ReorderCutSequenceCell;
     state.Workspace().sequence_dialog.layout_changed =
         NotifySequencePaneLayoutChanged;
     state.Workspace().sequence_dialog.thumbnail_width_dip =
@@ -18508,32 +17185,18 @@ std::optional<LRESULT> RouteDocumentCommand(
             return 0;
         }
         case IDM_FILE_OPEN: {
-                std::wstring path;
-                if (ChooseOpenDocumentPath(window, path)) {
-                    const InkpodStatus status = OpenDocumentForContext(*state, path, context);
-                    if (!FileIoAccepted(status)) {
-                        ShowCoreError(*state, window, UiText(UiStringId::Text1018));
-                    }
-                }
-            return 0;
-        }
-        case IDM_FILE_IMPORT_RASTER: {
-            std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
-            if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, false, path)) {
+            std::wstring path = state->lifetime.smoke_test
+                ? state->lifetime.smoke_raster_path : L"";
+            if (!state->lifetime.smoke_test && !ChooseOpenDocumentPath(window, path)) {
                 return 0;
             }
-            const InkpodStatus status = QueueDocumentOpen(
-                *state, path, INKPOD_IO_OPEN_RASTER, {}, {}, context);
+            const InkpodStatus status = OpenDocumentForContext(*state, path, context);
             if (!FileIoAccepted(status)) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0422));
+                ShowCoreError(*state, window, UiText(UiStringId::Text1018));
             }
-            UpdateMenuState(*state);
             return FileIoAccepted(status) ? 1 : 0;
         }
-        case IDM_FILE_EXPORT_RASTER:
-        case IDM_FILE_EXPORT_INSTRUCTION_RASTER: {
-            const bool instruction = LOWORD(wparam)
-                == IDM_FILE_EXPORT_INSTRUCTION_RASTER;
+        case IDM_FILE_EXPORT_RASTER: {
             std::wstring path = state->lifetime.smoke_test ? state->lifetime.smoke_raster_path : L"";
             if (!state->lifetime.smoke_test && !ChooseCommonRasterPath(window, true, path)) {
                 return 0;
@@ -18547,7 +17210,7 @@ std::optional<LRESULT> RouteDocumentCommand(
                 return 0;
             }
             const InkpodStatus status = QueueRasterExport(
-                *state, path, dialog.values[0] != 0, instruction, context);
+                *state, path, dialog.values[0] != 0, context);
             if (!FileIoAccepted(status)) {
                 ShowCoreError(*state, window, UiText(UiStringId::Text0421));
             }
@@ -18838,7 +17501,6 @@ std::optional<LRESULT> RouteDocumentCommand(
                             != revert_authority->persistence_epoch
                         || !ResolveOpenDocumentItems(
                             candidate, INKPOD_IO_OPEN_NATIVE, open_items)
-                        || open_items.cut_descriptor
                         || open_items.pair_raster == nullptr) {
                         return INKPOD_STATUS_INVALID_STATE;
                     }
@@ -19226,8 +17888,7 @@ InkpodShootingFrameInput ShootingFrameInputFromInfo(
         static_cast<double>(frame.width_milli) / 1000.0,
         static_cast<double>(frame.height_milli) / 1000.0,
         static_cast<double>(frame.rotation_turns) * kTurnsToDegrees,
-        frame.visible,
-        frame.include_in_instruction_export};
+        frame.visible};
 }
 
 InkpodStatus EditShootingFrameFromDialog(ApplicationHost& state) noexcept {
@@ -19251,7 +17912,6 @@ InkpodStatus EditShootingFrameFromDialog(ApplicationHost& state) noexcept {
               std::max(1.0, static_cast<double>(document.width) * 0.8),
               std::max(1.0, static_cast<double>(document.height) * 0.8),
               0.0,
-              1U,
               1U};
     if (state.lifetime.smoke_test) {
         dialog.value.rotation_degrees = 15.0;
@@ -22155,70 +20815,6 @@ std::optional<LRESULT> RouteApplicationCommand(
         return std::nullopt;
     }
     switch (LOWORD(wparam)) {
-        case IDM_FILE_NEW_CUT: {
-            const InkpodStatus status = CreateNewCut(*state, window);
-            if (!FileIoAccepted(status)
-                && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0710));
-            }
-            return FileIoAccepted(status) ? 1 : 0;
-        }
-        case IDM_CUT_PROPERTIES: {
-            const InkpodStatus status = EditCutProperties(*state, window);
-            if (status != INKPOD_STATUS_OK
-                && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0146));
-            }
-            return status == INKPOD_STATUS_OK ? 1 : 0;
-        }
-        case IDM_CUT_SAVE: {
-            const InkpodStatus status = SaveWorkspaceCut(*state);
-            if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0149));
-            }
-            UpdateMenuState(*state);
-            return status == INKPOD_STATUS_OK ? 1 : 0;
-        }
-        case IDM_CUT_UNDO:
-        case IDM_CUT_REDO: {
-            const InkpodStatus status = MoveCutHistory(
-                *state, LOWORD(wparam) == IDM_CUT_REDO);
-            if (status != INKPOD_STATUS_OK) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0154));
-            }
-            return status == INKPOD_STATUS_OK ? 1 : 0;
-        }
-        case IDM_CUT_SEQUENCE_ADD:
-        case IDM_CUT_SEQUENCE_REMOVE:
-        case IDM_CUT_SEQUENCE_MOVE_UP:
-        case IDM_CUT_SEQUENCE_MOVE_DOWN:
-        case IDM_CUT_SEQUENCE_RENUMBER: {
-            InkpodStatus status = INKPOD_STATUS_INVALID_STATE;
-            switch (LOWORD(wparam)) {
-                case IDM_CUT_SEQUENCE_ADD:
-                    status = AddCutSequenceMember(*state, window);
-                    break;
-                case IDM_CUT_SEQUENCE_REMOVE:
-                    status = RemoveCutSequenceMember(*state);
-                    break;
-                case IDM_CUT_SEQUENCE_MOVE_UP:
-                    status = MoveCutSequenceMember(*state, false);
-                    break;
-                case IDM_CUT_SEQUENCE_MOVE_DOWN:
-                    status = MoveCutSequenceMember(*state, true);
-                    break;
-                case IDM_CUT_SEQUENCE_RENUMBER:
-                    status = RenumberCutSequence(*state, window);
-                    break;
-                default:
-                    break;
-            }
-            if (status != INKPOD_STATUS_OK
-                && status != INKPOD_STATUS_CANCELLED) {
-                ShowCoreError(*state, window, UiText(UiStringId::Text0144));
-            }
-            return status == INKPOD_STATUS_OK ? 1 : 0;
-        }
         case IDM_FILE_RESTORE_PREVIOUS: {
             const bool enabled = !state->lifetime.restore_previous_documents;
             if (!SaveApplicationSettingsUpdate(

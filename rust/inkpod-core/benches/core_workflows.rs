@@ -6,6 +6,8 @@ use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 const BENCHMARK_UUID: u128 = 0x494e_4b50_4f44_2d4d_322d_4245_4e43_4801;
+// Document-state checksums use schema 13/domain 11. Pixel checksums, workloads,
+// semantic counters and the harness remain unchanged.
 const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
     0x517e_d7ae_78bf_0487,
     0x9e13_576d_ef6f_539b,
@@ -14,8 +16,8 @@ const EXPECTED_QUICK_CHECKSUMS: [u64; 9] = [
     0x255a_b9ba_d114_dfdd,
     0x9ae6_8357_26a3_6053,
     0x34f6_5a70_92a8_7cff,
-    0x2035_6218_ff2c_db20,
-    0x084d_bdb0_99b5_fd04,
+    0x5062_efd7_565e_19e4,
+    0x1b75_49d8_82cd_9743,
 ];
 const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x4390_40e0_244d_5773,
@@ -25,8 +27,8 @@ const EXPECTED_FULL_CHECKSUMS: [u64; 9] = [
     0x77f6_3d83_e130_185f,
     0xd1be_3927_5687_aa9b,
     0x34f6_5a70_92a8_7cff,
-    0x2035_6218_ff2c_db20,
-    0x7c97_a39e_8e00_b250,
+    0x5062_efd7_565e_19e4,
+    0xfd51_4e08_addb_4698,
 ];
 
 #[derive(Clone, Copy)]

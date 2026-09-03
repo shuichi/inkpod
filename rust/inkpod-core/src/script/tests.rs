@@ -138,7 +138,7 @@ fn assert_export_round_trip(base: &Core, scripted: &Core) {
 fn complete_source(parameters: &str, bindings: &str, program: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 5; replay_epoch = 27; }}
+requires {{ procedure_catalog = 6; replay_epoch = 28; }}
 inputs {{ current_document; }}
 parameters {{ {parameters} }}
 bindings {{ {bindings} }}
@@ -152,7 +152,7 @@ execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
 fn complete_source_with_assets(bindings: &str, program: &str, assets: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 5; replay_epoch = 27; }}
+requires {{ procedure_catalog = 6; replay_epoch = 28; }}
 inputs {{ current_document; }}
 parameters {{}}
 bindings {{ {bindings} }}
@@ -348,7 +348,7 @@ fn compiler_freezes_parameters_and_checks_cancel_invalid_and_aggregate_resources
     assert_eq!(limited, Err(ScriptCompileError::ResourceLimit));
 
     let invalid =
-        source("inkscript 2; requires { procedure_catalog = 5; replay_epoch = 27; }".to_owned());
+        source("inkscript 2; requires { procedure_catalog = 6; replay_epoch = 28; }".to_owned());
     assert!(matches!(
         compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())),
         Err(ScriptCompileError::Syntax) | Err(ScriptCompileError::Semantic(_))
@@ -2767,7 +2767,6 @@ fn shooting_input() -> ShootingFrameInput {
         rotation_turns: 0x1000_0000,
         anchor: ShootingFrameAnchor::Center,
         visible: true,
-        include_in_instruction_export: true,
     }
 }
 
@@ -2784,7 +2783,7 @@ fn shooting_frame_document_owner_supports_exact_source_and_semantic_rebound() {
     let mut source_core = frame_script_base();
     let frame_id = add_frame(&mut source_core);
     let info = source_core.document_info().unwrap();
-    let update = r#"step "Update frame" { enabled = true; invoke edit_shooting_frame { edit = { operation = 2; frame_id = $frame; input = { center_x_milli = 9000; center_y_milli = 8000; width_milli = 10000; height_milli = 6000; rotation_turns = 268435456; anchor = center; visible = true; include_in_instruction_export = true; }; }; }; }"#;
+    let update = r#"step "Update frame" { enabled = true; invoke edit_shooting_frame { edit = { operation = 2; frame_id = $frame; input = { center_x_milli = 9000; center_y_milli = 8000; width_milli = 10000; height_milli = 6000; rotation_turns = 268435456; anchor = center; visible = true; }; }; }; }"#;
     let strict_source = complete_source(
         "",
         &format!(

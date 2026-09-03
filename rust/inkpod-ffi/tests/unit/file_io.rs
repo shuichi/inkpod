@@ -2157,7 +2157,6 @@ fn io_003_authority_repair_progress_flag_is_independent_and_additive() {
         result_count: 2,
         truncated: false,
         installing: true,
-        cut_descriptor: false,
         authority_repaired: true,
         authority_revoked: false,
     };

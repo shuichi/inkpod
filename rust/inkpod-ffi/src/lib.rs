@@ -11,15 +11,10 @@ compile_error!("inkpod-ffi requires the statically linked MSVC CRT");
 mod application_data;
 mod batch;
 mod color_chart;
-mod cut;
 
 #[cfg(test)]
 #[path = "../tests/unit/contracts.rs"]
 mod ffi_contract_tests;
-
-#[cfg(test)]
-#[path = "../tests/unit/cut.rs"]
-mod cut_ffi_tests;
 
 #[cfg(test)]
 #[path = "../tests/unit/inkscript.rs"]
@@ -31,13 +26,12 @@ use inkpod_core::{
     AssetColorSpace, BoundaryAirbrush, BrushShape, CellCreationOptions, CellCreationPlan,
     CellSizing, Channel, ClipboardPayload, ClipboardPixel, ClipboardPlane, ColorBalance,
     ColorChartEntry, ColorChartPreview, ColorCheckMode, CommonRasterFormat, CoordinateSpace, Core,
-    CoreError, CurveInterpolation, CurvePoint, CutCore, CutCreateRequest, CutDefaults, CutMember,
-    CutMetadata, CutMutationOutcome, CutUpdateRequest, DocumentInfo, DocumentResize, DustMode,
-    DustRemoval, EditTarget, EditTargetCommand, EditorBrushOptions, EditorDefaults,
-    EditorFillOptions, EditorSelectionOptions, EditorSelectionShape, EditorState, EditorStateInfo,
-    EditorStateUpdate, EditorStrokeInput, EditorTarget, EditorTool, EffectRegionKind,
-    EyedropperSource, FileColorChart, FileColorChartEntry, FilePalette, FillOperation, FillRequest,
-    Filter, FloatingTransform, FloatingTransformAnchor, FrameAnchor, FrameMetadata, GeometryCommit,
+    CoreError, CurveInterpolation, CurvePoint, DocumentInfo, DocumentResize, DustMode, DustRemoval,
+    EditTarget, EditTargetCommand, EditorBrushOptions, EditorDefaults, EditorFillOptions,
+    EditorSelectionOptions, EditorSelectionShape, EditorState, EditorStateInfo, EditorStateUpdate,
+    EditorStrokeInput, EditorTarget, EditorTool, EffectRegionKind, EyedropperSource,
+    FileColorChart, FileColorChartEntry, FilePalette, FillOperation, FillRequest, Filter,
+    FloatingTransform, FloatingTransformAnchor, FrameAnchor, FrameMetadata, GeometryCommit,
     GeometryCrossSection, GeometryOptions, GeometryPreviewInfo, GeometryPrimitive, GeometryRequest,
     GeometrySnapMode, Gradient, GradientKind, GradientMode, GradientStop, GridConfig, GuideAxis,
     HistoryVisualizationBuilder as CoreHistoryVisualizationBuilder, HistoryVisualizationProgress,
@@ -53,15 +47,15 @@ use inkpod_core::{
     SNAPSHOT_FEATURE_COLOR_CHECK_NATIVE_ALPHA, SNAPSHOT_FEATURE_SOLID_WHITE_BASE, SavedSelectionId,
     SavedSelectionOperation, ScopedColorReplaceMode, ScopedColorReplacePreview,
     ScopedColorReplaceRequest, SelectionConstructionOptions, SelectionOperation, SelectionSample,
-    SelectionShape, SequenceCellSource, SequenceDirection, SequenceEditOperation,
-    SequenceEditRequest, SequenceEndpointPolicy, SequenceMemberId, SequenceRenderSourceIdentity,
-    SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy, SequenceSwitchRequest,
-    ShootingFrameAnchor, ShootingFrameEdit, ShootingFrameInfo, ShootingFrameInput,
-    ShootingFramePreviewTarget, ShortcutBinding, ShortcutSequenceBinding, ShortcutStroke, Stamp,
-    StampGesture, StampShape, StartColorPredicate, Stroke, StrokeSample, SubpaletteCatalog,
-    SubpaletteCatalogInfo, SubpaletteImageInput, SubpaletteItemId, SubpaletteSource, TileRaster,
-    TraceBrushOptions, TraceBrushShape, ViewCommand, plan_cell_creation, read_color_chart,
-    read_palette, save_color_chart_atomic, save_palette_atomic,
+    SelectionShape, SequenceCellSource, SequenceDirection, SequenceEndpointPolicy,
+    SequenceRenderSourceIdentity, SequenceStepPlan, SequenceStepResult, SequenceSwitchPolicy,
+    SequenceSwitchRequest, ShootingFrameAnchor, ShootingFrameEdit, ShootingFrameInfo,
+    ShootingFrameInput, ShootingFramePreviewTarget, ShortcutBinding, ShortcutSequenceBinding,
+    ShortcutStroke, Stamp, StampGesture, StampShape, StartColorPredicate, Stroke, StrokeSample,
+    SubpaletteCatalog, SubpaletteCatalogInfo, SubpaletteImageInput, SubpaletteItemId,
+    SubpaletteSource, TileRaster, TraceBrushOptions, TraceBrushShape, ViewCommand,
+    plan_cell_creation, read_color_chart, read_palette, save_color_chart_atomic,
+    save_palette_atomic,
 };
 use std::cell::RefCell;
 use std::mem::{align_of, size_of};
@@ -98,7 +92,6 @@ pub(crate) use abi::{
 pub use animation::*;
 pub use application_data::*;
 pub use color_chart::*;
-pub use cut::*;
 pub use determinism::*;
 pub use document_edit::*;
 pub use editor_state::*;

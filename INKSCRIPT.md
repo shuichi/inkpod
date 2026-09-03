@@ -23,10 +23,10 @@ exact field、型、default、上限を固定する。command entryはowner mani
 M23で全単射、実装、equivalence evidenceを検証して当時の
 `schemas/inkscript/catalog-v2.json`へfreezeした。M27B後の描画モデル再ベースラインでは削除対象9 commandを除いた
 75 commandを`schemas/inkscript/catalog-v3.json`とowner manifest v3へfreezeし、v2を現行readerから外した。
-その後のBatch契約更新でcatalog／owner manifest v4へ進み、現行のlayer／plane再ベースラインでは
+その後のBatch契約更新でcatalog／owner manifest v4へ進み、layer／plane再ベースラインでは
 `convert_layer`、adjustment-layer 2 command、selection-layer 2 command、vanishing-point commandを退役させ、
 document-owned saved-selection-mask 4 commandを追加した73 commandを
-`schemas/inkscript/catalog-v5.json`とowner manifest v5へfreezeした。退役primitive IDはtombstoneとして再利用しない。
+`schemas/inkscript/catalog-v5.json`とowner manifest v5へfreezeした。カット管理・指示画像export廃止に伴い、撮影frameのinclude fieldを削除し、現行catalog／ownerはv6、EditShootingFrame schema 3／semantics 2へ進む。退役primitive IDはtombstoneとして再利用しない。
 pre-ratification draftは残さない。production Rust APIはexact-currentのclosed catalogだけを受理し、C ABI、Windows、
 product file routeは後続milestoneまで公開しない。
 `docs/inkscript-command-reference.md`はlanguage/catalog registryから生成する派生物であり、手編集しない。
@@ -39,11 +39,11 @@ product file routeは後続milestoneまで公開しない。
 | 項目                                |                                       初期値 |
 | ----------------------------------- | -------------------------------------------: |
 | InkScript file format version       |                                            2 |
-| InkScript procedure catalog version | 5（layer／plane再ベースライン、73 command） |
-| required replay epoch               |                                           27 |
+| InkScript procedure catalog version | 6（指示画像export flag廃止、73 command） |
+| required replay epoch               | 28 |
 | native output                       |                      exact-current `.inkpod` |
-| native top-level format             |                                           32 |
-| C ABI                               |                                           30 |
+| native top-level format             | 33 |
+| C ABI                               | 33 |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に
 exact-current version だけを受理する。grammar、serialized field、selector の
@@ -60,7 +60,7 @@ exact-current version だけを受理する。grammar、serialized field、selec
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
 catalog v2 draftはM23までproduction catalog contractではなく、owner milestone内で変更できたがproductから受理
-しなかった。M23で批准した`catalog-v2.json`も履歴としてin-place変更せず、現行は`catalog-v5.json`だけを受理する。
+しなかった。M23で批准した`catalog-v2.json`も履歴としてin-place変更せず、現行は`catalog-v6.json`だけを受理する。
 新entryやsignature変更ではcatalog versionを更新し、旧version拒否test、example、registry、生成referenceを同時更新する。
 
 ## 2. 目的と非目的
@@ -826,9 +826,9 @@ file/catalog versionと`language-v2.json`をexact-currentへ更新した。
 合成`SchemaView`はlanguage-core定義と全catalog entry定義を結合し、type/constructor名の重複を拒否する。
 M23で全entry、実装、owner、equivalence evidenceの全単射を検証し、private draftを削除して当時の
 `catalog-v2.json`へfreezeした。M27B後の再ベースラインでvector 8 commandとannotation 1 commandを削除し、残る
-75 entryを`catalog-v3.json`へfreezeした。Batch契約更新のv4を経て、現行layer／plane再ベースラインでは
+75 entryを`catalog-v3.json`へfreezeした。Batch契約更新のv4を経て、layer／plane再ベースラインでは
 6 commandを退役、saved-selection-mask 4 commandを追加し、73 entryを`catalog-v5.json`へfreezeした。
-catalog v5はRust compile／bind／staged-run contractとしてproduction公開するが、
+現行は撮影frameのinclude fieldを除去したcatalog v6である。catalog v6はRust compile／bind／staged-run contractとしてproduction公開するが、
 file、clipboard、FFI、Windows product commandからの到達は各後続owner milestoneまで許可しない。
 
 registryは最低限、次を定義する。

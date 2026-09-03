@@ -28,7 +28,7 @@ fn analyze(
 fn registry_types_constructors_records_and_namespaces_compile_to_owned_values() {
     let input = source(
         br#"inkscript_fragment 2;
-requires { procedure_catalog = 5; replay_epoch = 27; }
+requires { procedure_catalog = 6; replay_epoch = 28; }
 parameters {
     param replacement: pixel_value = rgba8(0, 64, 255, 255) { label = "Replacement"; ask = each_run; };
     param target_kind: plane_kind = raster;
@@ -138,7 +138,7 @@ fn type_constructor_record_and_numeric_failures_have_stable_source_ranges() {
 
     for (declaration, expected) in cases {
         let text = format!(
-            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 5; replay_epoch = 27; }}\nparameters {{\n    {declaration}\n}}\nprogram {{}}\n"
+            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 6; replay_epoch = 28; }}\nparameters {{\n    {declaration}\n}}\nprogram {{}}\n"
         );
         let error = analyze(text.as_bytes()).unwrap_err();
         assert_eq!(error.code(), expected, "{declaration}");
@@ -158,7 +158,7 @@ fn asset_payload_source_is_an_exactly_one_closed_choice() {
     ] {
         let input = format!(
             r#"inkscript_fragment 2;
-requires {{ procedure_catalog = 5; replay_epoch = 27; }}
+requires {{ procedure_catalog = 6; replay_epoch = 28; }}
 program {{}}
 assets {{
     asset payload {{
@@ -212,7 +212,7 @@ fn value_and_asset_namespaces_reject_duplicates_undefined_forward_and_cycles() {
 
     for (body, expected) in cases {
         let text = format!(
-            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 5; replay_epoch = 27; }}\n{body}\n"
+            "inkscript_fragment 2;\nrequires {{ procedure_catalog = 6; replay_epoch = 28; }}\n{body}\n"
         );
         let error = analyze(text.as_bytes()).unwrap_err();
         assert_eq!(error.code(), expected, "{body}");
@@ -223,7 +223,7 @@ fn value_and_asset_namespaces_reject_duplicates_undefined_forward_and_cycles() {
 #[test]
 fn each_run_resolution_is_explicit_immutable_and_atomic_on_cancel_or_invalid_input() {
     let empty = analyze(
-        b"inkscript_fragment 2; requires { procedure_catalog = 5; replay_epoch = 27; } program {}",
+        b"inkscript_fragment 2; requires { procedure_catalog = 6; replay_epoch = 28; } program {}",
     )
     .unwrap();
     assert!(empty.parameters().is_empty());
@@ -243,7 +243,7 @@ fn each_run_resolution_is_explicit_immutable_and_atomic_on_cancel_or_invalid_inp
 
     let model = analyze(
         br#"inkscript_fragment 2;
-requires { procedure_catalog = 5; replay_epoch = 27; }
+requires { procedure_catalog = 6; replay_epoch = 28; }
 parameters {
     param width: u32 = 1920 { ask = each_run; };
     param color: rgba8 = rgba8(1, 2, 3, 255) { ask = each_run; };

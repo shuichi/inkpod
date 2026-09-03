@@ -33,32 +33,6 @@ struct WorkspacePaneIds final {
     PaneInstanceId subpalette{};
 };
 
-// Workspace-scoped Cut authority. The Rust handle is created, used, and
-// destroyed synchronously on the CoreHost owner thread. Paths and names are
-// presentation caches only; the Cut handle remains authoritative.
-struct CutMemberCache final {
-    std::uint32_t display_number{};
-    std::uint64_t cell_id{};
-    std::uint64_t document_uuid_high{};
-    std::uint64_t document_uuid_low{};
-    std::wstring relative_path;
-    std::uint32_t width{};
-    std::uint32_t height{};
-    std::uint32_t thumbnail_width{};
-    std::uint32_t thumbnail_height{};
-    std::uint32_t thumbnail_stride_bytes{};
-    std::uint64_t thumbnail_checksum{};
-    std::vector<std::uint8_t> thumbnail_rgba;
-};
-
-struct CutSession final {
-    InkpodCut* handle{};
-    std::uint32_t flags{};
-    std::wstring current_path;
-    std::wstring cut_name;
-    std::vector<CutMemberCache> members;
-};
-
 struct HistoryVisualizationMenuTarget final {
     DocumentSessionId session{};
     Generation generation{};
@@ -78,7 +52,6 @@ struct WorkspaceWindow final {
     Generation generation{};
     std::uint32_t persistence_slot{};
     WorkspacePaneIds pane_ids{};
-    CutSession cut{};
     MainWindowHandles windows{};
     EditorArea editors{};
     ToolUiState tools{};

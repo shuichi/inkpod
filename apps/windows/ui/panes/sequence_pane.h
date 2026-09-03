@@ -13,8 +13,6 @@ namespace inkpod::windows::ui::panes {
 
 using SequencePaneCommandCallback = void (*)(void* context, UINT command) noexcept;
 using SequencePaneActivateCallback = void (*)(void* context, std::uint32_t index) noexcept;
-using SequencePaneReorderCallback = void (*)(
-    void* context, std::uint32_t from, std::uint32_t to) noexcept;
 using SequencePaneLayoutChangedCallback = void (*)(void* context) noexcept;
 
 struct SequencePaneCellView final {
@@ -55,9 +53,7 @@ struct SequencePaneView final {
     std::uint32_t active_index{UINT32_MAX};
     bool target_available{};
     bool pinned{};
-    bool cut_editable{};
     bool auto_sequence_truncated{};
-    bool wrap_navigation{};
     SequencePaneCatalogKey catalog{};
     // Nonzero only after every referenced thumbnail was present at this generation.
     std::uint64_t thumbnail_generation{};
@@ -69,7 +65,6 @@ struct SequencePaneSelection final {
     std::wstring target_text;
     bool pinned{};
     bool auto_sequence_truncated{};
-    bool wrap_navigation{};
 };
 
 struct SequencePaneDialogState final {
@@ -77,12 +72,10 @@ struct SequencePaneDialogState final {
     ThumbnailCache* thumbnail_cache{};
     SequencePaneCommandCallback dispatch_command{};
     SequencePaneActivateCallback activate_cell{};
-    SequencePaneReorderCallback reorder_cell{};
     SequencePaneLayoutChangedCallback layout_changed{};
     std::uint32_t thumbnail_width_dip{app::kDefaultSequenceThumbnailWidthDip};
     SequencePaneView view;
     std::vector<std::wstring> item_labels;
-    std::uint32_t drag_index{UINT32_MAX};
     int wheel_remainder{};
 };
 

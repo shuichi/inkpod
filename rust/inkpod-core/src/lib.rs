@@ -24,7 +24,6 @@ mod color_chart;
 mod color_replace;
 mod coordinate;
 mod core;
-mod cut;
 mod document;
 mod editor;
 mod effects;
@@ -89,7 +88,6 @@ pub(crate) use coordinate::*;
 pub use core::Core;
 #[cfg(feature = "test-support")]
 pub use core::CowOptimizationCounters;
-pub use cut::*;
 use document::{CellDocument, DocumentIds, LayerNode, PaperSpec, PlaneNode};
 use editor::EditorSessionState;
 pub use editor::{

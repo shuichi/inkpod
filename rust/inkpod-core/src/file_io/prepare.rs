@@ -678,17 +678,9 @@ pub(super) fn native(
     let loaded = manager.with_file_locks(std::slice::from_ref(path), context, |files| {
         let stamp = files.metadata(path)?;
         let file = files.with_reader(path, MAX_NATIVE_BYTES, |reader| {
-            use std::io::{Read, Seek, SeekFrom};
-            let mut magic = [0_u8; 8];
-            reader.read_exact(&mut magic)?;
-            reader.seek(SeekFrom::Start(0))?;
-            if magic == *b"INKCUT\0\0" && request.kind == FileIoKind::OpenNative {
-                return Ok(None);
-            }
-            Ok(Some(inkpod_format::read_procedure_from_reader(
-                reader,
-                || context.is_cancelled(),
-            )?))
+            Ok(inkpod_format::read_procedure_from_reader(reader, || {
+                context.is_cancelled()
+            })?)
         })?;
         if stamp != files.metadata(path)? {
             return Err(inkpod_io::IoError::ChangedDuringRead);
@@ -701,33 +693,6 @@ pub(super) fn native(
         loaded?
     };
     context.check_cancelled()?;
-    let Some(native) = native else {
-        if let Some(expected) = &direct_native_candidates
-            && manager
-                .discover_native_companion_candidates(path, context)
-                .map_err(io_pair_conflict)?
-                != *expected
-        {
-            return Err(CoreError::FileConflict);
-        }
-        return Ok((
-            Prepared::CutDescriptor,
-            vec![FileIoItem {
-                path: path.clone(),
-                name: path
-                    .file_name()
-                    .and_then(|name| name.to_str())
-                    .unwrap_or("")
-                    .to_owned(),
-                format: None,
-                identity: stamp.identity,
-                identity_physical: true,
-                source_generation: 1,
-                document_uuid: 0,
-                sequence_resident_native: None,
-            }],
-        ));
-    };
     let companion_proof = if request.kind == FileIoKind::OpenNative {
         let format = Core::procedure_file_raster_format(&native).map_err(pair_conflict)?;
         let candidates = manager
@@ -1274,12 +1239,9 @@ pub(super) fn save(
             let format = request
                 .raster_format
                 .ok_or(CoreError::InvalidArgument("missing export format"))?;
-            let bytes = snapshot.prepare_raster_export(
-                format,
-                request.composite_white,
-                request.instructions,
-                || context.is_cancelled(),
-            )?;
+            let bytes = snapshot.prepare_raster_export(format, request.composite_white, || {
+                context.is_cancelled()
+            })?;
             manager.write_bytes_atomic(path, &bytes, context)?;
             Prepared::Output(None)
         }

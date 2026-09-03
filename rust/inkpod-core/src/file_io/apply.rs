@@ -324,7 +324,6 @@ impl FileIoJob {
             Prepared::Recovery(_) => {
                 unreachable!("independent recovery result completes during poll")
             }
-            Prepared::CutDescriptor => unreachable!("Cut probe completes without Cell adoption"),
         }
         self.progress.state = FileIoState::Complete;
         Ok(FileIoApply::Complete {

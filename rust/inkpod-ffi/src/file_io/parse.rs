@@ -79,7 +79,6 @@ pub(super) unsafe fn request(pointer: *const InkpodIoRequest) -> Result<FileIoRe
         & !(INKPOD_IO_FORCE_RELOAD
             | INKPOD_IO_COMPOSITE_WHITE
             | INKPOD_IO_OVERWRITE_CONFIRMED
-            | INKPOD_IO_INSTRUCTIONS
             | INKPOD_IO_REVERT_CURRENT)
         != 0
         || request.reserved != 0
@@ -156,7 +155,6 @@ pub(super) unsafe fn request(pointer: *const InkpodIoRequest) -> Result<FileIoRe
     parsed.revert_current = request.flags & INKPOD_IO_REVERT_CURRENT != 0;
     parsed.composite_white = request.flags & INKPOD_IO_COMPOSITE_WHITE != 0;
     parsed.overwrite_confirmed = request.flags & INKPOD_IO_OVERWRITE_CONFIRMED != 0;
-    parsed.instructions = request.flags & INKPOD_IO_INSTRUCTIONS != 0;
     parsed.object_id = request.object_id;
     parsed.document_uuid =
         (u128::from(request.document_uuid_high) << 64) | u128::from(request.document_uuid_low);

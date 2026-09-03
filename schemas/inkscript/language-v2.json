@@ -2,8 +2,8 @@
   "kind": "inkpod.inkscript.language",
   "registry_schema_version": 2,
   "file_version": 2,
-  "procedure_catalog_version": 5,
-  "required_replay_epoch": 27,
+  "procedure_catalog_version": 6,
+  "required_replay_epoch": 28,
   "canonicalization": {
     "encoding": "utf-8",
     "bom": false,

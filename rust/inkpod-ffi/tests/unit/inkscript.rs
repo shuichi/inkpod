@@ -2,7 +2,7 @@ use super::*;
 
 fn source_text() -> &'static [u8] {
     br#"inkscript 2;
-requires { procedure_catalog = 5; replay_epoch = 27; }
+requires { procedure_catalog = 6; replay_epoch = 28; }
 inputs { current_document; }
 program {
     step "Set grid" {
@@ -19,7 +19,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
 
 fn parameter_source_text() -> &'static [u8] {
     br#"inkscript 2;
-requires { procedure_catalog = 5; replay_epoch = 27; }
+requires { procedure_catalog = 6; replay_epoch = 28; }
 inputs { current_document; }
 parameters {
     param spacing: u32 = 8 { ask = each_run; };
@@ -85,7 +85,7 @@ fn assert_send_sync<T: Send + Sync>() {}
 
 #[test]
 fn inkscript_source_parse_copies_diagnostics_and_text_in_batches() {
-    assert_eq!(INKPOD_ABI_VERSION, 32);
+    assert_eq!(INKPOD_ABI_VERSION, 33);
     assert_send_sync::<InkpodInkScriptSource>();
     assert_send_sync::<InkpodInkScriptProgram>();
     assert_send_sync::<InkpodInkScriptFragment>();

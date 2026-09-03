@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 32U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 33U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
 _Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
 _Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");
@@ -43,17 +43,6 @@ _Static_assert(sizeof(InkpodCellCreationPlanItem) == 140U, "cell creation plan i
 _Static_assert(sizeof(InkpodDocumentInfo) == 232U, "document info layout drift");
 _Static_assert(sizeof(InkpodUtf8Span) == 16U, "UTF-8 span layout drift");
 _Static_assert(sizeof(InkpodUtf8Buffer) == 24U, "UTF-8 buffer layout drift");
-_Static_assert(sizeof(InkpodCutMetadataInput) == 88U, "Cut metadata input layout drift");
-_Static_assert(sizeof(InkpodCutMetadataBuffer) == 128U, "Cut metadata buffer layout drift");
-_Static_assert(sizeof(InkpodCutDefaultsInput) == 56U, "Cut defaults layout drift");
-_Static_assert(sizeof(InkpodCutMemberInput) == 48U, "Cut member input layout drift");
-_Static_assert(sizeof(InkpodCutCreateRequest) == 72U, "Cut create request layout drift");
-_Static_assert(sizeof(InkpodCutUpdateRequest) == 40U, "Cut update request layout drift");
-_Static_assert(sizeof(InkpodCutInfo) == 144U, "Cut info layout drift");
-_Static_assert(sizeof(InkpodCutMemberInfo) == 56U, "Cut member info layout drift");
-_Static_assert(sizeof(InkpodCutSequenceEditOperation) == 104U, "Cut sequence operation layout drift");
-_Static_assert(sizeof(InkpodCutSequenceEditRequest) == 48U, "Cut sequence request layout drift");
-_Static_assert(sizeof(InkpodCutSequenceEditResult) == 40U, "Cut sequence result layout drift");
 _Static_assert(sizeof(InkpodDocumentThumbnailBuffer) == 56U, "document thumbnail layout drift");
 _Static_assert(sizeof(InkpodResourceUsage) == 136U, "resource usage layout drift");
 _Static_assert(sizeof(InkpodSnapshotSourceIdentity) == 40U, "snapshot source identity layout drift");

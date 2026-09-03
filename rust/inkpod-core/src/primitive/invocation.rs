@@ -27,6 +27,8 @@ const fn invocation_schema_version(primitive_id: PrimitiveId) -> u16 {
         CREATE_PLANE_INVOCATION_SCHEMA_VERSION
     } else if primitive_id.get() == PrimitiveId::CONVERT_PLANE.get() {
         CONVERT_PLANE_INVOCATION_SCHEMA_VERSION
+    } else if primitive_id.get() == PrimitiveId::EDIT_SHOOTING_FRAME.get() {
+        3
     } else if primitive_id.get() == PrimitiveId::EDIT_TARGETS.get() {
         EDIT_TARGETS_INVOCATION_SCHEMA_VERSION
     } else if primitive_id.get() == PrimitiveId::APPLY_BATCH_OPERATIONS.get() {
@@ -2295,7 +2297,6 @@ impl<'a> CanonicalReader<'a> {
             rotation_turns,
             anchor,
             visible: self.boolean()?,
-            include_in_instruction_export: self.boolean()?,
         })
     }
 
@@ -3320,7 +3321,6 @@ impl CanonicalWriter {
             ShootingFrameAnchor::BottomRight => 5,
         });
         self.boolean(input.visible);
-        self.boolean(input.include_in_instruction_export);
     }
 
     fn rect(&mut self, rect: RectI32) {

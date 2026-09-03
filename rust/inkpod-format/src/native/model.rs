@@ -8,7 +8,7 @@ pub(super) const MAGIC: [u8; 8] = *b"INKPOD\0\0";
 /// until the user declares a format freeze; older versions are not migrated.
 pub const DOCUMENT_ARCHIVE_VERSION: u32 = 7;
 pub(super) const DOCUMENT_METADATA_MAGIC: [u8; 4] = *b"DOCM";
-pub(super) const DOCUMENT_METADATA_VERSION: u32 = 8;
+pub(super) const DOCUMENT_METADATA_VERSION: u32 = 9;
 pub(super) const HEADER_BYTES: usize = 32;
 pub(super) const FIXED_MANIFEST_BYTES: usize = 200;
 pub(super) const COLOR_METADATA_FIXED_BYTES: usize = 24;
@@ -152,7 +152,6 @@ pub struct FileShootingFrame {
     pub rotation_turns: u32,
     pub anchor: FileShootingFrameAnchor,
     pub visible: bool,
-    pub include_in_instruction_export: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -216,7 +215,7 @@ pub struct DocumentArchive {
     pub main_line_color: PixelValue,
     pub palette: Vec<PixelValue>,
     pub planes: Vec<FilePlane>,
-    /// Decoded document metadata slot. The exact-current v32 contract requires
+    /// Decoded document metadata slot. The exact-current v33 contract requires
     /// `Some`; `None` exists only so malformed/missing DOCM input can be rejected
     /// at the validation boundary without synthesizing a compatibility tree.
     pub document_metadata: Option<FileDocumentMetadata>,

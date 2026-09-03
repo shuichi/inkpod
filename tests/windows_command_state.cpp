@@ -3,6 +3,7 @@
 #include <cstdio>
 #include <cstdint>
 #include <initializer_list>
+#include <utility>
 
 #include "app/frontend_state.h"
 #include "app/resource.h"
@@ -198,7 +199,7 @@ bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
         }
     }
     return states.size() == kProductionCommandStateCount
-        && kProductionCommandStateCount == 324U
+        && kProductionCommandStateCount == 312U
         && FindCommandState(states, kRetiredJobProgressCommand) == nullptr;
 }
 
@@ -236,7 +237,32 @@ bool ShortcutCatalogIsSparseAndPrefixFree() {
         }
         return false;
     };
-    if (menu_commands.size() != 316U
+    // Deleted commands must disappear from all projections, including stable
+    // shortcut keys. Keep only test-owned former IDs, never product tombstones.
+    constexpr std::array retired_commands{
+        std::pair{40010U, "file.import.raster"},
+        std::pair{40023U, "file.new.cut"},
+        std::pair{40024U, "cut.properties"},
+        std::pair{40025U, "cut.save"},
+        std::pair{40026U, "cut.undo"},
+        std::pair{40027U, "cut.redo"},
+        std::pair{40028U, "cut.sequence.add"},
+        std::pair{40029U, "cut.sequence.remove"},
+        std::pair{40030U, "cut.sequence.move.up"},
+        std::pair{40031U, "cut.sequence.move.down"},
+        std::pair{40032U, "cut.sequence.renumber"},
+        std::pair{40033U, "file.export.instruction.raster"}};
+    for (const auto& [command, key] : retired_commands) {
+        if (is_menu_command(command)
+            || std::find(commands.begin(), commands.end(), command) != commands.end()
+            || FindShortcutSequence(shortcuts, command) != nullptr
+            || !inkpod::windows::ui::CommandStableKey(command).empty()
+            || inkpod::windows::ui::CommandFromStableKey(key) != 0U) {
+            std::fprintf(stderr, "retired command is still exposed: %s\n", key);
+            return false;
+        }
+    }
+    if (menu_commands.size() != 304U
         || shortcuts.size() != 29U
         || commands.size() != kProductionCommandStateCount
         || is_menu_command(IDM_COLOR_PIN)
@@ -440,11 +466,9 @@ int main() {
         || IsCommandChecked(states, IDM_SEQ_WRAP_ENDPOINTS)
         || !IsCommandEnabled(states, IDM_FILE_NEW)
         || !IsCommandEnabled(states, IDM_FILE_OPEN)
-        || !IsCommandEnabled(states, IDM_FILE_IMPORT_RASTER)
         || !IsCommandEnabled(states, IDM_FILE_OPEN_RECOVERY)
         || FindCommandState(states, IDM_FILE_NEW)->owner != CommandStateOwner::Application
         || FindCommandState(states, IDM_FILE_OPEN)->owner != CommandStateOwner::Application
-        || FindCommandState(states, IDM_FILE_IMPORT_RASTER)->owner != CommandStateOwner::Application
         || FindCommandState(states, IDM_FILE_OPEN_RECOVERY)->owner != CommandStateOwner::Application) {
         return 1;
     }

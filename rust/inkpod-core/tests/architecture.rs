@@ -346,6 +346,8 @@ fn production_and_test_identifiers_are_semantic() {
             || source.ends_with(Path::new("schemas/inkscript/catalog-v3.json"))
             || source.ends_with(Path::new("schemas/inkscript/owner-manifest-v5.json"))
             || source.ends_with(Path::new("schemas/inkscript/catalog-v5.json"))
+            || source.ends_with(Path::new("schemas/inkscript/owner-manifest-v6.json"))
+            || source.ends_with(Path::new("schemas/inkscript/catalog-v6.json"))
         {
             // The InkScript ownership and production catalog registries intentionally retain
             // stable owner-milestone and equivalence-evidence IDs. Separate integration tests

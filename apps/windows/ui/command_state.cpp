@@ -79,7 +79,6 @@ void ProvideDocumentCommandStates(
         {IDM_FILE_COMPACT_COPY,
          IDM_FILE_AUTOSAVE_NOW,
          IDM_FILE_EXPORT_RASTER,
-         IDM_FILE_EXPORT_INSTRUCTION_RASTER,
          IDM_CELL_SHOOTING_FRAME_PROPERTIES},
         input.has_document);
     SetEnabled(

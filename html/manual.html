@@ -505,7 +505,7 @@
           <div class="search-unit" data-search="new cell quick start Ctrl N">
             <h3 id="quick-new">新規セルを作って彩色する</h3>
             <ol class="steps">
-              <li><span class="menu-path">ファイル<span class="sep">›</span>新規<span class="sep">›</span>セル</span>（<kbd>Ctrl</kbd>+<kbd>N</kbd>）を選びます。新しい無題セルが文書タブに開きます。</li>
+              <li><span class="menu-path">ファイル<span class="sep">›</span>新規セル</span>（<kbd>Ctrl</kbd>+<kbd>N</kbd>）を選びます。新しい無題セルが文書タブに開きます。</li>
               <li><a href="#pane-layer">レイヤー／プレーン</a>で目的のレイヤーを選び、その中の「主線」または「彩色」プレーンを選びます。彩色する場合は「彩色」が編集可能であることを確認します。</li>
               <li>描画色は<a href="#pane-color">カラー</a>で指定します。主線色と彩色用描画色は別表示です。</li>
               <li>ツールパレットで「鉛筆」「ブラシ」「フィル」などを選び、Canvasで操作します。ストロークはペンを下ろしてから離すまでが一回のUndo単位です。</li>
@@ -525,9 +525,6 @@
         <section class="chapter" id="concepts" aria-labelledby="concepts-heading">
           <h2 id="concepts-heading">4. 基本概念</h2>
           <div class="card-grid">
-            <div class="card search-unit" id="term-cut" data-search="cut shot scene カット">
-              <h3>カット</h3><p>一つのショットに属するセル連番、背景、基準フレーム、既定用紙、制作情報をまとめる単位です。</p>
-            </div>
             <div class="card search-unit" id="term-cell" data-search="cell セル">
               <h3>セル</h3><p>一枚の作画・彩色文書です。用紙、フレーム、複数レイヤー、選択範囲、補助情報を持ちます。</p>
             </div>
@@ -615,23 +612,15 @@
           <details class="reference search-unit" id="menu-file" open data-search="ファイル file new open save recovery import export recent">
             <summary>ファイル</summary>
             <div class="details-body"><ul class="command-list">
-              <li class="search-unit"><div class="command-name">ファイル › 新規 › セル <kbd>Ctrl</kbd>+<kbd>N</kbd></div><div class="command-desc">新しい無題セルを作り、現在のグループへタブとして開きます。文書を作れる状態なら実行でき、新しい文書は未保存です。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › 新規 › カット...</div><div class="command-desc">カット名、制作情報、既定用紙／フレーム等を指定し、セル系列を管理するカットを作ります。カット記述子と各セル文書は別ファイルとして扱われます。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 新規セル <kbd>Ctrl</kbd>+<kbd>N</kbd></div><div class="command-desc">新しい無題セルを作り、現在のグループへタブとして開きます。文書を作れる状態なら実行でき、新しい文書は未保存です。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 開く... <kbd>Ctrl</kbd>+<kbd>O</kbd></div><div class="command-desc">`.inkpod` または対応ラスター画像を選びます。同じ実体のファイルが開いていれば既存文書を選択します。ダイアログのキャンセルでは変化しません。</div></li>
               <li class="search-unit" data-search="1 (なし) 2 3 4 5 6 7 8"><div class="command-name">ファイル › 最近使ったファイル › 1 (なし)〜8 (なし)</div><div class="command-desc">直近の最大8件を開く可変スロットです。履歴が空なら「(なし)」となり無効です。表示中のパスを開く点は「開く...」と同じです。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 保存 <kbd>Ctrl</kbd>+<kbd>S</kbd></div><div class="command-desc">現在の保存先へ安全に保存し、成功時だけ通常保存の基準を進めます。未保存なら保存先を選びます。変更なしは何も変えません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 名前を付けて保存... <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></div><div class="command-desc">新しい `.inkpod` 保存先を選び、成功後に文書名、最近使ったファイル、Recovery情報を更新します。別の開いている文書と保存先が衝突する場合は確認なしに統合しません。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › カットを保存</div><div class="command-desc">カットのメタデータ、既定値、セル系列、カット履歴をカット記述子へ安全に保存します。構成セルの `.inkpod` は独立して保存します。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › カットのプロパティ...</div><div class="command-desc">現在カットの名称、制作情報、既定用紙／フレーム等を編集します。OKでカット履歴へ一回だけ確定し、キャンセルでは変更しません。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › カットを元に戻す／カットをやり直す</div><div class="command-desc">セル文書とは独立したカット履歴を移動します。セル系列やカット設定だけが対象で、各セル内の描画履歴は変更しません。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › カットのセル系列 › 既存セルを追加...／メンバーから除外</div><div class="command-desc">既存の `.inkpod` を安定ID付きメンバーとして追加し、または系列から外します。除外しても元のセルファイル自体は削除しません。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › カットのセル系列 › 上へ移動／下へ移動／表示番号を付け直す...</div><div class="command-desc">系列順や表示番号をカットの一回の履歴単位として変更します。対象はコマンド発行時のカットとセルで固定され、途中で別タブへ切り替えても付け替えません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 履歴を破棄してコピー... <span class="tag caution">注意</span></div><div class="command-desc">現在状態を新しいGenesisとする別ファイルへ書き出し、過去の手続き履歴を含めない小型のコピーを作ります。元文書とその履歴は変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 復帰 <span class="tag caution">注意</span></div><div class="command-desc">文書全体を最後の通常保存時点へ戻します。未保存変更とその後の履歴を失うため確認して使います。Recovery保存は復帰点ではありません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › レイヤーを部分的に復帰 <span class="tag undo">Undo可</span></div><div class="command-desc">最後の通常保存内容から、選択中レイヤー／プレーンの選択範囲だけを戻します。保存済み状態、編集対象、選択範囲が必要です。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › ラスタ－を読み込み...</div><div class="command-desc">PNG、TIFF、TGA、BMPを文書として読み込みます。選択をキャンセルした場合や読み込み失敗時は既存文書を変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › ラスタ－を書き出し...</div><div class="command-desc">現在の表示内容を対応ラスター形式へ書き出します。レイヤー／プレーン等の固有情報は画像形式では平坦化され得るため、編集用原本は `.inkpod` でも保存してください。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › 指示画像を書き出し...</div><div class="command-desc">出力対象に設定した撮影フレームを含む確認用ラスターを書き出します。通常のラスター書き出しには撮影フレームを含めません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを保存</div><div class="command-desc">障害復旧用の別保存を直ちに作ります。通常保存先、通常の保存基準、未保存表示は変えません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを開く...</div><div class="command-desc">列挙されたRecovery候補を選んで「復元セル」として開きます。元ファイルを無言で上書きしません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 起動時に前回の文書を復元</div><div class="command-desc">通常終了時の文書一覧を次回起動時に戻す設定を切り替えます。既定はオフで、障害復旧用Recoveryとは別です。<span class="tag view">設定</span></div></li>
@@ -1033,7 +1022,7 @@
             </div>
             <div class="card search-unit" id="pane-sequence" data-search="シーケンス sequence thumbnails previous next import files natural order">
               <h3>シーケンス</h3>
-              <p>単独セルでは自然順、カットを開いているときはカットの安定ID付きメンバー順でセル一覧とサムネイルを表示します。選択、前へ、次へ、ファイル追加のほか、カットでは追加、除外、上下移動、表示番号の付け直しを行えます。アクティブ追従／文書固定に対応します。</p>
+              <p>セル一覧とサムネイルをファイル名の自然順で表示します。選択、前へ、次へ、ファイル追加を利用でき、アクティブ追従／文書固定に対応します。各セルは独立した文書として保存します。</p>
               <p>セル切替前の自動保存は「ファイル」メニュー、端点の停止／循環は「制作 › 連番・サブパレット」メニューから設定します。</p>
               <p><span class="menu-path">ウィンドウ › シーケンス</span></p>
             </div>
@@ -1154,25 +1143,15 @@
             <p>表示切替は合成に含めるか、編集可否切替はコマンドが変更してよいかを決めます。非表示でも編集不可とは限らず、選択中でも編集不可なら描画できません。レイヤーとプレーンは別々の順序を持ち、プレーンを所属レイヤーの外へ移しません。新規プレーンは追加ラスターに固定され、RGBA 8／16 bit形式から選びます。</p>
             <p>必須の主線／彩色は削除・複製できません。プレーン変換は役割を変えず、対応するピクセル形式だけを変更します。削除、形式変換、統合はUndoできますが、保存前に結果を確認してください。</p>
           </div>
-          <div class="search-unit" data-search="shooting frame overlay output policy 撮影フレーム 指示画像">
+          <div class="search-unit" data-search="shooting frame canvas overlay 撮影フレーム">
             <h3 id="production-overlays">撮影フレーム</h3>
             <p>撮影フレームはレイヤー外の任意文書オブジェクトです。Undo／Redo、保存／再読込、数値入力、Canvasハンドル編集に対応し、画像プレーンのピクセルを直接変更しません。</p>
-            <p>通常のラスター書き出しは撮影フレームを除外します。「指示画像を書き出し...」では、撮影フレーム側で出力対象に設定した場合だけ確認用画像へ含めます。</p>
+            <p>撮影フレームはCanvas表示・編集専用です。ラスター書き出しやサムネイルには含めません。白背景合成は通常のラスター書き出しで指定できます。</p>
           </div>
         </section>
 
         <section class="chapter" id="animation" aria-labelledby="animation-heading">
-          <h2 id="animation-heading">11. カット、ライトテーブル、連番、サブパレット、モーションチェック</h2>
-          <div class="search-unit" data-search="cut workflow descriptor members sequence metadata save undo redo カット セル系列">
-            <h3 id="cut-workflow">カットとセル系列</h3>
-            <ol class="steps">
-              <li><span class="menu-path">ファイル<span class="sep">›</span>新規<span class="sep">›</span>カット...</span>でカット名、制作情報、既定値を設定します。</li>
-              <li>「カットのセル系列 › 既存セルを追加...」で既存の `.inkpod` を登録します。メンバーは安定IDで識別され、表示番号は後から付け直せます。</li>
-              <li>上へ／下へで順序を整えます。除外はカットの所属だけを変更し、元セルファイルを削除しません。</li>
-              <li>セル文書は通常の「保存」、カット構成は「カットを保存」で別々に保存します。</li>
-            </ol>
-            <p>カットのプロパティと系列編集はカット固有のUndo／Redoを使います。コマンド発行後に別タブへ切り替えたり対象が古くなった場合、現在の別カット／セルへ付け替えず安全に拒否します。</p>
-          </div>
+          <h2 id="animation-heading">11. ライトテーブル、連番、サブパレット、モーションチェック</h2>
           <div class="search-unit" data-search="light table workflow read only reference alignment swap">
             <h3 id="light-table-workflow">ライトテーブル</h3>
             <ol class="steps">
@@ -1256,11 +1235,9 @@
               <thead><tr><th>操作</th><th>目的</th><th>通常保存の基準／未保存状態</th><th>Undo</th></tr></thead>
               <tbody>
                 <tr><td>保存／名前を付けて保存</td><td>編集可能な原本を `.inkpod` として保存</td><td>成功時だけ基準を現在へ進める</td><td>保存自体はUndoしない。編集履歴は保持</td></tr>
-                <tr><td>カットを保存</td><td>カット設定、セル系列、カット履歴を別の `.inkpod` 記述子として保存</td><td>成功時だけカットの保存基準を進める。各セルの基準は変えない</td><td>保存自体はUndoしない。カット履歴は保持</td></tr>
                 <tr><td>Recoveryを保存</td><td>障害復旧用の別データ</td><td>進めない。未保存表示も消さない</td><td>対象外</td></tr>
                 <tr><td>Recoveryを開く</td><td>復旧候補を「復元セル」として開く</td><td>元ファイルを上書きしない</td><td>新しく開いた文書で編集可能</td></tr>
                 <tr><td>ラスタ－を書き出し</td><td>他アプリ向けの平坦な画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
-                <tr><td>指示画像を書き出し</td><td>出力対象の撮影フレームを含む確認用画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
                 <tr><td>復帰</td><td>最後の通常保存へ戻す</td><td>保存基準そのものを使用</td><td>未保存編集と履歴を失う操作として確認</td></tr>
               </tbody>
             </table>
@@ -1273,11 +1250,10 @@
             <h3 id="savepoint-history">通常保存の基準とUndo／Redo</h3>
             <p>通常保存が成功した履歴位置が「保存済み」の基準です。そこから編集、Undo、Redoで別の状態へ移るとタブに未保存の「*」が付きます。履歴上で保存した状態へ正確に戻ると未保存表示も解消できます。Recovery保存や書き出しだけでは基準は動きません。</p>
           </div>
-          <div class="search-unit" data-search="supported formats inkpod v32 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch v5 cut cell">
+          <div class="search-unit" data-search="supported formats inkpod v33 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch v5 cell">
             <h3 id="file-formats">対応形式</h3>
             <ul>
-              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン32、リプレイエポック27）。標準レイヤー／プレーン、撮影フレーム、現在の選択と名前付き保存マスク、保存基準、履歴、パレット、ライトテーブル、色深度を保持します。</li>
-              <li><strong>カット記述子:</strong> 同じ `.inkpod` 拡張子ですが、セルとは異なる識別子を持つ別形式です。カットの制作情報、既定値、安定ID付きセル系列、カット履歴を保存し、各セルファイルは埋め込みません。現在はトップレベル形式バージョン32、カットリプレイエポック25、ペイロードスキーマ3です。</li>
+              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン33、リプレイエポック28）。標準レイヤー／プレーン、撮影フレーム、現在の選択と名前付き保存マスク、保存基準、履歴、パレット、ライトテーブル、色深度を保持します。</li>
               <li><strong>一般ラスター:</strong> PNG、TIFF、TGA、BMP。各形式が表現できる8／16 bit、アルファ、寸法、DPIを扱います。形式で表せないレイヤー構造等は平坦化されます。</li>
               <li><strong>バッチセット:</strong> `.inkbatch`（現在の形式バージョン5）。現行版だけを読み書きします。</li>
             </ul>
@@ -1348,13 +1324,13 @@
               <h3>複数セルを安全に一括処理する</h3>
               <ol><li>入力と処理列を設定。</li><li>出力を「複製保存（既定）」にする。</li><li>dry-runで衝突を検査。</li><li>プレビュー後に全実行。</li></ol>
             </div>
-            <div class="card search-unit" data-search="recipe cut sequence add reorder renumber save">
-              <h3>カットのセル系列を組む</h3>
-              <ol><li>新規カットを作成。</li><li>既存セルを系列へ追加。</li><li>上下移動で順序を整える。</li><li>表示番号を付け直し、カットを保存。</li></ol><p>セル文書は必要に応じて別途保存します。</p>
+            <div class="card search-unit" data-search="recipe sequence natural order open save">
+              <h3>連番セルを確認する</h3>
+              <ol><li>「開く...」でセル画像を開く。</li><li>Sequenceペインで自然順の一覧を確認する。</li><li>必要なら「ファイル追加」で画像を追加する。</li><li>前へ／次へで移動し、各セルを保存する。</li></ol>
             </div>
-            <div class="card search-unit" data-search="recipe shooting frame instruction raster export">
-              <h3>撮影指示入りの確認画像を作る</h3>
-              <ol><li>撮影フレームを数値またはハンドルで調整。</li><li>撮影フレームの「指示画像に含める」をオン。</li><li>「指示画像を書き出し...」を実行。</li></ol><p>通常のラスター書き出しには撮影フレームを含めません。</p>
+            <div class="card search-unit" data-search="recipe shooting frame canvas handles">
+              <h3>Canvasで撮影フレームを調整する</h3>
+              <ol><li>撮影フレームのプロパティで位置・寸法・角度を指定。</li><li>必要ならCanvasハンドルで調整。</li><li>セル文書を保存。</li></ol><p>ラスター書き出しには撮影フレームを含めません。</p>
             </div>
           </div>
         </section>
@@ -1391,10 +1367,6 @@
             <h3>ペインが見つからない</h3>
             <p>「ウィンドウ」メニューで該当ペインをオンにします。AutoHideなら画面端ボタンを確認します。配置が崩れた場合は「ウィンドウ › ワークスペース › 既定に戻す」を使います。</p>
           </div>
-          <div class="search-unit" data-search="cut command stale target active cell rejected カット コマンド 対象 古い">
-            <h3>カットの操作が実行されない</h3>
-            <p>カット操作は、メニューやボタンを押した時点のワークスペース、カット、セル、世代を対象にします。ダイアログ表示中などに別タブへ切り替えた場合、後からアクティブになった別セルへ操作を付け替えず拒否します。元のカット／セルを選び直して再実行してください。</p>
-          </div>
           <div class="search-unit" data-search="shooting frame handles hidden overlay edit mode">
             <h3>撮影フレームのハンドルが見えない</h3>
             <p>撮影フレームが文書に存在するか、「撮影フレームをハンドル編集」を選んでいるかを確認します。フレームがCanvas表示範囲外にある場合は全体表示に戻して位置を確認してください。</p>
@@ -1427,10 +1399,9 @@
                 <tr><td>dry-run</td><td>バッチの入力、対象、出力、衝突を検査するだけで、一切書き込まない実行。</td></tr>
                 <tr><td>Recovery</td><td>障害から作業を復元するための別保存。通常保存の代わりではありません。</td></tr>
                 <tr><td>savepoint／通常保存の基準</td><td>最後に通常保存が成功した履歴位置。未保存判定の基準になります。</td></tr>
-                <tr><td>カット</td><td>一つのショットに属する安定ID付きセル系列、制作設定、独立した履歴をまとめる単位。各セル文書は別保存です。</td></tr>
                 <tr><td>セル</td><td>一枚の作画・彩色文書。</td></tr>
                 <tr><td>シーケンス／連番</td><td>自然順に並べた複数セル／画像の列。</td></tr>
-                <tr><td>撮影フレーム</td><td>中心、幅、高さ、角度を持つ任意の撮影範囲。指示画像へ明示的に出力できます。</td></tr>
+                <tr><td>撮影フレーム</td><td>中心、幅、高さ、角度を持つCanvas表示・編集専用の撮影範囲。ラスター書き出しには含めません。</td></tr>
                 <tr><td>主線保護</td><td>主線を見せたまま、彩色操作が主線プレーンを変更しない性質。</td></tr>
                 <tr><td>選択マスク</td><td>処理を許可する範囲をピクセルごとに表す、レイヤー外の文書所有情報。現在の選択と名前付き保存マスクがあります。</td></tr>
                 <tr><td>ドック</td><td>ペインを作業ウィンドウの上・左・右・下へ固定配置すること。</td></tr>

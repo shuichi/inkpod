@@ -98,24 +98,10 @@ bool LayoutSequencePane(
         IDC_SEQUENCE_IMPORT,
         std::max(margin, width - margin - import_width), margin,
         import_width, button_height));
-    const std::array<int, 4U> edit_controls{
-        IDC_SEQUENCE_REMOVE,
-        IDC_SEQUENCE_MOVE_UP,
-        IDC_SEQUENCE_MOVE_DOWN,
-        IDC_SEQUENCE_RENUMBER};
     const auto* state = reinterpret_cast<const SequencePaneDialogState*>(
         GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    const bool cut_editable = state != nullptr && state->view.cut_editable;
-    const std::size_t edit_rows = cut_editable
-        ? PaneButtonRowCount(dialog, edit_controls, content_width, gap)
-        : 0U;
-    const int edit_buttons_height = static_cast<int>(edit_rows) * button_height
-        + std::max(0, static_cast<int>(edit_rows) - 1) * gap;
-    const int edit_buttons_top = std::max(
-        margin + header_height + gap,
-        height - margin - edit_buttons_height);
     const int list_top = margin + std::max(header_height, button_height) + gap;
-    const int list_bottom = cut_editable ? edit_buttons_top - gap : height - margin;
+    const int list_bottom = height - margin;
     const UINT dpi = GetDpiForWindow(dialog);
     const int list_frame = GetSystemMetricsForDpi(SM_CYHSCROLL, dpi)
         + 2 * GetSystemMetricsForDpi(SM_CYBORDER, dpi);
@@ -137,20 +123,6 @@ bool LayoutSequencePane(
         list_top + std::max(0, (list_height - line_height) / 2),
         std::max(0, width - margin * 2 - gap * 2),
         line_height));
-    if (cut_editable) {
-        int action_width = gap * (static_cast<int>(edit_controls.size()) - 1);
-        for (const int control : edit_controls) {
-            action_width += PaneButtonIdealWidth(dialog, control);
-        }
-        PlacePaneButtonRows(
-            plan,
-            edit_controls,
-            margin,
-            edit_buttons_top,
-            std::min(content_width, action_width),
-            button_height,
-            gap);
-    }
     // Publish every HWND geometry first. ListBox metric messages can draw or
     // change the top item, and must not run if this placement transaction
     // fails and rolls back.
@@ -185,26 +157,7 @@ void StepSequenceCell(SequencePaneDialogState& state, bool next) noexcept {
     if (!state.view.target_available || state.view.cells.empty()) {
         return;
     }
-    if (!state.view.cut_editable) {
-        Dispatch(state, next ? IDM_SEQ_NEXT : IDM_SEQ_PREVIOUS);
-        return;
-    }
-    // Cut membership is an explicitly ordered list of independent Cell files,
-    // not the active Cell Core's naturally ordered raster sequence.
-    const auto count = static_cast<std::uint32_t>(state.view.cells.size());
-    std::uint32_t target = state.view.active_index;
-    if (target >= count) {
-        target = next ? 0U : count - 1U;
-    } else if (next && target + 1U < count) {
-        ++target;
-    } else if (!next && target > 0U) {
-        --target;
-    } else if (state.view.wrap_navigation && count > 1U) {
-        target = next ? 0U : count - 1U;
-    } else {
-        return;
-    }
-    state.activate_cell(state.context, state.view.cells[target].sequence_index);
+    Dispatch(state, next ? IDM_SEQ_NEXT : IDM_SEQ_PREVIOUS);
 }
 
 bool SameSequenceCell(
@@ -302,38 +255,6 @@ LRESULT CALLBACK SequenceListSubclass(
                 && IsWindowVisible(list) != FALSE) {
                 SetFocus(list);
             }
-            return 0;
-        }
-    }
-    if (message == WM_CANCELMODE || message == WM_CAPTURECHANGED) {
-        state->drag_index = UINT32_MAX;
-    }
-    if (state->view.cut_editable && message == WM_LBUTTONDOWN) {
-        const DWORD item = static_cast<DWORD>(SendMessageW(
-            list, LB_ITEMFROMPOINT, 0, lparam));
-        state->drag_index = HIWORD(item) == 0
-            ? static_cast<std::uint32_t>(LOWORD(item))
-            : UINT32_MAX;
-    } else if (state->view.cut_editable && message == WM_MOUSEMOVE
-               && state->drag_index != UINT32_MAX
-               && (wparam & MK_LBUTTON) != 0U) {
-        const DWORD item = static_cast<DWORD>(SendMessageW(
-            list, LB_ITEMFROMPOINT, 0, lparam));
-        if (HIWORD(item) == 0) {
-            SendMessageW(list, LB_SETCURSEL, LOWORD(item), 0);
-        }
-    } else if (message == WM_LBUTTONUP
-               && state->drag_index != UINT32_MAX) {
-        const std::uint32_t source = state->drag_index;
-        state->drag_index = UINT32_MAX;
-        const DWORD item = static_cast<DWORD>(SendMessageW(
-            list, LB_ITEMFROMPOINT, 0, lparam));
-        // LOWORD is the nearest item even when the captured pointer is outside.
-        const std::uint32_t destination = LOWORD(item);
-        if (destination < state->view.cells.size() && source != destination
-            && state->reorder_cell != nullptr) {
-            state->reorder_cell(
-                state->context, source, destination);
             return 0;
         }
     }
@@ -516,23 +437,7 @@ INT_PTR CALLBACK SequencePaneProcedure(
                     Dispatch(*state, IDM_SEQUENCE_PIN);
                     return TRUE;
                 case IDC_SEQUENCE_IMPORT:
-                    Dispatch(
-                        *state,
-                        state->view.cut_editable
-                            ? IDM_CUT_SEQUENCE_ADD
-                            : IDM_SEQ_IMPORT);
-                    return TRUE;
-                case IDC_SEQUENCE_REMOVE:
-                    Dispatch(*state, IDM_CUT_SEQUENCE_REMOVE);
-                    return TRUE;
-                case IDC_SEQUENCE_MOVE_UP:
-                    Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_UP);
-                    return TRUE;
-                case IDC_SEQUENCE_MOVE_DOWN:
-                    Dispatch(*state, IDM_CUT_SEQUENCE_MOVE_DOWN);
-                    return TRUE;
-                case IDC_SEQUENCE_RENUMBER:
-                    Dispatch(*state, IDM_CUT_SEQUENCE_RENUMBER);
+                    Dispatch(*state, IDM_SEQ_IMPORT);
                     return TRUE;
                 case IDC_SEQUENCE_CELLS:
                     if (HIWORD(wparam) == LBN_SELCHANGE) {
@@ -609,16 +514,6 @@ HWND CreateSequencePaneDialog(
         1U,
         reinterpret_cast<DWORD_PTR>(&state));
     EnablePaneDialogResizePainting(dialog);
-    static_cast<void>(SetPaneIconButton(
-        GetDlgItem(dialog, IDC_SEQUENCE_REMOVE), PaneIconId::Delete));
-    SetDlgItemTextW(dialog, IDC_SEQUENCE_MOVE_UP,
-        UiText(UiStringId::SequenceMoveEarlier));
-    SetDlgItemTextW(dialog, IDC_SEQUENCE_MOVE_DOWN,
-        UiText(UiStringId::SequenceMoveLater));
-    static_cast<void>(SetPaneIconButton(
-        GetDlgItem(dialog, IDC_SEQUENCE_MOVE_UP), PaneIconId::Previous));
-    static_cast<void>(SetPaneIconButton(
-        GetDlgItem(dialog, IDC_SEQUENCE_MOVE_DOWN), PaneIconId::Next));
     if (!LayoutSequencePane(dialog)) {
         DestroyWindow(dialog);
         return nullptr;
@@ -653,8 +548,6 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     } catch (const std::bad_alloc&) {
         return;
     }
-    const bool layout_extent_changed =
-        state->view.cut_editable != view.cut_editable;
     const HWND list = GetDlgItem(dialog, IDC_SEQUENCE_CELLS);
     const LRESULT old_first = SendMessageW(list, LB_GETTOPINDEX, 0, 0);
     LRESULT first_visible = old_first;
@@ -712,22 +605,7 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     EnableWindow(
         GetDlgItem(dialog, IDC_SEQUENCE_IMPORT),
         state->view.target_available ? TRUE : FALSE);
-    SetDlgItemTextW(
-        dialog,
-        IDC_SEQUENCE_IMPORT,
-        state->view.cut_editable ? UiText(UiStringId::ExistingCellAdd)
-                                 : UiText(UiStringId::FileAdd));
-    const int show_edit = state->view.cut_editable ? SW_SHOW : SW_HIDE;
-    for (const int control : {
-             IDC_SEQUENCE_REMOVE,
-             IDC_SEQUENCE_MOVE_UP,
-             IDC_SEQUENCE_MOVE_DOWN,
-             IDC_SEQUENCE_RENUMBER}) {
-        ShowWindow(GetDlgItem(dialog, control), show_edit);
-        EnableWindow(
-            GetDlgItem(dialog, control),
-            state->view.cut_editable && has_sequence ? TRUE : FALSE);
-    }
+    SetDlgItemTextW(dialog, IDC_SEQUENCE_IMPORT, UiText(UiStringId::FileAdd));
     SetDlgItemTextW(
         dialog,
         IDC_SEQUENCE_EMPTY,
@@ -739,9 +617,6 @@ void UpdateSequencePaneDialog(HWND dialog, SequencePaneView view) noexcept {
     // change may subsequently scroll just enough to reveal its frame.
     SelectCommittedCell(list, state->view.active_index, first_visible, selection_changed);
     CompletePaneDialogResize(dialog);
-    if (layout_extent_changed && state->layout_changed != nullptr) {
-        state->layout_changed(state->context);
-    }
 }
 
 bool SetSequencePaneThumbnailWidthDip(
@@ -773,7 +648,7 @@ bool SetSequencePaneThumbnailWidthDip(
 }
 
 int MeasureSequencePaneBottomExtentDip(
-    HWND dialog, int available_width_pixels) noexcept {
+    HWND dialog, int /*available_width_pixels*/) noexcept {
     const auto* state = reinterpret_cast<const SequencePaneDialogState*>(
         dialog == nullptr ? 0 : GetWindowLongPtrW(dialog, GWLP_USERDATA));
     if (state == nullptr) {
@@ -796,27 +671,13 @@ int MeasureSequencePaneBottomExtentDip(
         thumbnail_height + ScalePaneDip(dialog, 12) + text_height);
     const int list_frame = GetSystemMetricsForDpi(SM_CYHSCROLL, dpi)
         + 2 * GetSystemMetricsForDpi(SM_CYBORDER, dpi);
-    const int content_width = std::max(0, available_width_pixels - margin * 2);
-    const std::array<int, 4U> edit_controls{
-        IDC_SEQUENCE_REMOVE,
-        IDC_SEQUENCE_MOVE_UP,
-        IDC_SEQUENCE_MOVE_DOWN,
-        IDC_SEQUENCE_RENUMBER};
-    const std::size_t edit_rows = state->view.cut_editable
-        ? PaneButtonRowCount(dialog, edit_controls, content_width, gap)
-        : 0U;
-    const int edit_height = static_cast<int>(edit_rows) * button_height
-        + std::max(0, static_cast<int>(edit_rows) - 1) * gap;
-    int required_pixels = margin
+    const int required_pixels = margin
         + std::max(header_height, button_height)
         + gap
         + row_height
         + list_frame
         + margin
         + ScalePaneDip(dialog, kDockTabHeightDip);
-    if (edit_rows > 0U) {
-        required_pixels += gap + edit_height;
-    }
     const int rounded_dip = static_cast<int>(
         (static_cast<std::int64_t>(required_pixels) * 96
              + static_cast<std::int64_t>(dpi) - 1)
@@ -828,7 +689,7 @@ bool UpdateSequencePaneSelection(
     HWND dialog, SequencePaneSelection selection) noexcept {
     auto* state = reinterpret_cast<SequencePaneDialogState*>(
         dialog == nullptr ? 0 : GetWindowLongPtrW(dialog, GWLP_USERDATA));
-    if (state == nullptr || state->view.cut_editable || !state->view.target_available
+    if (state == nullptr || !state->view.target_available
         || !selection.catalog || state->view.catalog != selection.catalog
         || state->view.cells.size() != selection.catalog.cell_count
         || (selection.active_index != UINT32_MAX
@@ -878,7 +739,6 @@ bool UpdateSequencePaneSelection(
     state->view.active_index = selection.active_index;
     state->view.pinned = selection.pinned;
     state->view.auto_sequence_truncated = selection.auto_sequence_truncated;
-    state->view.wrap_navigation = selection.wrap_navigation;
     state->view.thumbnail_generation = thumbnail_generation;
     if (target_changed) {
         SetDlgItemTextW(dialog, IDC_SEQUENCE_TARGET, target_text.c_str());

@@ -5,8 +5,6 @@
     "en-US"
   ],
   "entries": [
-    { "id": "SequenceMoveEarlier", "kind": "text", "ja": "左へ移動", "en": "Move left", "resource": false },
-    { "id": "SequenceMoveLater", "kind": "text", "ja": "右へ移動", "en": "Move right", "resource": false },
     { "id": "JobStatusQueued", "kind": "text", "ja": "待機中", "en": "Queued", "resource": false },
     { "id": "JobStatusApplying", "kind": "text", "ja": "確定中", "en": "Finishing", "resource": false },
     { "id": "JobStatusMoreFormat", "kind": "format", "ja": "%ls（ほか %zu 件）", "en": "%ls (+%zu)", "resource": false },
@@ -925,13 +923,6 @@
       "resource": true
     },
     {
-      "id": "Instruction",
-      "kind": "text",
-      "ja": "指示",
-      "en": "Instruction",
-      "resource": true
-    },
-    {
       "id": "PlaneRaster",
       "kind": "text",
       "ja": "ラスター",
@@ -1114,13 +1105,6 @@
       "resource": true
     },
     {
-      "id": "ExistingCellAdd",
-      "kind": "text",
-      "ja": "既存セルを追加",
-      "en": "Add Existing Cell",
-      "resource": false
-    },
-    {
       "id": "SequenceNoCells",
       "kind": "text",
       "ja": "シーケンスはありません",
@@ -1142,20 +1126,6 @@
       "resource": false
     },
     {
-      "id": "SequenceThumbnailLoadFailed",
-      "kind": "text",
-      "ja": "カットのセル thumbnail を読み込めません",
-      "en": "Cut Cell Thumbnail Could Not Be Loaded",
-      "resource": false
-    },
-    {
-      "id": "SequenceThumbnailRegisterFailed",
-      "kind": "text",
-      "ja": "カットのセル thumbnail を登録できません",
-      "en": "Cut Cell Thumbnail Could Not Be Cached",
-      "resource": false
-    },
-    {
       "id": "SequenceDisplayOutOfMemory",
       "kind": "text",
       "ja": "シーケンス表示用メモリが不足しました",
@@ -1163,31 +1133,10 @@
       "resource": false
     },
     {
-      "id": "CutDisplayOutOfMemory",
-      "kind": "text",
-      "ja": "カット表示用メモリが不足しました",
-      "en": "Not Enough Memory to Display the Cut",
-      "resource": false
-    },
-    {
       "id": "CellsSuffix",
       "kind": "text",
       "ja": " セル",
       "en": " cells",
-      "resource": false
-    },
-    {
-      "id": "CutPrefix",
-      "kind": "text",
-      "ja": "カット: ",
-      "en": "Cut: ",
-      "resource": false
-    },
-    {
-      "id": "CurrentCellOutsideMembers",
-      "kind": "text",
-      "ja": "現在のセルはメンバー外",
-      "en": "Current Cell Is Not a Member",
       "resource": false
     },
     {
@@ -2514,109 +2463,11 @@
       "resource": true
     },
     {
-      "id": "Text0140",
-      "kind": "text",
-      "ja": "カット...",
-      "en": "Cut...",
-      "resource": true
-    },
-    {
       "id": "Text0141",
       "kind": "text",
       "ja": "カット\tCtrl+X",
       "en": "Cut\tCtrl+X",
       "resource": true
-    },
-    {
-      "id": "Text0142",
-      "kind": "text",
-      "ja": "カットのセル保存先が既に存在します。別のカット名を選んでください。",
-      "en": "The destination for a cut cell already exists. Choose a different cut name.",
-      "resource": false
-    },
-    {
-      "id": "Text0143",
-      "kind": "text",
-      "ja": "カットのセル系列",
-      "en": "Cut Cell Sequence",
-      "resource": true
-    },
-    {
-      "id": "Text0144",
-      "kind": "text",
-      "ja": "カットのセル系列編集",
-      "en": "Edit Cut Cell Sequence",
-      "resource": false
-    },
-    {
-      "id": "Text0145",
-      "kind": "text",
-      "ja": "カットのセル順変更",
-      "en": "Reorder Cut Cells",
-      "resource": false
-    },
-    {
-      "id": "Text0146",
-      "kind": "text",
-      "ja": "カットのプロパティ",
-      "en": "Cut Properties",
-      "resource": true
-    },
-    {
-      "id": "Text0147",
-      "kind": "text",
-      "ja": "カットのプロパティ...",
-      "en": "Cut Properties...",
-      "resource": true
-    },
-    {
-      "id": "Text0148",
-      "kind": "text",
-      "ja": "カットをやり直す",
-      "en": "Redo Cut",
-      "resource": true
-    },
-    {
-      "id": "Text0149",
-      "kind": "text",
-      "ja": "カットを保存",
-      "en": "Save Cut",
-      "resource": true
-    },
-    {
-      "id": "Text0150",
-      "kind": "text",
-      "ja": "カットを元に戻す",
-      "en": "Undo Cut",
-      "resource": true
-    },
-    {
-      "id": "Text0151",
-      "kind": "text",
-      "ja": "カットを閉じる",
-      "en": "Close Cut",
-      "resource": false
-    },
-    {
-      "id": "Text0152",
-      "kind": "text",
-      "ja": "カット名",
-      "en": "Cut name",
-      "resource": true
-    },
-    {
-      "id": "Text0153",
-      "kind": "text",
-      "ja": "カット名と1以上の尺を入力してください。",
-      "en": "Enter a cut name and a duration of at least 1.",
-      "resource": false
-    },
-    {
-      "id": "Text0154",
-      "kind": "text",
-      "ja": "カット履歴",
-      "en": "Cut History",
-      "resource": false
     },
     {
       "id": "Text0155",
@@ -2990,13 +2841,6 @@
       "resource": true
     },
     {
-      "id": "Text0208",
-      "kind": "text",
-      "ja": "シーン",
-      "en": "Scene",
-      "resource": true
-    },
-    {
       "id": "Text0209",
       "kind": "text",
       "ja": "スタンプ...",
@@ -3076,8 +2920,8 @@
     {
       "id": "Text0220",
       "kind": "text",
-      "ja": "セル\tCtrl+N",
-      "en": "Cell\tCtrl+N",
+      "ja": "新規セル...\tCtrl+N",
+      "en": "New Cell...\tCtrl+N",
       "resource": true
     },
     {
@@ -3099,13 +2943,6 @@
       "kind": "text",
       "ja": "セルから作成...",
       "en": "Create from Cell...",
-      "resource": true
-    },
-    {
-      "id": "Text0224",
-      "kind": "text",
-      "ja": "セルは同じフォルダーの個別 .inkpod を参照します。",
-      "en": "Cells reference individual .inkpod files in the same folder.",
       "resource": true
     },
     {
@@ -3190,13 +3027,6 @@
       "kind": "text",
       "ja": "セル色を抽出中...",
       "en": "Extracting cell colors...",
-      "resource": false
-    },
-    {
-      "id": "Text0237",
-      "kind": "text",
-      "ja": "セル表示番号の付け直し",
-      "en": "Renumber Cell Display Numbers",
       "resource": false
     },
     {
@@ -3865,13 +3695,6 @@
       "resource": true
     },
     {
-      "id": "Text0350",
-      "kind": "text",
-      "ja": "メンバーから除外",
-      "en": "Remove from Members",
-      "resource": true
-    },
-    {
       "id": "Text0351",
       "kind": "text",
       "ja": "モーションFPS変更",
@@ -4117,13 +3940,6 @@
       "resource": true
     },
     {
-      "id": "Text0388",
-      "kind": "text",
-      "ja": "ラスタ－を読み込み...",
-      "en": "Import Raster...",
-      "resource": true
-    },
-    {
       "id": "Text0389",
       "kind": "text",
       "ja": "ループ (0/1)",
@@ -4355,13 +4171,6 @@
       "resource": false
     },
     {
-      "id": "Text0422",
-      "kind": "text",
-      "ja": "一般画像の読み込み",
-      "en": "Import General Image",
-      "resource": false
-    },
-    {
       "id": "Text0424",
       "kind": "text",
       "ja": "上",
@@ -4379,13 +4188,6 @@
       "id": "Text0426",
       "kind": "text",
       "ja": "上へ",
-      "en": "Move Up",
-      "resource": true
-    },
-    {
-      "id": "Text0427",
-      "kind": "text",
-      "ja": "上へ移動",
       "en": "Move Up",
       "resource": true
     },
@@ -4415,13 +4217,6 @@
       "kind": "text",
       "ja": "下へ分割",
       "en": "Split Down",
-      "resource": true
-    },
-    {
-      "id": "Text0432",
-      "kind": "text",
-      "ja": "下へ移動",
-      "en": "Move Down",
       "resource": true
     },
     {
@@ -4576,13 +4371,6 @@
       "kind": "text",
       "ja": "余白...",
       "en": "Margins...",
-      "resource": true
-    },
-    {
-      "id": "Text0458",
-      "kind": "text",
-      "ja": "作品名",
-      "en": "Production title",
       "resource": true
     },
     {
@@ -4822,13 +4610,6 @@
       "ja": "先頭フレーム",
       "en": "First Frame",
       "resource": true
-    },
-    {
-      "id": "Text0493",
-      "kind": "text",
-      "ja": "先頭番号",
-      "en": "First number",
-      "resource": false
     },
     {
       "id": "Text0494",
@@ -5580,13 +5361,6 @@
       "resource": false
     },
     {
-      "id": "Text0606",
-      "kind": "text",
-      "ja": "増分",
-      "en": "Increment",
-      "resource": false
-    },
-    {
       "id": "Text0607",
       "kind": "text",
       "ja": "変換",
@@ -5738,13 +5512,6 @@
       "kind": "text",
       "ja": "対象色を現在色に設定",
       "en": "Set Target to Current Color",
-      "resource": true
-    },
-    {
-      "id": "Text0630",
-      "kind": "text",
-      "ja": "尺 (frame)",
-      "en": "Duration (frames)",
       "resource": true
     },
     {
@@ -6021,20 +5788,6 @@
       "resource": false
     },
     {
-      "id": "Text0671",
-      "kind": "text",
-      "ja": "指示画像に含める",
-      "en": "Include in instruction image",
-      "resource": true
-    },
-    {
-      "id": "Text0672",
-      "kind": "text",
-      "ja": "指示画像を書き出し...",
-      "en": "Export Instruction Image...",
-      "resource": true
-    },
-    {
       "id": "Text0673",
       "kind": "text",
       "ja": "描画",
@@ -6280,25 +6033,11 @@
       "resource": true
     },
     {
-      "id": "Text0708",
-      "kind": "text",
-      "ja": "新規",
-      "en": "New",
-      "resource": true
-    },
-    {
       "id": "Text0709",
       "kind": "text",
       "ja": "新規...",
       "en": "New...",
       "resource": true
-    },
-    {
-      "id": "Text0710",
-      "kind": "text",
-      "ja": "新規カット",
-      "en": "New Cut",
-      "resource": false
     },
     {
       "id": "Text0711",
@@ -6355,13 +6094,6 @@
       "ja": "方向 (1:左右 2:上下)",
       "en": "Direction (1:horizontal 2:vertical)",
       "resource": false
-    },
-    {
-      "id": "Text0719",
-      "kind": "text",
-      "ja": "既存セルを追加...",
-      "en": "Add Existing Cell...",
-      "resource": true
     },
     {
       "id": "Text0720",
@@ -6749,13 +6481,6 @@
       "resource": false
     },
     {
-      "id": "Text0783",
-      "kind": "text",
-      "ja": "現在のカットには未保存の変更があります。保存しますか？",
-      "en": "The current cut has unsaved changes. Save them?",
-      "resource": false
-    },
-    {
       "id": "Text0784",
       "kind": "text",
       "ja": "現在のセルを保存してからシーケンスを切り替えますか？",
@@ -6971,13 +6696,6 @@
       "ja": "画面サイズ固定",
       "en": "Fixed screen size",
       "resource": false
-    },
-    {
-      "id": "Text0815",
-      "kind": "text",
-      "ja": "番号変更",
-      "en": "NumberChange",
-      "resource": true
     },
     {
       "id": "Text0816",
@@ -7491,13 +7209,6 @@
       "resource": false
     },
     {
-      "id": "Text0895",
-      "kind": "text",
-      "ja": "表示番号を付け直す...",
-      "en": "Renumber Display Numbers...",
-      "resource": true
-    },
-    {
       "id": "Text0896",
       "kind": "text",
       "ja": "表示補助の切替",
@@ -7659,13 +7370,6 @@
       "resource": false
     },
     {
-      "id": "Text0921",
-      "kind": "text",
-      "ja": "話数",
-      "en": "Episode",
-      "resource": true
-    },
-    {
       "id": "Text0922",
       "kind": "text",
       "ja": "詳細",
@@ -7818,13 +7522,6 @@
       "ja": "追加",
       "en": "Add",
       "resource": true
-    },
-    {
-      "id": "Text0952",
-      "kind": "text",
-      "ja": "追加するセルはカット記述子と同じフォルダーに保存してください。",
-      "en": "Save added cells in the same folder as the cut descriptor.",
-      "resource": false
     },
     {
       "id": "Text0953",
@@ -8308,13 +8005,6 @@
       "ja": "降順 (0/1)",
       "en": "Descending (0/1)",
       "resource": false
-    },
-    {
-      "id": "Text1028",
-      "kind": "text",
-      "ja": "除外",
-      "en": "Exclude",
-      "resource": true
     },
     {
       "id": "Text1029",

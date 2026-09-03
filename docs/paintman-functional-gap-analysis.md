@@ -80,7 +80,7 @@ PDF は全 191 表示ページを確認した。PDF p2～p189 は原則として
 
 個別Cell参照方式のカット作成、セル系列の構造編集、再編集可能な指示／text object、角度付き撮影frame、端点loop policy、複数消失点／放射補助線は、いずれも縦切り実装、自動検証、x64 Releaseの利用者確認まで完了した。現行要件の状態と残る既知差分は`docs/compatibility.md`を正本とする。
 
-> **現行契約による上書き（2026-09-02）:** この文書は2026-08-12の比較調査と当時の実装証跡を履歴として保持する。その後の利用者判断により、現行の画像木は種類fieldを持たない標準layer（MainLine exactly one／Color exactly one／Raster zero-or-more）だけとなり、現在選択・保存選択・fill protectionは文書所有maskへ移った。Adjustment layerとVanishingPointのdata／API／UIは現行scopeから削除され、前者は破壊的tone adjustmentで合理的に代替し、後者は`Not required`とする。現行のversion tupleはnative v32／replay epoch 27／ABI v31／DocumentArchive 7＋必須DOCM 8／digest schema 12-domain 10／snapshot composite 5／Cut schema 3 epoch 25／`.inkbatch` graph 5 operation schema 4／InkScript catalog-owner 5（73 commands）である。以下の旧version番号は明示的に現行と書かれた箇所を除き、当時のverification evidenceを表す。
+> **現行契約による上書き（2026-09-03）:** この文書の比較調査と実装証跡は履歴として保持する。現行仕様は`SPEC.md`と`docs/compatibility.md`を正本とする。利用者判断によりカット管理、Cut専用Sequence構造編集、指示画像exportは廃止した。通常SequenceとCanvas上の角度付き撮影frameは維持する。標準layerはMainLine exactly one／Color exactly one／Raster zero-or-more、selectionとfill protectionは文書所有maskであり、Adjustment layerとVanishingPointはscope外である。現行契約はnative v33／replay epoch 28／ABI v33／DocumentArchive 7＋必須DOCM 9／digest schema 13-domain 11／snapshot composite 5／`.inkbatch` graph 5 operation 4／InkScript catalog-owner 6（73 commands）。下記の旧仕様・version・verified表示は当時の証跡であり、現行機能の提供を意味しない。
 
 ### 2.2 件数
 

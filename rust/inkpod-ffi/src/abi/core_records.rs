@@ -515,3 +515,18 @@ pub struct InkpodSnapshotOverlay {
     pub guide_count: u64,
     pub guide_stride_bytes: u64,
 }
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodUtf8Span {
+    pub bytes: *const u8,
+    pub byte_count: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodUtf8Buffer {
+    pub bytes: *mut u8,
+    pub capacity: u64,
+    pub byte_count: u64,
+}

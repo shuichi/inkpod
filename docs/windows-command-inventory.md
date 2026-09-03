@@ -6,10 +6,10 @@ the resource sources of truth; this file is not a second registry.
 
 ## Current surface
 
-- `resource.h` defines 326 unique `IDM_*` values: 324 state-owned commands and
+- `resource.h` defines 314 unique `IDM_*` values: 312 state-owned commands and
   two history-visualization range sentinels.
-- The generated application menu references 316 unique production command IDs
-  through 323 actionable menu/control occurrences. `IDM_EFFECT_DUST`
+- The generated application menu references 304 unique production command IDs
+  through 311 actionable menu/control occurrences. `IDM_EFFECT_DUST`
   intentionally appears in two menus;
   six Layer commands appear in both the menu and dockable Layer pane. Every duplicate
   entry point shares one route and state.
@@ -21,13 +21,17 @@ the resource sources of truth; this file is not a second registry.
   a production menu leaf; palette controls are alternate entry points that
   forward the same command ID on the UI thread.
 
+File > Open is the sole native/raster entry point. Cut creation, metadata,
+independent history, membership editing and instruction export have no menu,
+shortcut, command-state or route entries. New Cell is a direct File command.
+
 ## Routing and state ownership
 
 `apps/windows/ui/main_window_runtime.cpp` routes commands through focused Batch,
 document, edit, effects, document-pane, animation, selection/view, tool, color,
 workspace, and application owners. Every production ID is handled exactly once.
 
-`apps/windows/ui/command_state_catalog.inc` independently assigns all 324
+`apps/windows/ui/command_state_catalog.inc` independently assigns all 312
 state-owned commands exactly one enabled/checked-state owner. Pure state providers feed one
 cached result used by menus, shortcuts, and palette entry points; querying state
 does not mutate Core, tools, previews, or documents.
@@ -58,7 +62,7 @@ test, so this prose inventory does not need manual handler lists.
   submenus; Workspace retains its existing submenu. This is presentation-only
   grouping: command IDs, route/state owners, and pane visibility semantics do not
   change.
-- The shortcut editor still projects the complete 324-command production catalog.
+- The shortcut editor still projects the complete 312-command production catalog.
   A missing built-in binding means `Unassigned`, not a missing command: every
   catalog entry remains searchable and can receive primary and secondary bindings
   with the existing context/action/matching model.
@@ -90,7 +94,10 @@ test, so this prose inventory does not need manual handler lists.
   not show a synthetic key sequence. Access keys remain visible independently of
   assignment. Existing custom/imported profiles are never rebuilt from the
   current built-in profile, so an explicit user binding (including `Q`, `K`, or
-  `A`) survives application updates and default-table changes.
+  `A`) to a surviving command survives default-table changes. Profiles naming
+  deleted commands fail the existing unknown-command validation; no migration
+  or silent reassignment is added. Invalid settings keep the default fallback
+  and existing automatic-write protection.
 - The Alt-letter key space belongs to menu mnemonics in the built-in profile.
   Native menu/system handling wins for bare Alt, unmodified F10, Alt+Space, and
   the top-level Alt-letter mnemonics. New recording/rebinding rejects those
@@ -107,7 +114,7 @@ test, so this prose inventory does not need manual handler lists.
 
 | Value range | Area | Defined |
 |---|---|---:|
-| 40000-40099 | File | 33 |
+| 40000-40099 | File | 21 |
 | 40100-40199 | Edit/history/clipboard | 13 |
 | 40200-40299 | View/guide/grid | 36 |
 | 40300-40399 | Raster/fill tools | 16 |

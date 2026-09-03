@@ -496,7 +496,6 @@ fn shooting_frame_metadata_round_trips_and_rejects_invalid_geometry_and_ids() {
         rotation_turns: 0x1800_0000,
         anchor: FileShootingFrameAnchor::BottomRight,
         visible: true,
-        include_in_instruction_export: true,
     });
     assert_eq!(decode(&encode(&document).unwrap()).unwrap(), document);
 

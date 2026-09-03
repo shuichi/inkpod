@@ -13,7 +13,9 @@ and explicit user approval. Replace current values instead of appending dated
 acceptance logs. Historical calibration and milestone results are summarized in
 [`legacy.md`](legacy.md).
 
-Batch v5 uses native v32/replay epoch 27 and retains the approved
+The user-approved Cut removal changes only the exact-current serialization/replay contract: native v33/epoch 28, DOCM 9, document digest 13/domain 11, ABI 33 and InkScript catalog/owner 6. No workload, semantic counter, pixel checksum, harness or timing envelope is changed. Only the schema-dependent document hashes in `checkpoint_open` (both profiles: `5062efd7565e19e4`) and `output_color_guard` (quick: `1b7549d882cd9743`; full: `fd514e08addb4698`) are regenerated for schema 13/domain 11; the same fixtures, exact assertions and quick/full gates remain.
+
+Batch v5 uses native v33/replay epoch 28 and retains the approved
 `batch_preview` workload described below. The benchmark has no sequence input,
 Filter operation, or legacy layer-kind selector. Its native files, exact Color
 Replace rows, semantic counters, checksums, and complete samples are locked
@@ -79,7 +81,7 @@ scenario assertions are:
 | `undo_redo` | every edit is one history entry, Undo reaches the clean savepoint, and Redo restores the exact checksum |
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `batch_preview` | one invalid graph is rejected; every unique native input opens, replays, and applies its exact native-depth Color Replace row in preview and dry-run; no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 27 / native v32 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 28 / native v33 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -95,8 +97,8 @@ wall-clock time, addresses, cache allocation order, and Batch output paths.
 | `light_table_composite` | `255ab9bad114dfdd` | `77f63d83e130185f` |
 | `batch_preview` | `9ae6835726a36053` | `d1be39275687aa9b` |
 | `canonical_replay` | `34f65a7092a87cff` | `34f65a7092a87cff` |
-| `checkpoint_open` | `20356218ff2cdb20` | `20356218ff2cdb20` |
-| `output_color_guard` | `084dbdb099b5fd04` | `7c97a39e8e00b250` |
+| `checkpoint_open` | `5062efd7565e19e4` | `5062efd7565e19e4` |
+| `output_color_guard` | `1b7549d882cd9743` | `fd514e08addb4698` |
 
 The v19/schema-6 Color-chart commitment changed only the `checkpoint_open`
 document-digest checksum from `eca2df7e74020108` to `8847f8440d290c18`.
@@ -194,8 +196,8 @@ envelopes, and the `revision-max` expression are unchanged.
 The user-approved v31/epoch-27 standard-layer rebaseline changes only the three
 version-sensitive current checksums: `canonical_replay` is
 `34f65a7092a87cff` in both profiles, `checkpoint_open` is
-`20356218ff2cdb20` in both profiles, and `output_color_guard` is
-`084dbdb099b5fd04` quick / `7c97a39e8e00b250` full. Current quick and full runs
+`5062efd7565e19e4` in both profiles, and `output_color_guard` is
+`1b7549d882cd9743` quick / `fd514e08addb4698` full. Current quick and full runs
 reproduced every semantic counter and checksum. Workloads, timed intervals,
 approved envelopes, payload-access gates, and the `revision-max` expression are
 unchanged.
@@ -218,8 +220,8 @@ to Windows build 26200.9168 on the MSI MS-7E26 host with an AMD Ryzen 9
 scheme. A materially different host, target, toolchain, or power mode needs a
 separately approved range.
 
-The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v5 and replay
-epoch 27, 128 `set_plane_properties` steps, four successful 4-by-4 current-v32
+The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v6 and replay
+epoch 28, 128 `set_plane_properties` steps, four successful 4-by-4 current-v33
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
 full Genesis/asset/procedure replay without a checkpoint cache. The runner is

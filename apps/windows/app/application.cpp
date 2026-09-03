@@ -142,11 +142,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
         }
     }
 
-    InkpodStatus cut_status = INKPOD_STATUS_OK;
     if (state.engine != nullptr) {
-        if (!state.DestroyAllCutSessions()) {
-            cut_status = INKPOD_STATUS_INVALID_STATE;
-        }
         state.DetachCoreSessions();
         state.engine->Stop();
         state.engine.reset();
@@ -205,8 +201,7 @@ InkpodStatus StopCore(ApplicationHost& state) noexcept {
              report_status,
              graph_status,
              run_graph_status,
-             recovery_cleanup_status,
-             cut_status}) {
+             recovery_cleanup_status}) {
         if (status != INKPOD_STATUS_OK) {
             return status;
         }

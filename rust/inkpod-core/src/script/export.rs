@@ -266,7 +266,7 @@ pub fn export_inkscript_fragment_with_limits(
     let strict_owners = augment_light_table_owner_bindings(&snapshot, &mut strict)?;
 
     let mut source = String::from(
-        "inkscript_fragment 2;\nrequires { procedure_catalog = 5; replay_epoch = 27; }\n",
+        "inkscript_fragment 2;\nrequires { procedure_catalog = 6; replay_epoch = 28; }\n",
     );
     if !strict.is_empty() {
         source.push_str("bindings {\n");
@@ -1455,15 +1455,14 @@ fn shooting_frame_edit_literal(
 
 fn shooting_frame_input_literal(input: crate::ShootingFrameInput) -> String {
     format!(
-        "{{ center_x_milli = {}; center_y_milli = {}; width_milli = {}; height_milli = {}; rotation_turns = {}; anchor = {}; visible = {}; include_in_instruction_export = {}; }}",
+        "{{ center_x_milli = {}; center_y_milli = {}; width_milli = {}; height_milli = {}; rotation_turns = {}; anchor = {}; visible = {}; }}",
         input.center_x_milli,
         input.center_y_milli,
         input.width_milli,
         input.height_milli,
         input.rotation_turns,
         shooting_frame_anchor_name(input.anchor),
-        input.visible,
-        input.include_in_instruction_export
+        input.visible
     )
 }
 

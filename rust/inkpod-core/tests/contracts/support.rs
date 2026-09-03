@@ -3,7 +3,7 @@ use inkpod_core::*;
 pub(crate) use inkpod_format::{BATCH_GRAPH_VERSION, CommonRaster, encode_common_raster};
 pub(crate) use std::collections::BTreeSet;
 pub(crate) use std::fs;
-pub(crate) use std::path::{Path, PathBuf};
+pub(crate) use std::path::PathBuf;
 use std::sync::atomic::AtomicU64;
 pub(crate) use std::sync::atomic::Ordering;
 

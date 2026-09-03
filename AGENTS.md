@@ -66,7 +66,7 @@ Windows frontend の所有権は process 単位の `ApplicationHost`、top-level
 - raster 寸法、stride、index は固定幅整数で overflow と境界を検査する。
 - 2 値、grayscale、RGBA 8/16 bit、selection mask を型付き `PixelFormat` で区別する。
 - sRGB RGBA を損失なく保持し、straight alpha と premultiplied alpha を型または明示 API で区別する。
-- project/cut、cell、layer、plane、frame、sequence は永続化可能な安定 ID を持つ。名前や配列添字を ID の代用にせず、生成 ID は transaction commit 時だけ消費し、削除後も同じ namespace で再利用しない。
+- cell、layer、plane、frame、sequence は永続化可能な安定 ID を持つ。名前や配列添字を ID の代用にせず、生成 ID は transaction commit 時だけ消費し、削除後も同じ namespace で再利用しない。
 - layer type ごとに許可 plane、変換、統合条件を検証する。主線保護中の彩色 command は主線 plane を変更しない。
 - 大画像は tile、遅延割当、copy-on-write を基本とし、Undo、snapshot、light table ごとの全画像複製を避ける。
 - UI 操作は型付き command/input を通す。破壊的編集は transaction として成功時だけ commit する。

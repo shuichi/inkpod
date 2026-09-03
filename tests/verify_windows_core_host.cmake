@@ -207,7 +207,7 @@ file(READ "${RUNTIME_SOURCE}" RUNTIME)
 foreach(REQUIRED IN ITEMS
         "pane.auto_sequence_truncated = document->auto_sequence_truncated"
         "(result.progress.flags & INKPOD_IO_RESULT_TRUNCATED) != 0U"
-        "NativeSaveOverwritePolicy::Reject"
+        "!result.authority_revoked"
         "inkpod_core_sequence_activation_resolve(core, activation_target, &activation_plan)"
         "activation_plan.result_class == INKPOD_SEQUENCE_ACTIVATION_REPLACE"
         "activation_plan.result_class == INKPOD_SEQUENCE_ACTIVATION_NOOP"

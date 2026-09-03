@@ -25,11 +25,6 @@ pub struct InkpodSubpalette {
     pub(crate) catalog: SubpaletteCatalog,
 }
 
-pub struct InkpodCut {
-    pub(crate) owner_thread: ThreadId,
-    pub(crate) cut: CutCore,
-}
-
 pub struct InkpodCellCreationPlan {
     pub(crate) plan: CellCreationPlan,
     pub(crate) sizing_mode: u32,

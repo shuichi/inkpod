@@ -476,7 +476,7 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
             _ => return Err(FormatError::Unsupported("unknown shooting-frame anchor")),
         };
         let flags = reader.u32()?;
-        if flags & !3 != 0 || reader.u32()? != 0 {
+        if flags & !1 != 0 || reader.u32()? != 0 {
             return Err(FormatError::Unsupported(
                 "shooting-frame flags or reserved field is invalid",
             ));
@@ -490,7 +490,6 @@ fn decode_document_metadata(bytes: &[u8]) -> Result<FileDocumentMetadata, Format
             rotation_turns,
             anchor,
             visible: flags_bit(flags, 0),
-            include_in_instruction_export: flags_bit(flags, 1),
         })
     } else {
         None

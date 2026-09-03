@@ -130,7 +130,7 @@ std::string CurrentDocumentSource(
     const char* basename,
     std::uint64_t start_number = 1U) {
     std::string source = R"(inkscript 2;
-requires { procedure_catalog = 5; replay_epoch = 27; }
+requires { procedure_catalog = 6; replay_epoch = 28; }
 inputs { current_document; }
 program {
     step "Add guide" as created {
@@ -154,7 +154,7 @@ std::string FolderSource(
     const char* basename,
     std::uint64_t start_number = 1U) {
     std::string source = R"(inkscript 2;
-requires { procedure_catalog = 5; replay_epoch = 27; }
+requires { procedure_catalog = 6; replay_epoch = 28; }
 inputs { folder "in"; }
 program {
     step "Add guide" {
@@ -175,7 +175,7 @@ execution { failure = stop; wait_ms = )";
 
 std::string OverwriteFolderSource() {
     return R"(inkscript 2;
-requires { procedure_catalog = 5; replay_epoch = 27; }
+requires { procedure_catalog = 6; replay_epoch = 28; }
 inputs { file "input.inkpod"; }
 program {
     step "Add guide" {
@@ -558,7 +558,7 @@ bool ValidateNativeOutput(
         status = inkpod_core_get_persistence_info(core, &persistence);
     }
     const bool clean_open = status == INKPOD_STATUS_OK
-        && persistence.format_version == 32U
+        && persistence.format_version == 33U
         && persistence.open_strategy == INKPOD_NATIVE_OPEN_FULL_REPLAY
         && (opened.document.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
         && (opened.editor.flags & INKPOD_EDITOR_STATE_DIRTY) == 0U
