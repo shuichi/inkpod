@@ -138,6 +138,16 @@ Before the application-version-only commit, the same production sources at
 `9177334` passed `cargo fmt --check`, workspace/all-target/all-feature Clippy with
 warnings denied, all 801 workspace tests (one existing Release-only test ignored),
 the unchanged Core quick benchmark, and Core rustdoc with warnings denied.
+
+The release-commit [push CI](https://github.com/shuichi/inkpod/actions/runs/33704461297)
+passes Rust on Linux/macOS and the Windows x64 Release job. Windows Debug fails
+before CMake in `same_size_timestamp_preserved_tga_rewrite_invalidates_cache`
+(`rust/inkpod-io/tests/manager.rs:107`), both initially and on one unchanged-job
+retry: the rewrite preserves identity, length, modified time and change time,
+so the required unequal `FileStamp` assertion fails. The same test passes locally
+and in the tag-triggered CI's I/O step, but the two failures remain unresolved;
+no test or acceptance gate was relaxed for publication.
+
 Local logs are under `build/release-validation-0.3.1/`. ARM64 native execution,
 the optional administrator MSIX install/uninstall test, and the physical
 accessibility/DPI/IME interaction rows were not repeated for this release.
