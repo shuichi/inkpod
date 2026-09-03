@@ -171,6 +171,11 @@ impl Core {
             .ok_or(CoreError::InvalidState("there is no active filter preview"))?;
         if !self.canonical_invocation_is_active() {
             let invocation = match &preview.procedure {
+                PreviewProcedure::LineCorrection(request) => {
+                    CanonicalInvocation::ApplyLineCorrection {
+                        request: request.clone(),
+                    }
+                }
                 PreviewProcedure::Filter(filter) => CanonicalInvocation::ApplyFilter {
                     plane_id: preview.plane_id.get(),
                     filter: filter.clone(),

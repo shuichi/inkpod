@@ -157,9 +157,9 @@ fn io_001_imported_genesis_source_rejects_wrong_asset_plane_and_underlay() {
     assert!(Core::from_native_file(wrong_opaque_underlay, false).is_err());
 
     let encoded = inkpod_format::encode_procedure_file(&native).unwrap();
-    assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 33);
+    assert_eq!(u32::from_le_bytes(encoded[8..12].try_into().unwrap()), 34);
     let mut previous = encoded;
-    previous[8..12].copy_from_slice(&32_u32.to_le_bytes());
+    previous[8..12].copy_from_slice(&33_u32.to_le_bytes());
     assert!(inkpod_format::decode_procedure_file(&previous).is_err());
 }
 

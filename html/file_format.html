@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="color-scheme" content="light dark">
-  <meta name="description" content="現行 .inkpod v33 ファイルフォーマットの人間向け技術解説">
-  <title>.inkpod ファイルフォーマット — v33</title>
+  <meta name="description" content="現行 .inkpod v34 ファイルフォーマットの人間向け技術解説">
+  <title>.inkpod ファイルフォーマット — v34</title>
   <style>
     :root {
       --paper: #f4f0e8;
@@ -777,10 +777,10 @@
         <p>現行状態の可変ラスターだけを正本にせず、再構築に必要な意味データと履歴を保存します。通常保存・読込はともに、失敗やキャンセルで既存ファイルや使用中の文書を途中状態へ置き換えません。</p>
       </div>
       <dl class="spec-strip">
-        <div><dt>FORMAT</dt><dd>v33</dd></div>
-        <div><dt>REPLAY EPOCH</dt><dd>28</dd></div>
+        <div><dt>FORMAT</dt><dd>v34</dd></div>
+        <div><dt>REPLAY EPOCH</dt><dd>29</dd></div>
         <div><dt>ARCHIVE / DOCM</dt><dd>7 / 9</dd></div>
-        <div><dt>ABI</dt><dd>33</dd></div>
+        <div><dt>ABI</dt><dd>34</dd></div>
         <div><dt>BYTE ORDER</dt><dd>little-endian</dd></div>
         <div><dt>MAX FILE</dt><dd>1 GiB</dd></div>
       </dl>
@@ -861,7 +861,7 @@
           </table>
         </div>
 
-        <p>未知の critical セクションは、意味を安全に解釈できないため拒否します。未知の任意セクションは <code>opaque-preserve</code> のときだけ受理し、再保存時に内容を byte-for-byte で保持します。v33 の初期 raster source は、完全不透明な RGBA MainLine だけ SolidWhite と組み合わせ、非不透明 alpha を含む場合は Transparent を保持します。source asset は Genesis 画素の復元専用で、base として合成しません。</p>
+        <p>未知の critical セクションは、意味を安全に解釈できないため拒否します。未知の任意セクションは <code>opaque-preserve</code> のときだけ受理し、再保存時に内容を byte-for-byte で保持します。v34 の初期 raster source は、完全不透明な RGBA MainLine だけ SolidWhite と組み合わせ、非不透明 alpha を含む場合は Transparent を保持します。source asset は Genesis 画素の復元専用で、base として合成しません。</p>
 
         <div class="callout">
           <strong>セル文書だけを扱います</strong>
@@ -875,7 +875,7 @@
         <p class="intro">ファイルを開く処理は、使用中の文書を直接書き換えません。別の staged Core で構造・参照・digest・再生結果を確定し、成功した完成状態だけを置き換えます。</p>
 
         <div class="flow">
-          <div class="flow-step"><div><strong>ヘッダーと directory を検証</strong><p>magic、v33、container epoch 9、サイズ、整列、範囲重複、ゼロ予約領域、FileRootDigest を確認し、META と procedure の runtime replay epoch 28 も照合します。</p></div></div>
+          <div class="flow-step"><div><strong>ヘッダーと directory を検証</strong><p>magic、v34、container epoch 9、サイズ、整列、範囲重複、ゼロ予約領域、FileRootDigest を確認し、META と procedure の runtime replay epoch 29 も照合します。</p></div></div>
           <div class="flow-step"><div><strong>セクションを検証</strong><p>必須セクション、record schema、stored/logical digest、件数とリソース上限を確認します。</p></div></div>
           <div class="flow-step"><div><strong>Genesis と Assets を構築</strong><p>schema 7 の文書アーカイブと必須 <code>DOCM</code> schema 9、standard layer topology、文書所有mask、asset descriptor・chunk・AssetId を照合し、初期状態と参照可能な不変データを staged Core に用意します。</p></div></div>
           <div class="flow-step"><div><strong>Journal を再生</strong><p>有効な CKPT があれば接頭辞を厳密照合して利用し、不一致なら Genesis から全 PROC を再生します。</p></div></div>
@@ -926,13 +926,13 @@
 
         <div class="callout">
           <strong><code>PROC</code>のすべてがPrimitiveではありません</strong>
-          <p>kind 1の<code>Commit</code>だけがPrimitive実行です。kind 2の<code>HistoryMove</code>とkind 3の<code>BranchCut</code>は履歴制御eventです。query、view、transient preview、ingestion、export、application command IDはPrimitiveIdではありません。75件のcatalog entryのうち<code>LightTableSwapWithActive</code>はsession-levelのGenesis置換であり、<code>Commit</code>には出現しません。<code>ApplyBatchOperations</code>はBatch専用ですが、通常のreplayable <code>Commit</code>です。</p>
+          <p>kind 1の<code>Commit</code>だけがPrimitive実行です。kind 2の<code>HistoryMove</code>とkind 3の<code>BranchCut</code>は履歴制御eventです。query、view、transient preview、ingestion、export、application command IDはPrimitiveIdではありません。76件のcatalog entryのうち<code>LightTableSwapWithActive</code>はsession-levelのGenesis置換であり、<code>Commit</code>には出現しません。<code>ApplyBatchOperations</code>はBatch専用ですが、通常のreplayable <code>Commit</code>です。</p>
         </div>
 
         <div class="catalog-summary" aria-label="Primitive catalog概要">
-          <div class="catalog-stat"><span>CATALOG ENTRIES</span><strong>75</strong></div>
-          <div class="catalog-stat"><span>JOURNAL REPLAYABLE</span><strong>74</strong></div>
-          <div class="catalog-stat"><span>INKSCRIPT PUBLIC</span><strong>73</strong></div>
+          <div class="catalog-stat"><span>CATALOG ENTRIES</span><strong>76</strong></div>
+          <div class="catalog-stat"><span>JOURNAL REPLAYABLE</span><strong>75</strong></div>
+          <div class="catalog-stat"><span>INKSCRIPT PUBLIC</span><strong>74</strong></div>
           <div class="catalog-stat"><span>ID FAMILIES</span><strong>9</strong></div>
         </div>
 
@@ -942,7 +942,7 @@
             <thead><tr><th>列</th><th>意味</th></tr></thead>
             <tbody>
               <tr><td>ID</td><td>非ゼロのstable <code>u32</code>。再番号付け・再利用をせず、上位16 bitのfamilyで責務を分けます。</td></tr>
-              <tr><td>Schema</td><td>canonical引数layoutのversion。75件中63件がtyped invocation schema 2です。</td></tr>
+              <tr><td>Schema</td><td>canonical引数layoutのversion。76件中62件がtyped invocation schema 2です。</td></tr>
               <tr><td>Sem.</td><td>validation、pixel、ID、no-op、workなどreplay結果に関わる意味revision。</td></tr>
               <tr><td>Work</td><td>resource admissionに使う閉じたwork-formula ID。<code>同ID</code>はPrimitiveIdと同じ数値です。</td></tr>
               <tr><td>保存</td><td><code>Commit</code>はPROCで再生可能。<code>Genesis置換</code>はjournalへ積まず、sessionの起点を置き換えます。</td></tr>
@@ -952,7 +952,7 @@
 
         <div class="catalog-toolbar" role="search">
           <input id="primitive-search" type="search" placeholder="名前・ID・用途・familyで絞り込み" aria-label="Primitive一覧を絞り込む" autocomplete="off">
-          <span class="catalog-count" id="primitive-count" aria-live="polite">75 / 75</span>
+          <span class="catalog-count" id="primitive-count" aria-live="polite">76 / 76</span>
           <button class="catalog-clear" id="primitive-clear" type="button">解除</button>
         </div>
 
@@ -1026,7 +1026,7 @@
         </details>
 
         <details class="primitive-family" id="family-05" open>
-          <summary><span class="family-code">0x0005</span> Raster paint・Fill・Effect・Filter <span class="family-count">20 primitives</span></summary>
+          <summary><span class="family-code">0x0005</span> Raster paint・Fill・Effect・Filter <span class="family-count">21 primitives</span></summary>
           <div class="details-body table-wrap">
             <table class="primitive-table">
               <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
@@ -1042,9 +1042,10 @@
                 <tr data-primitive-id="0x00050015" data-name="ApplyStamp" data-schema="2" data-semantics="2" data-work="0x00050015" data-replay="commit" data-family="raster stamp スタンプ"><td class="primitive-id">0x0005_0015</td><td>ApplyStamp</td><td>raster stampを1回適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050016" data-name="ApplyStampGesture" data-schema="2" data-semantics="2" data-work="0x00050016" data-replay="commit" data-family="raster stamp gesture スタンプ"><td class="primitive-id">0x0005_0016</td><td>ApplyStampGesture</td><td>canonical stamp gestureを1回適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050017" data-name="ApplyBlurTool" data-schema="2" data-semantics="2" data-work="0x00050017" data-replay="commit" data-family="raster blur tool pressure trace ぼかし"><td class="primitive-id">0x0005_0017</td><td>ApplyBlurTool</td><td>shapeまたはpressure traceで限定したblur tool操作を適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
-                <tr data-primitive-id="0x00050018" data-name="ApplyDustRemoval" data-schema="2" data-semantics="2" data-work="0x00050018" data-replay="commit" data-family="raster dust removal ゴミ取り"><td class="primitive-id">0x0005_0018</td><td>ApplyDustRemoval</td><td>boundedなdust removalを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00050018" data-name="ApplyDustRemoval" data-schema="3" data-semantics="3" data-work="0x00050018" data-replay="commit" data-family="raster dust removal ゴミ取り"><td class="primitive-id">0x0005_0018</td><td>ApplyDustRemoval</td><td>背景を区別し、元plane全体で測った小成分のうち操作maskへ完全に含まれるものだけ修正する。</td><td>3</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050019" data-name="EditPlaneAlpha" data-schema="2" data-semantics="2" data-work="0x00050019" data-replay="commit" data-family="raster alpha mask アルファ"><td class="primitive-id">0x0005_0019</td><td>EditPlaneAlpha</td><td>raster planeのalphaをmaskから置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x0005001a" data-name="ApplyAlphaGradient" data-schema="2" data-semantics="2" data-work="0x0005001a" data-replay="commit" data-family="raster alpha gradient アルファ"><td class="primitive-id">0x0005_001A</td><td>ApplyAlphaGradient</td><td>raster alphaへgradientを適用する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x0005001b" data-name="ApplyLineCorrection" data-schema="2" data-semantics="1" data-work="0x0005001b" data-replay="commit" data-family="raster line correction connect dust width 線修正"><td class="primitive-id">0x0005_001B</td><td>ApplyLineCorrection</td><td>背景と操作範囲を固定し、ゴミ取り・恒久線接続・太く／細く／均一幅を一transactionで実行する。</td><td>2</td><td>1</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050020" data-name="ApplyFilter" data-schema="2" data-semantics="2" data-work="0x00050020" data-replay="commit" data-family="raster filter フィルター"><td class="primitive-id">0x0005_0020</td><td>ApplyFilter</td><td>filter操作を確定する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050040" data-name="ReplaceRasterColors" data-schema="2" data-semantics="2" data-work="0x00050040" data-replay="commit" data-family="raster color replace 色置換"><td class="primitive-id">0x0005_0040</td><td>ReplaceRasterColors</td><td>exact-depth color pairでbounded raster色を置換する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00050041" data-name="SeparateRasterColors" data-schema="2" data-semantics="3" data-work="0x00050041" data-replay="commit" data-family="raster color separation 色分解"><td class="primitive-id">0x0005_0041</td><td>SeparateRasterColors</td><td>bounded rasterの色分解を実行する。</td><td>2</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
@@ -1062,7 +1063,7 @@
             <table class="primitive-table">
               <thead><tr><th>ID</th><th>Canonical name</th><th>用途</th><th>Schema</th><th>Sem.</th><th>Work</th><th>保存</th></tr></thead>
               <tbody>
-                <tr data-primitive-id="0x00060001" data-name="ApplySelection" data-schema="2" data-semantics="3" data-work="0x00060001" data-replay="commit" data-family="selection 選択"><td class="primitive-id">0x0006_0001</td><td>ApplySelection</td><td>range interpretationとconstruction optionを含むselectionを合成する。</td><td>2</td><td>3</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
+                <tr data-primitive-id="0x00060001" data-name="ApplySelection" data-schema="2" data-semantics="4" data-work="0x00060001" data-replay="commit" data-family="selection 選択"><td class="primitive-id">0x0006_0001</td><td>ApplySelection</td><td>range／constructionと探索前の仮想gap境界を使い、sourceを変えずにselectionを合成する。</td><td>2</td><td>4</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00060002" data-name="InvertSelection" data-schema="2" data-semantics="2" data-work="0x00060002" data-replay="commit" data-family="selection 選択 反転"><td class="primitive-id">0x0006_0002</td><td>InvertSelection</td><td>selection maskを反転する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00060003" data-name="ClearSelection" data-schema="2" data-semantics="2" data-work="0x00060003" data-replay="commit" data-family="selection 選択 解除"><td class="primitive-id">0x0006_0003</td><td>ClearSelection</td><td>selection maskを消去する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
                 <tr data-primitive-id="0x00060004" data-name="ResizeSelection" data-schema="2" data-semantics="2" data-work="0x00060004" data-replay="commit" data-family="selection 選択 拡張 縮小"><td class="primitive-id">0x0006_0004</td><td>ResizeSelection</td><td>selection maskを指定pixel数だけ拡張・縮小する。</td><td>2</td><td>2</td><td>同ID</td><td><span class="policy-badge">Commit</span></td></tr>
@@ -1256,7 +1257,7 @@
         </div>
 
         <details open>
-          <summary>v33 header — 128 bytes</summary>
+          <summary>v34 header — 128 bytes</summary>
           <div class="details-body">
             <figure class="layout-figure" aria-labelledby="header-map-title">
               <figcaption class="figure-head">
@@ -1266,7 +1267,7 @@
               <div class="byte-ruler-scroll">
                 <div class="byte-ruler units-4">
                   <div class="byte-block identity span-2" data-offset="0"><strong>MAGIC</strong><small>8 B</small></div>
-                  <div class="byte-block identity span-1" data-offset="8"><strong>FORMAT</strong><small>u32 = 33</small></div>
+                  <div class="byte-block identity span-1" data-offset="8"><strong>FORMAT</strong><small>u32 = 34</small></div>
                   <div class="byte-block identity span-1" data-offset="12"><strong>EPOCH</strong><small>u32 = 9</small></div>
                   <div class="byte-block span-1" data-offset="16"><strong>HEADER SIZE</strong><small>u32 = 128</small></div>
                   <div class="byte-block reserved span-1" data-offset="20"><strong>FLAGS</strong><small>u32 = 0</small></div>
@@ -1287,7 +1288,7 @@
                 <thead><tr><th>Offset</th><th>Size</th><th>型／bytes</th><th>Field</th><th>必須条件</th></tr></thead>
                 <tbody>
                   <tr><td>0</td><td>8</td><td><code>[u8; 8]</code></td><td>magic</td><td><code>49 4E 4B 50 4F 44 00 00</code></td></tr>
-                  <tr><td>8</td><td>4</td><td><code>u32</code></td><td>top-level format version</td><td><code>33</code></td></tr>
+                  <tr><td>8</td><td>4</td><td><code>u32</code></td><td>top-level format version</td><td><code>34</code></td></tr>
                   <tr><td>12</td><td>4</td><td><code>u32</code></td><td>container-layout epoch</td><td><code>9</code></td></tr>
                   <tr><td>16</td><td>4</td><td><code>u32</code></td><td>header size</td><td><code>128</code></td></tr>
                   <tr><td>20</td><td>4</td><td><code>u32</code></td><td>required flags</td><td><code>0</code></td></tr>
@@ -1565,18 +1566,18 @@
       <section class="doc-section" id="compatibility">
         <span class="section-kicker">12 / COMPATIBILITY</span>
         <h2>Versionと互換方針</h2>
-        <p class="intro">現行 reader/writer が受理する Cell native contract は、top-level version 33／runtime replay epoch 28／DocumentArchive schema 7／必須 <code>DOCM</code> schema 9／現在の primitive catalog の組み合わせだけです。Cut descriptorには対応しません。</p>
+        <p class="intro">現行 reader/writer が受理する Cell native contract は、top-level version 34／runtime replay epoch 29／DocumentArchive schema 7／必須 <code>DOCM</code> schema 9／現在の primitive catalog の組み合わせだけです。Cut descriptorには対応しません。</p>
 
         <div class="cards">
-          <article class="card"><span class="card-number">VERSION</span><h3>v33 only</h3><p>v33 以外は payload decode や live Core の置換前に拒否します。</p></article>
-          <article class="card"><span class="card-number">SEMANTICS</span><h3>epoch 28</h3><p>Cellのreplay 結果を変える規則変更は epoch と top-level version を同時に更新します。</p></article>
+          <article class="card"><span class="card-number">VERSION</span><h3>v34 only</h3><p>v34 以外は payload decode や live Core の置換前に拒否します。</p></article>
+          <article class="card"><span class="card-number">SEMANTICS</span><h3>epoch 29</h3><p>Cellのreplay 結果を変える規則変更は epoch と top-level version を同時に更新します。</p></article>
           <article class="card"><span class="card-number">DOCUMENT</span><h3>archive 7 / DOCM 9</h3><p><code>DOCM</code>欠落やstandard layer／mask topology不正は互換補完せず拒否します。</p></article>
           <article class="card"><span class="card-number">COMPRESSION</span><h3>None</h3><p>現在受理する compression code は 0 のみです。</p></article>
         </div>
 
         <div class="callout warning">
           <strong>後方互換性は未提供</strong>
-          <p>フォーマットフリーズが明示されるまでは current-only です。旧版 reader、migration、compatibility shim はありません。この制約は、同一 v33 ファイル内の意味データを非破壊に保持する設計とは別の軸です。</p>
+          <p>フォーマットフリーズが明示されるまでは current-only です。旧版 reader、migration、compatibility shim はありません。この制約は、同一 v34 ファイル内の意味データを非破壊に保持する設計とは別の軸です。</p>
         </div>
       </section>
 
@@ -1603,11 +1604,11 @@
               <li><a href="../SPEC.md">SPEC.md</a> — native 永続化の要求</li>
               <li><a href="../docs/file-format.md">docs/file-format.md</a> — normative byte/schema contract</li>
               <li><a href="../rust/inkpod-format/src/native/mod.rs">rust/inkpod-format/src/native</a> — current schema-7 archive／schema-9 DOCM codec</li>
-              <li><a href="../rust/inkpod-format/src/procedure.rs">rust/inkpod-format/src/procedure.rs</a> — current v33 top-level procedure container codec</li>
+              <li><a href="../rust/inkpod-format/src/procedure.rs">rust/inkpod-format/src/procedure.rs</a> — current v34 top-level procedure container codec</li>
               <li><a href="../rust/inkpod-core/src/persistence.rs">rust/inkpod-core/src/persistence.rs</a> — Core mapping、replay、checkpoint、compaction</li>
               <li><a href="../rust/inkpod-core/src/primitive/catalog.rs">rust/inkpod-core/src/primitive/catalog.rs</a> — closed Primitive catalogとreplay contract</li>
               <li><a href="../rust/inkpod-core/src/primitive/model.rs">rust/inkpod-core/src/primitive/model.rs</a> — stable PrimitiveId定義</li>
-              <li><a href="../rust/inkpod-core/tests/contracts/native_v33.rs">rust/inkpod-core/tests/contracts/native_v33.rs</a> — current v33 public Core contract tests</li>
+              <li><a href="../rust/inkpod-core/tests/contracts/native_v33.rs">rust/inkpod-core/tests/contracts/native_v33.rs</a> — current v34 public Core contract tests</li>
               <li><a href="../rust/inkpod-format/tests/unit/native.rs">rust/inkpod-format/tests/unit/native.rs</a> — byte layout、digest、atomic I/O tests</li>
             </ul>
           </div>
@@ -1617,7 +1618,7 @@
   </div>
 
   <footer>
-    <p>対象契約: <span class="mono">.inkpod v33 / runtime replay epoch 28 / archive 7 / DOCM 9</span> — 本文は現在の形式だけを説明します。</p>
+    <p>対象契約: <span class="mono">.inkpod v34 / runtime replay epoch 29 / archive 7 / DOCM 9</span> — 本文は現在の形式だけを説明します。</p>
   </footer>
 
   <script>

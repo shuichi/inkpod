@@ -47,6 +47,9 @@ struct CanvasGeometryPreview {
     float stroke_width;
     std::uint32_t reserved;
     CanvasGeometryPoint points[kCanvasGeometryPreviewPoints];
+    // Display-only band preview; zero keeps the existing outline path.
+    std::uint32_t brush_shape{};
+    float point_diameters[kCanvasGeometryPreviewPoints]{};
 };
 
 enum class SnapshotOwnerKind : std::uint8_t {

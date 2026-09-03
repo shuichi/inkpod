@@ -199,7 +199,7 @@ bool CatalogHasExactlyOneOwner(const CommandStateSet& states) noexcept {
         }
     }
     return states.size() == kProductionCommandStateCount
-        && kProductionCommandStateCount == 312U
+        && kProductionCommandStateCount == 317U
         && FindCommandState(states, kRetiredJobProgressCommand) == nullptr;
 }
 
@@ -262,7 +262,7 @@ bool ShortcutCatalogIsSparseAndPrefixFree() {
             return false;
         }
     }
-    if (menu_commands.size() != 304U
+    if (menu_commands.size() != 309U
         || shortcuts.size() != 29U
         || commands.size() != kProductionCommandStateCount
         || is_menu_command(IDM_COLOR_PIN)

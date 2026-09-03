@@ -1,5 +1,20 @@
 use super::*;
 
+/// An explicit line edit on one stable plane. The document-space region is
+/// intersected with the existing selection; `None` uses that selection or the
+/// entire plane. Construction options apply only to the supplied region.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LineCorrectionRequest {
+    /// Stable destination plane ID in this document.
+    pub plane_id: u64,
+    /// Optional document-space operation region.
+    pub region: Option<SelectionShape>,
+    /// Brush geometry captured at gesture begin, including screen-size zoom.
+    pub construction: crate::SelectionConstructionOptions,
+    /// Correction mode, units, and background policy.
+    pub correction: crate::LineCorrection,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 /// Checksums and transient revision for the active filter preview.
 pub struct FilterPreviewInfo {
@@ -15,6 +30,7 @@ pub struct FilterPreviewInfo {
 
 #[derive(Clone, Debug)]
 pub(crate) enum PreviewProcedure {
+    LineCorrection(LineCorrectionRequest),
     Filter(Filter),
     Dust {
         shape: Option<SelectionShape>,

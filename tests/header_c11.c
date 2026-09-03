@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 33U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 34U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
 _Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
 _Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");

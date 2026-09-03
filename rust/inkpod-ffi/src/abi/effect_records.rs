@@ -276,6 +276,33 @@ pub struct InkpodDustInput {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodLineCorrectionInput {
+    pub struct_size: u32,
+    pub mode: u32,
+    pub feature_flags: u64,
+    pub plane_id: u64,
+    pub view_id: u64,
+    pub expected_document_revision: u64,
+    pub coordinate_space: u32,
+    pub shape: u32,
+    pub use_region: u32,
+    pub background_mode: u32,
+    pub gap: u32,
+    pub line_width: u32,
+    pub amount: u32,
+    pub brush_shape: u32,
+    pub pressure_size: u32,
+    pub screen_size: u32,
+    pub background_rgba: [u16; 4],
+    pub diameter: f32,
+    pub view_zoom_q16: i64,
+    pub samples: *const InkpodStrokeSample,
+    pub sample_count: u64,
+    pub sample_stride_bytes: u64,
+}
+
+#[repr(C)]
 #[derive(Clone, Copy)]
 pub struct InkpodTaskInfo {
     pub struct_size: u32,

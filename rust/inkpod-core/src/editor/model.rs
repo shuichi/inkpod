@@ -127,10 +127,14 @@ pub enum EditorTool {
     EffectDust = 1_105,
     /// Alpha-gradient effect command.
     EffectAlphaGradient = 1_106,
+    /// Locally connect facing raster line endpoints.
+    EffectLineConnect = 1_107,
+    /// Locally thicken, thin, or normalize raster line width.
+    EffectLineWidth = 1_108,
 }
 
 impl EditorTool {
-    pub(crate) const ALL: [Self; 24] = [
+    pub(crate) const ALL: [Self; 26] = [
         Self::Pencil,
         Self::Brush,
         Self::Eraser,
@@ -155,6 +159,8 @@ impl EditorTool {
         Self::EffectStamp,
         Self::EffectDust,
         Self::EffectAlphaGradient,
+        Self::EffectLineConnect,
+        Self::EffectLineWidth,
     ];
 
     pub(crate) const fn consumes_color(self) -> bool {

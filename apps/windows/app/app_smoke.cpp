@@ -7746,6 +7746,199 @@ int RunPaintingRecoverySmoke(ApplicationHost& state) noexcept {
     return passed ? 0 : 214;
 }
 
+// Audit a real Canvas gesture against an independent, complete 32x32 mask.
+// This temporary session keeps unrelated product-smoke document state intact.
+int RunLineCorrectionImplementationSmoke(ApplicationHost& state) noexcept;
+
+int RunLineSelectionAuditSmoke(ApplicationHost& state) noexcept {
+    const auto previous_view = state.routing.targets.ActiveDocumentView();
+    const auto baseline_count = state.Documents().Count();
+    if (CreateCell(state, 32U, 32U, 96'000U) != INKPOD_STATUS_OK) {
+        return 23100;
+    }
+    const auto audit_session = state.Document().id;
+    const HWND audit_window = state.Workspace().windows.window;
+    const bool was_visible = IsWindowVisible(audit_window) != FALSE;
+    // Hidden Canvas slots intentionally have no fresh snapshot. Publish this
+    // fixture before converting document points into actual device coordinates.
+    ShowWindow(audit_window, SW_SHOWNOACTIVATE);
+    PumpPendingWindowMessages();
+    const auto exercise = [&state]() -> int {
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_PLANE_MAIN_LINE, 0);
+        const auto dust_state = GetMenuState(
+            GetMenu(state.Workspace().windows.window), IDM_EFFECT_DUST, MF_BYCOMMAND);
+        if (dust_state == static_cast<UINT>(-1)
+            || (dust_state & (MF_DISABLED | MF_GRAYED)) != 0U) {
+            return 23101;
+        }
+        std::fputs("line-selection implementation: Dust is available on MainLine\n", stderr);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_TRACE, 0);
+        SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_MODE_NEW, 0);
+        if (!UpdateEditorSelectionOptionsForSmoke(state, [](InkpodEditorSelectionOptions& options) {
+                options.diameter_q16 = 5U << 16U;
+                options.trace_shape = INKPOD_TRACE_ROUND;
+                options.interpretation = INKPOD_RANGE_NORMAL;
+                options.construction_flags = 0U;
+            })
+            || ApplyView(state, INKPOD_VIEW_SET_RULER_VISIBLE, 0.0, 0.0) != INKPOD_STATUS_OK
+            || FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) {
+            return 23102;
+        }
+        using Mask = std::array<bool, 32U * 32U>;
+        Mask expected{};
+        for (int y = 0; y < 32; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                bool inside = (x >= 6 && x <= 10 && y >= 8 && y <= 24)
+                    || (x >= 8 && x <= 24 && y >= 22 && y <= 26);
+                for (const POINT center : {POINT{8, 8}, POINT{8, 24}, POINT{24, 24}}) {
+                    const auto dx = x - center.x;
+                    const auto dy = y - center.y;
+                    inside = inside || dx * dx + dy * dy <= 6;
+                }
+                expected[static_cast<std::size_t>(y * 32 + x)] = inside;
+            }
+        }
+        const auto read_mask = [&state](Mask& selected) {
+            selected.fill(false);
+            return state.engine->Invoke([&selected](InkpodCore* core) {
+                const InkpodSnapshotOptions options{sizeof(InkpodSnapshotOptions), 0U, INKPOD_FEATURE_NONE};
+                InkpodSnapshot* snapshot{};
+                InkpodStatus status = inkpod_core_build_snapshot(core, &options, &snapshot);
+                InkpodSnapshotView view{};
+                view.struct_size = sizeof(view);
+                if (status == INKPOD_STATUS_OK) {
+                    status = inkpod_snapshot_get_view(snapshot, &view);
+                }
+                if (status == INKPOD_STATUS_OK) {
+                    // This fixture has entirely empty source planes. Its only
+                    // nontransparent snapshot pixels are the selection overlay.
+                    for (std::uint64_t index = 0; index < view.tile_count; ++index) {
+                        const auto& tile = view.tiles[index];
+                        for (std::uint32_t y = 0; y < tile.height; ++y) {
+                            for (std::uint32_t x = 0; x < tile.width; ++x) {
+                                const auto px = tile.origin_x + static_cast<int>(x);
+                                const auto py = tile.origin_y + static_cast<int>(y);
+                                if (px >= 0 && px < 32 && py >= 0 && py < 32) {
+                                    selected[static_cast<std::size_t>(py * 32 + px)] =
+                                        tile.pixels[static_cast<std::size_t>(y) * tile.stride_bytes + x * 4U + 3U] != 0U;
+                                }
+                            }
+                        }
+                    }
+                }
+                const auto released = inkpod_snapshot_release(&snapshot);
+                return status == INKPOD_STATUS_OK ? released : status;
+            }, false, false) == INKPOD_STATUS_OK;
+        };
+        int preview_failure = 0;
+        for (const std::uint32_t scenario : {0U, 1U, 2U, 3U}) {
+            const bool flipped = scenario == 1U;
+            if (scenario != 0U) SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_SELECTION_CLEAR, 0);
+            if (state.ActiveView().presentation.flip_horizontal != flipped) {
+                SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_FLIP_HORIZONTAL, 0);
+            }
+            if (FitCanvas(state, INKPOD_VIEW_FIT) != INKPOD_STATUS_OK) return 23112;
+            if (!WaitForSequencePresentation(state, true)
+                || SendMessageW(state.Workspace().windows.canvas,
+                    inkpod::renderer::kCanvasRenderOnce, 0, 0) != 1) {
+                return 23103;
+            }
+            inkpod::renderer::CanvasDocumentBounds bounds{};
+            InkpodDocumentInfo before{};
+            Mask actual{};
+            if (!QueryDocument(state, before) || !read_mask(actual)
+                || actual != Mask{}
+                || !inkpod::renderer::GetCanvasDocumentBounds(state.Workspace().windows.canvas, bounds)
+                || bounds.right <= bounds.left || bounds.bottom <= bounds.top) {
+                return 23104;
+            }
+            if (!UpdateEditorSelectionOptionsForSmoke(state, [&](InkpodEditorSelectionOptions& options) {
+                    const double zoom = (bounds.right - bounds.left) / 32.0;
+                    options.diameter_q16 = static_cast<std::uint32_t>(std::llround(
+                        5.0 * (scenario == 3U ? zoom : 1.0) * 65536.0));
+                    options.construction_flags = scenario == 3U ? INKPOD_SELECTION_TRACE_SCREEN_SIZE : 0U;
+                })) return 23113;
+            const auto sample = [&bounds, flipped](float x, float y) {
+                return InkpodStrokeSample{sizeof(InkpodStrokeSample), 0U,
+                    static_cast<float>(bounds.left + (bounds.right - bounds.left) * (flipped ? 32.0F - x : x) / 32.0),
+                    static_cast<float>(bounds.top + (bounds.bottom - bounds.top) * y / 32.0), 1.0F, 0U};
+            };
+            const std::array<InkpodStrokeSample, 3> samples{
+                sample(8.5F, 8.5F), sample(8.5F, 24.5F), sample(24.5F, 24.5F)};
+            const auto send = [&state](inkpod::renderer::CanvasStrokeEventKind kind,
+                                  const InkpodStrokeSample* point, std::size_t count) {
+                return inkpod::renderer::SubmitCanvasStrokeEvent(state.Workspace().windows.canvas,
+                    inkpod::renderer::CanvasStrokeEvent{kind, point, count});
+            };
+            using Kind = inkpod::renderer::CanvasStrokeEventKind;
+            if (!send(Kind::Begin, samples.data(), 1U)
+                || !send(Kind::Append, samples.data() + 1U, 1U)) {
+                return 23105;
+            }
+            inkpod::renderer::CanvasGeometryPreview preview{};
+            preview.struct_size = sizeof(preview);
+            InkpodDocumentInfo during{};
+            const bool preview_read = inkpod::renderer::GetCanvasGeometryPreview(state.Workspace().windows.canvas, preview);
+            const bool during_read = QueryDocument(state, during);
+            const bool cancelled = send(Kind::Cancel, nullptr, 0U);
+            const bool cancelled_mask_read = read_mask(actual);
+            if (!preview_read || preview.active != 1U || !during_read
+                || during.document_revision != before.document_revision
+                || !cancelled || !cancelled_mask_read || actual != Mask{}) {
+                std::fprintf(stderr, "line-selection audit preview: read=%d active=%u during=%d revisions=%llu/%llu cancel=%d mask_read=%d selected=%zu tool=%u flipped=%d\n",
+                    preview_read ? 1 : 0, preview.active, during_read ? 1 : 0,
+                    static_cast<unsigned long long>(before.document_revision),
+                    static_cast<unsigned long long>(during.document_revision),
+                    cancelled ? 1 : 0, cancelled_mask_read ? 1 : 0,
+                    static_cast<std::size_t>(std::count(actual.begin(), actual.end(), true)),
+                    state.Workspace().tools.active_tool, flipped ? 1 : 0);
+                // Retain the failed assertion while also auditing commit and
+                // history; the smoke still returns failure after these probes.
+                preview_failure = 23106;
+            }
+            if (!send(Kind::Begin, samples.data(), 1U)) return 23114;
+            if (scenario >= 2U) {
+                if (ApplyView(state, INKPOD_VIEW_ZOOM_AT, 0.5, 0.0, 0.0) != INKPOD_STATUS_OK
+                    || ApplyView(state, INKPOD_VIEW_PAN_BY, 17.0, 11.0) != INKPOD_STATUS_OK) return 23115;
+                SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_VIEW_FLIP_HORIZONTAL, 0);
+            }
+            if (!send(Kind::Append, samples.data() + 1U, 1U)
+                || !send(Kind::End, samples.data() + 2U, 1U)
+                || !read_mask(actual) || actual != expected) {
+                std::fprintf(stderr, "line-selection audit: L-band Canvas mask mismatch; bounds=%.3f,%.3f..%.3f,%.3f selected=%zu expected=%zu flipped=%d\n",
+                    bounds.left, bounds.top, bounds.right, bounds.bottom,
+                    static_cast<std::size_t>(std::count(actual.begin(), actual.end(), true)),
+                    static_cast<std::size_t>(std::count(expected.begin(), expected.end(), true)), flipped ? 1 : 0);
+                return 23107;
+            }
+            InkpodDocumentInfo after{};
+            if (!QueryDocument(state, after)
+                || after.document_revision != before.document_revision + 1U
+                || after.main_plane_checksum != before.main_plane_checksum
+                || after.color_plane_checksum != before.color_plane_checksum) {
+                return 23108;
+            }
+            SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_UNDO, 0);
+            if (!read_mask(actual) || actual != Mask{}) { return 23109; }
+            SendMessageW(state.Workspace().windows.window, WM_COMMAND, IDM_EDIT_REDO, 0);
+            if (!read_mask(actual) || actual != expected) { return 23110; }
+        }
+        std::fprintf(stderr, "line-selection audit: exact 32x32 Canvas L-band, begin-zoom/pan/flip capture, screen size, source invariance and Undo/Redo passed; preview_failure=%d\n", preview_failure);
+        return preview_failure;
+    };
+    const int selection_result = exercise();
+    const int result = selection_result == 0 ? RunLineCorrectionImplementationSmoke(state) : selection_result;
+    if (!was_visible) {
+        ShowWindow(audit_window, SW_HIDE);
+    }
+    if (!state.CloseDocumentSession(audit_session)
+        || (previous_view && !state.ActivateDocumentView(previous_view))
+        || state.Documents().Count() != baseline_count) {
+        return 23111;
+    }
+    return result;
+}
+
 int RunDocumentEditingSmoke(ApplicationHost& state) noexcept {
     if (state.engine == nullptr) {
         return 300;
@@ -21730,6 +21923,9 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
     }
     if (exit_code == 0) {
         exit_code = runtime::RunStatusJobProgressSmoke(state);
+    }
+    if (exit_code == 0) {
+        exit_code = runtime::RunLineSelectionAuditSmoke(state);
     }
     if (exit_code == 0) {
         exit_code = runtime::RunDrawingPersistenceSmoke(state);

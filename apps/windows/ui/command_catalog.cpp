@@ -61,7 +61,7 @@ consteval auto BuildMenuCommandIds() {
 }
 
 constexpr auto kMenuCommandIds = BuildMenuCommandIds();
-static_assert(kMenuCommandIds.size() == 304U);
+static_assert(kMenuCommandIds.size() == 309U);
 
 constexpr InkpodShortcutStroke Stroke(UINT key, std::uint32_t modifiers = 0U) noexcept {
     return {key, modifiers};

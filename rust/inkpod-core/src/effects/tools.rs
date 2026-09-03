@@ -329,9 +329,13 @@ impl Core {
         &mut self,
         plane_id: u64,
         shape: Option<&SelectionShape>,
-        options: DustRemoval,
+        mut options: DustRemoval,
         mut progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<DispatchOutcome, CoreError> {
+        let document = self.document.as_ref().ok_or(CoreError::NoDocument)?;
+        let plane = editable_line_plane(document, PlaneId::from_raw(plane_id))?;
+        options.background =
+            super::line_correction::resolved_line_background(options.background, plane.kind);
         if !self.canonical_invocation_is_active() {
             let shape = shape.cloned();
             let staged_shape = shape.clone();
@@ -370,7 +374,7 @@ impl Core {
         let base_revision = self.document_revision;
         let before = self.document.as_ref().ok_or(CoreError::NoDocument)?.clone();
         let revision = self.next_document_revision()?;
-        let plane = editable_rgba_plane(&before, plane_id)?;
+        let plane = editable_line_plane(&before, plane_id)?;
         let mut operation_mask = match shape {
             Some(shape) => Some(selection_mask_for_shape(
                 &before,
@@ -447,7 +451,7 @@ impl Core {
         kind: Option<EffectRegionKind>,
         samples: &[StrokeSample],
         diameter: f32,
-        options: DustRemoval,
+        mut options: DustRemoval,
         mut progress: impl FnMut(u64, u64) -> bool,
     ) -> Result<FilterPreviewInfo, CoreError> {
         self.ensure_no_active_stroke()?;
@@ -460,7 +464,9 @@ impl Core {
                 self.effect_region_for_view(view_id, coordinate_space, kind, samples, diameter)
             })
             .transpose()?;
-        let plane = editable_rgba_plane(&base_document, plane_id)?;
+        let plane = editable_line_plane(&base_document, plane_id)?;
+        options.background =
+            super::line_correction::resolved_line_background(options.background, plane.kind);
         let mut operation_mask = shape
             .as_ref()
             .map(|shape| {

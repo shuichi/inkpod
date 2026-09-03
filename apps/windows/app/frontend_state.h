@@ -47,6 +47,9 @@ struct CanvasEffectOptions {
     bool option{};
     bool option2{};
     std::vector<GradientStopValue> stops;
+    std::array<std::uint32_t, 3U> line_values{1U, 0U, 0U};
+    std::array<std::uint16_t, 4U> background_rgba{};
+    std::wstring background_text;
 };
 
 struct FilterJob {
@@ -266,6 +269,15 @@ struct EditorProcedureCapture final {
     Generation generation{};
     std::uint64_t core_view_id{};
     InkpodEditorStateInfo state{sizeof(InkpodEditorStateInfo)};
+    std::uint64_t document_revision{};
+    double canvas_left{};
+    double canvas_top{};
+    double zoom{1.0};
+    std::uint32_t width{};
+    std::uint32_t height{};
+    bool flip_horizontal{};
+    bool flip_vertical{};
+    bool frame_valid{};
     bool valid{};
 };
 

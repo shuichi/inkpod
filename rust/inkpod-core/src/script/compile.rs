@@ -712,6 +712,15 @@ pub(super) fn catalog(
                 restricted(67_108_864, &["semantic_target"], "boundary_airbrush")
             }
             "apply_dust_removal" => restricted(67_108_864, &["semantic_target"], "dust_removal"),
+            "apply_line_correction" => restricted(
+                1_100_000_000,
+                &[
+                    "semantic_target",
+                    "state_coupled_raster",
+                    "state_coupled_selection",
+                ],
+                "line_correction",
+            ),
             "apply_filter" => restricted(1_100_000_000, &["semantic_target"], "filter"),
             "replace_raster_colors" => {
                 restricted(67_108_864, &["semantic_target"], "color_replace")

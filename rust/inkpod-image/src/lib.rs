@@ -3,6 +3,7 @@
 mod canonical;
 mod edit;
 mod fill;
+mod line_correction;
 mod output_color_guard;
 mod palette;
 mod pixel;
@@ -24,6 +25,10 @@ pub use fill::{
     closed_region_fill_with_protection_and_cancel, extend_fill, extend_fill_with_cancel,
     extend_fill_with_protection_and_cancel, seed_fill, seed_fill_with_cancel,
     seed_fill_with_protection_and_cancel,
+};
+pub use line_correction::{
+    LineBackground, LineCorrection, LineWidthMode, apply_line_connection, apply_line_width,
+    virtual_gap_barrier,
 };
 pub use output_color_guard::{
     Bt709Ycbcr16, OutputColorGuardCategory, bt709_conservative_guard_category,

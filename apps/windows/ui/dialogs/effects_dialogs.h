@@ -27,6 +27,10 @@ struct EffectEditorState {
         UiText(UiStringId::ParameterP3),
         UiText(UiStringId::ParameterP4)};
     std::array<std::int32_t, 5U> parameters{};
+    std::size_t parameter_count{5U};
+    bool line_options{};
+    std::array<std::uint32_t, 3U> line_values{1U, 0U, 0U};
+    const wchar_t* points_label{};
     std::array<const wchar_t*, 5U> channel_labels{};
     std::array<std::uint32_t, 5U> channel_values{};
     std::size_t channel_count{};

@@ -25,6 +25,7 @@ enum class ToolOptionsDetailKind : std::uint8_t {
     View,
     Effect,
     BoundaryEffect,
+    LineEffect,
 };
 
 struct ToolOptionsDetailModel {

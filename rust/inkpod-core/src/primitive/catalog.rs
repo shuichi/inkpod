@@ -124,7 +124,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
     entry!(APPLY_STAMP, 2, "ApplyStamp", 2, 0x0005_0015),
     entry!(APPLY_STAMP_GESTURE, 2, "ApplyStampGesture", 2, 0x0005_0016),
     entry!(APPLY_BLUR_TOOL, 2, "ApplyBlurTool", 2, 0x0005_0017),
-    entry!(APPLY_DUST_REMOVAL, 2, "ApplyDustRemoval", 2, 0x0005_0018),
+    entry!(APPLY_DUST_REMOVAL, 3, "ApplyDustRemoval", 3, 0x0005_0018),
     entry!(EDIT_PLANE_ALPHA, 2, "EditPlaneAlpha", 2, 0x0005_0019),
     entry!(
         APPLY_ALPHA_GRADIENT,
@@ -132,6 +132,13 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         "ApplyAlphaGradient",
         2,
         0x0005_001a
+    ),
+    entry!(
+        APPLY_LINE_CORRECTION,
+        2,
+        "ApplyLineCorrection",
+        1,
+        0x0005_001b
     ),
     entry!(APPLY_FILTER, 2, "ApplyFilter", 2, 0x0005_0020),
     entry!(
@@ -170,7 +177,7 @@ const PRIMITIVE_CATALOG: &[PrimitiveCatalogEntry] = &[
         0x0005_0044,
         private
     ),
-    entry!(APPLY_SELECTION, 2, "ApplySelection", 3, 0x0006_0001),
+    entry!(APPLY_SELECTION, 2, "ApplySelection", 4, 0x0006_0001),
     entry!(INVERT_SELECTION, 2, "InvertSelection", 2, 0x0006_0002),
     entry!(CLEAR_SELECTION, 2, "ClearSelection", 2, 0x0006_0003),
     entry!(RESIZE_SELECTION, 2, "ResizeSelection", 2, 0x0006_0004),
@@ -361,7 +368,7 @@ mod tests {
 
     #[test]
     fn catalog_is_sorted_unique_bounded_and_matches_replay_schema_lookup() {
-        assert_eq!(PRIMITIVE_CATALOG.len(), 75);
+        assert_eq!(PRIMITIVE_CATALOG.len(), 76);
         for pair in PRIMITIVE_CATALOG.windows(2) {
             assert!(pair[0].id < pair[1].id);
         }

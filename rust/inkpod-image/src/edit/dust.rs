@@ -1,7 +1,10 @@
-use super::common::*;
-use super::*;
-use crate::{RasterError, TileRaster};
+use super::DustRemoval;
+use crate::line_correction::{bounded_vec, neighbors};
+use crate::{DustMode, PixelValue, RasterError, TileRaster};
+use std::collections::VecDeque;
 
+/// Classifies complete source components; only wholly selected components change.
+/// Foreground/outliers use eight neighbors, holes four. Cancellation returns no raster.
 pub fn apply_dust_removal(
     source: &TileRaster,
     operation_mask: Option<&TileRaster>,
@@ -9,168 +12,150 @@ pub fn apply_dust_removal(
     revision: u64,
     mut progress: impl FnMut(u64, u64) -> bool,
 ) -> Result<TileRaster, RasterError> {
-    validate_color_raster(source)?;
-    validate_selection(source, operation_mask)?;
+    let count = crate::line_correction::grid::validate(source, operation_mask)?;
+    options.background.validate(source.format())?;
     if options.maximum_pixels == 0 || options.maximum_pixels > 65_536 {
         return Err(RasterError::InvalidDimensions);
     }
-    let pixel_count = usize::try_from(u64::from(source.width()) * u64::from(source.height()))
-        .map_err(|_| RasterError::InvalidDimensions)?;
-    let total = u64::try_from(pixel_count).map_err(|_| RasterError::InvalidDimensions)?;
-    let mut visited = vec![false; pixel_count];
+    let mut visited = bounded_vec(count, 0u8)?;
     let mut result = source.clone();
-    let mut completed = 0_u64;
-    for y in 0..source.height() {
-        for x in 0..source.width() {
-            let index = raster_index(source.width(), x, y)?;
-            if visited[index] || !selected(operation_mask, x, y)? {
-                completed += 1;
-                continue;
-            }
-            let seed = source
-                .pixel(x, y)?
-                .rgba16()
-                .ok_or(RasterError::PixelFormatMismatch)?;
-            let eligible = match options.mode {
-                DustMode::RemoveForeground => seed[3] != 0,
-                DustMode::FillTransparentHoles => seed[3] == 0,
-                DustMode::ReplaceColorOutliers => true,
-            };
-            if !eligible {
-                visited[index] = true;
-                completed += 1;
-                continue;
-            }
-            let mut queue = std::collections::VecDeque::from([(x, y)]);
-            let mut component = Vec::new();
-            let mut oversized = false;
-            let mut touches_boundary = false;
-            while let Some((candidate_x, candidate_y)) = queue.pop_front() {
-                let candidate_index = raster_index(source.width(), candidate_x, candidate_y)?;
-                if visited[candidate_index] || !selected(operation_mask, candidate_x, candidate_y)?
-                {
-                    continue;
-                }
-                let value = source
-                    .pixel(candidate_x, candidate_y)?
-                    .rgba16()
-                    .ok_or(RasterError::PixelFormatMismatch)?;
-                let same_component = match options.mode {
-                    DustMode::RemoveForeground => value[3] != 0,
-                    DustMode::FillTransparentHoles => value[3] == 0,
-                    DustMode::ReplaceColorOutliers => value == seed,
-                };
-                if !same_component {
-                    continue;
-                }
-                visited[candidate_index] = true;
-                if component.len() <= options.maximum_pixels as usize {
-                    component.push((candidate_x, candidate_y));
-                } else {
-                    oversized = true;
-                }
-                touches_boundary |= candidate_x == 0
-                    || candidate_y == 0
-                    || candidate_x + 1 == source.width()
-                    || candidate_y + 1 == source.height();
-                for neighbor in
-                    four_neighbors(candidate_x, candidate_y, source.width(), source.height())
-                {
-                    queue.push_back(neighbor);
-                }
-            }
-            completed = completed.saturating_add(component.len() as u64);
-            if !progress(completed.min(total), total) {
-                return Err(RasterError::Cancelled);
-            }
-            if component.is_empty()
-                || oversized
-                || component.len() > options.maximum_pixels as usize
-            {
-                continue;
-            }
-            if options.mode == DustMode::FillTransparentHoles && touches_boundary {
-                continue;
-            }
-            let replacement = match options.mode {
-                DustMode::RemoveForeground => [0; 4],
-                DustMode::FillTransparentHoles | DustMode::ReplaceColorOutliers => {
-                    surrounding_average(source, &component, seed)?
-                }
-            };
-            if options.mode == DustMode::ReplaceColorOutliers && replacement == seed {
-                continue;
-            }
-            let replacement = from_rgba16(source.format(), replacement);
-            for (component_x, component_y) in component {
-                result.set_pixel(component_x, component_y, replacement, revision)?;
-            }
+    let mut queue = VecDeque::<u32>::new();
+    let mut component = Vec::new();
+    component
+        .try_reserve_exact(options.maximum_pixels as usize)
+        .map_err(|_| RasterError::InvalidDimensions)?;
+    let mut completed = 0u64;
+    for index in 0..count as u32 {
+        if visited[index as usize] != 0 {
+            continue;
         }
-        if !progress(completed.min(total), total) {
+        if !progress(completed, count as u64) {
             return Err(RasterError::Cancelled);
         }
+        let seed = source.pixel(index % source.width(), index / source.width())?;
+        let is_background = options.background.contains(seed);
+        if (options.mode == DustMode::RemoveForeground && is_background)
+            || (options.mode == DustMode::FillTransparentHoles && !is_background)
+        {
+            visited[index as usize] = 1;
+            completed += 1;
+            continue;
+        }
+        let same = |value: PixelValue| match options.mode {
+            DustMode::RemoveForeground => !options.background.contains(value),
+            DustMode::FillTransparentHoles => options.background.contains(value),
+            DustMode::ReplaceColorOutliers => {
+                options.background.normalized_background(value)
+                    == options.background.normalized_background(seed)
+            }
+        };
+        queue.clear();
+        queue
+            .try_reserve(1)
+            .map_err(|_| RasterError::InvalidDimensions)?;
+        queue.push_back(index);
+        visited[index as usize] = 1;
+        component.clear();
+        let mut size = 0u64;
+        let mut contained = true;
+        let mut edge = false;
+        let mut surrounding = None;
+        let mut ambiguous = false;
+        let mut sums = [0u64; 4];
+        let mut surround_count = 0u64;
+        while let Some(current) = queue.pop_front() {
+            let (x, y) = (current % source.width(), current / source.width());
+            size += 1;
+            completed += 1;
+            if size <= u64::from(options.maximum_pixels) {
+                component.push(current);
+            }
+            contained &= crate::line_correction::grid::selected(operation_mask, x, y)?;
+            edge |= x == 0 || y == 0 || x + 1 == source.width() || y + 1 == source.height();
+            if completed % 4096 == 0 && !progress(completed, count as u64) {
+                return Err(RasterError::Cancelled);
+            }
+            for neighbor in neighbors(
+                current,
+                source.width(),
+                source.height(),
+                options.mode != DustMode::FillTransparentHoles,
+            ) {
+                let value = source.pixel(neighbor % source.width(), neighbor / source.width())?;
+                if same(value) {
+                    if visited[neighbor as usize] == 0 {
+                        if queue.len() >= 1_048_576 {
+                            return Err(RasterError::InvalidDimensions);
+                        }
+                        queue
+                            .try_reserve(1)
+                            .map_err(|_| RasterError::InvalidDimensions)?;
+                        visited[neighbor as usize] = 1;
+                        queue.push_back(neighbor);
+                    }
+                } else {
+                    let (nx, ny) = (neighbor % source.width(), neighbor / source.width());
+                    if x.abs_diff(nx) + y.abs_diff(ny) != 1 {
+                        continue;
+                    }
+                    let value = options.background.normalized_background(value);
+                    if let Some(previous) = surrounding {
+                        ambiguous |= previous != value;
+                    } else {
+                        surrounding = Some(value);
+                    }
+                    let channels = value.rgba16().unwrap_or_else(|| {
+                        let v = match value {
+                            PixelValue::Binary(v) | PixelValue::Grayscale8(v) => u16::from(v) * 257,
+                            PixelValue::Grayscale16(v) => v,
+                            _ => 0,
+                        };
+                        [v; 4]
+                    });
+                    for channel in 0..4 {
+                        sums[channel] += u64::from(channels[channel]);
+                    }
+                    surround_count += 1;
+                }
+            }
+        }
+        if size > u64::from(options.maximum_pixels)
+            || !contained
+            || surrounding.is_none()
+            || (options.mode == DustMode::FillTransparentHoles && edge)
+        {
+            continue;
+        }
+        let replacement = if options.mode == DustMode::RemoveForeground {
+            if ambiguous {
+                continue;
+            }
+            surrounding.expect("nonempty surroundings")
+        } else {
+            let mean = sums.map(|v| ((v + surround_count / 2) / surround_count) as u16);
+            match seed {
+                PixelValue::Binary(_) => PixelValue::Binary(if mean[0] >= 32768 { 255 } else { 0 }),
+                PixelValue::Grayscale8(_) => {
+                    PixelValue::Grayscale8(((u32::from(mean[0]) + 128) / 257) as u8)
+                }
+                PixelValue::Grayscale16(_) => PixelValue::Grayscale16(mean[0]),
+                PixelValue::Rgba(_) => {
+                    PixelValue::Rgba(mean.map(|v| ((u32::from(v) + 128) / 257) as u8))
+                }
+                PixelValue::Rgba16(_) => PixelValue::Rgba16(mean),
+            }
+        };
+        for &pixel in &component {
+            result.set_pixel(
+                pixel % source.width(),
+                pixel / source.width(),
+                replacement,
+                revision,
+            )?;
+        }
     }
-    if !progress(total, total) {
+    if !progress(count as u64, count as u64) {
         return Err(RasterError::Cancelled);
     }
     Ok(result)
-}
-
-fn raster_index(width: u32, x: u32, y: u32) -> Result<usize, RasterError> {
-    usize::try_from(u64::from(y) * u64::from(width) + u64::from(x))
-        .map_err(|_| RasterError::InvalidDimensions)
-}
-
-fn four_neighbors(x: u32, y: u32, width: u32, height: u32) -> Vec<(u32, u32)> {
-    let mut result = Vec::with_capacity(4);
-    if x > 0 {
-        result.push((x - 1, y));
-    }
-    if x + 1 < width {
-        result.push((x + 1, y));
-    }
-    if y > 0 {
-        result.push((x, y - 1));
-    }
-    if y + 1 < height {
-        result.push((x, y + 1));
-    }
-    result
-}
-
-fn surrounding_average(
-    source: &TileRaster,
-    component: &[(u32, u32)],
-    component_color: [u16; 4],
-) -> Result<[u16; 4], RasterError> {
-    let component_set = component
-        .iter()
-        .copied()
-        .collect::<std::collections::BTreeSet<_>>();
-    let mut sums = [0_u128; 4];
-    let mut count = 0_u128;
-    for &(x, y) in component {
-        for (neighbor_x, neighbor_y) in four_neighbors(x, y, source.width(), source.height()) {
-            if component_set.contains(&(neighbor_x, neighbor_y)) {
-                continue;
-            }
-            let value = source
-                .pixel(neighbor_x, neighbor_y)?
-                .rgba16()
-                .ok_or(RasterError::PixelFormatMismatch)?;
-            if value == component_color {
-                continue;
-            }
-            for channel in 0..4 {
-                sums[channel] += u128::from(value[channel]);
-            }
-            count += 1;
-        }
-    }
-    if count == 0 {
-        return Ok(component_color);
-    }
-    Ok(std::array::from_fn(|channel| {
-        ((sums[channel] + count / 2) / count) as u16
-    }))
 }

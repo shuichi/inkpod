@@ -70,6 +70,22 @@ pub(super) fn editable_rgba_plane(
     document: &CellDocument,
     plane_id: PlaneId,
 ) -> Result<&super::PlaneNode, CoreError> {
+    let plane = editable_line_plane(document, plane_id)?;
+    if !matches!(
+        plane.raster.format(),
+        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+    ) {
+        return Err(CoreError::InvalidArgument(
+            "target is not an editable RGBA raster plane",
+        ));
+    }
+    Ok(plane)
+}
+
+pub(super) fn editable_line_plane(
+    document: &CellDocument,
+    plane_id: PlaneId,
+) -> Result<&super::PlaneNode, CoreError> {
     let layer = document
         .layers
         .iter()
@@ -88,10 +104,14 @@ pub(super) fn editable_rgba_plane(
         PlaneType::MainLine | PlaneType::Color | PlaneType::Raster
     ) || !matches!(
         plane.raster.format(),
-        PixelFormat::StraightRgba8 | PixelFormat::StraightRgba16
+        PixelFormat::BinaryMask8
+            | PixelFormat::Grayscale8
+            | PixelFormat::Grayscale16
+            | PixelFormat::StraightRgba8
+            | PixelFormat::StraightRgba16
     ) {
         return Err(CoreError::InvalidArgument(
-            "target is not an editable RGBA raster plane",
+            "target is not an editable line raster plane",
         ));
     }
     Ok(plane)

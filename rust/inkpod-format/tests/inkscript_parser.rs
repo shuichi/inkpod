@@ -36,7 +36,7 @@ fn public_parser_accepts_a_complete_file_and_preserves_every_source_byte() {
         "\u{feff}inkscript 2;\r\n",
         "// retained comment\r\n",
         "meta { title = \"\\u{69}nkpod\"; }\r\n",
-        "requires { procedure_catalog = 6; replay_epoch = 28; }\r\n",
+        "requires { procedure_catalog = 7; replay_epoch = 29; }\r\n",
         "inputs {\r\n",
         "  file \"a.inkpod\" {};\r\n",
         "  folder \"cells\" { recursive = false; };\r\n",
@@ -101,7 +101,7 @@ fn public_parser_accepts_a_complete_file_and_preserves_every_source_byte() {
 fn public_parser_accepts_the_minimal_fragment_and_all_value_forms() {
     let source = source(
         br#"inkscript_fragment 2;
-requires { procedure_catalog = 6; }
+requires { procedure_catalog = 7; }
 parameters { param p: nullable<list<u32>> = none; }
 bindings { let item = select plane {}; }
 program {

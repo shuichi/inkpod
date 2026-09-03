@@ -355,17 +355,26 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 - mode は `背景/透明以外の小点を除去`、`透明/背景の小穴を周囲色で埋める`、`周囲と異なる小領域を周囲色へ置換`。
 - 最大サイズを指定し、必要な線を消す可能性を preview で確認する。
 - tool は局所、filter は選択または plane 全体を一括処理する。
+- 最大サイズは画素数1〜65,536で上限を含む。前景成分は8近傍、穴の背景は4近傍とする。成分サイズと画像端への接続は元plane全体で判定し、成分全体が操作範囲と既存selectionの共通部分に含まれる場合だけ変更する。範囲をまたぐ小点も変更しない。
+- Binary/Grayscale主線の背景はcoverage 0。RGBA MainLineの初期設定は透明＋白、Color/Rasterは透明のみ。RGBAの背景色は指定でき、native-depth完全一致で比較する。alpha 0の未使用RGBは区別しない。小点除去は周囲の背景へ戻し、透明と指定色が混在して一意でない場合は変更しない。
 
 #### 線つなぎ
 
-- 指定範囲内で設定 gap 未満の端点候補を結び、raster の接続線幅を指定できる。
+- 指定範囲内で設定 gap 以下の端点候補を結び、raster の接続線幅を指定できる。gapは画素格子上の空白ステップ数で、端点画素中心差(dx,dy)に対するmax(abs(dx),abs(dy))-1とする。水平・垂直・45度とも一画素欠けはgap=1であり、ユークリッド中心間距離とは区別する。
 - tool は drag した範囲、menu command は既存 selection を対象にする。
 - 誤接続を避けるため候補の距離、角度、対象 plane を決定的に評価し、Undo 一回で戻す。
+- 両端点と接続線全体が操作範囲と既存selectionの共通部分に収まる場合だけ接続する。既接続、別線を横切る接続、向かい合わない線端、一意に対応付けられない競合は変更しない。
+- gapは0〜64（0は接続なし）、接続全幅は1〜256 document px。8近傍中心線の端点から終端方向を求め、相手への方向との差が両端とも45度以内の候補だけを採用する。空白ステップ数、中心間距離の二乗の順に比較し、互いに一意の最良候補である組だけを結ぶ。同順位、提案接続同士の交差は両方を採用しない。
 
 #### 線幅修正
 
 - 適用範囲は pen/rectangle/polyline/lasso。
+- 線補正toolのrectangleは通常選択と同じdocument Q16.16正規化と画素中心判定を使う。device入力のfloat変換誤差を先にfloorして外側の一列を追加しない。penの全sampleはCoreへ渡し、表示用の帯previewはboundedな間引き表示でよい。
 - `指定幅だけ太く`、`指定幅だけ細く` を別 mode にし、raster morphology として処理する。
+- 増減量は円形近傍の片側半径（document px）と表示する。量1の軸平行断面は1/3/7→3/5/9、収縮は1/3/7→0/1/5。元plane全体を参照し、書込みだけを操作範囲と既存selectionの共通部分へ制限する。
+- `指定均一幅`を独立modeとし、既存線の中心線から指定した全幅（document px）で再構成する。十分長い1/3/7幅の区間を同じ指定幅へ揃え、分岐・閉路の接続関係と8/16bit深度・線色を保持する。輪郭とアンチエイリアスは変わり得る。交点・分岐の重なり部分は指定幅より太くなってよい。
+- 増減半径と均一化全幅は1〜256。接続／均一化の偶数全幅は中心を左上へ0.5 px寄せた円で描く。均一化は最近傍中心線画素のnative色／coverageを使い、等距離ならy、x順で決める。削除部分は4近傍で最近の元背景へ戻す。RGBA8指定背景色の各16bit成分は257の倍数だけを受理し、8bitへ暗黙に量子化しない。
+- 指定背景と完全一致しない非透明画素は、16bitの色差やalphaが最小の非ゼロ値でも前景として扱う。形態演算の比較値を丸めて背景と同じ0にせず、採用する画素のnative RGBA値はそのまま保持する。
 
 ### 10. 色、パレット、チャート、参照画像
 
@@ -471,6 +480,7 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 - selection 内を drag したとき、mask だけを移動するか、選択された active plane pixel も floating content として移動するかを option で分ける。
 - rectangle/ellipse は aspect ratio、中心から作成、作成後回転、45度 constraint を持つ。
 - magic wand は connected same-color、color tolerance、gap close を持つ。階調主線では基本色と coverage semantics を使う。
+- wandのgap closeは線つなぎと同じ空白ステップ数の「設定値以下」とし、領域探索前に仮想境界を構築してseedから探索する。sourceの線・背景は変更しない。探索後の選択maskの膨張・収縮で代用しない。
 - trace brush は丸/角、太さ、pressure、screen-size固定を持つ。
 - 範囲解釈は通常、描線に密着する shrink、閉じた内部、描線形状、必要に応じた境界選択を区別する。
 - raster 内容の coverage は Binary／Grayscale 8/16 bit の非ゼロ値、RGBA 8/16 bit の非ゼロ alpha とする。探索は candidate 内の 4 近傍で行い、`描線に密着` は candidate 外周へ到達する未 coverage を除いた coverage と穴、`閉領域内部` は外周へ到達しない未 coverage、`描線形状` は coverage、`境界` は未 coverage または用紙外へ 4 近傍で接する coverage とする。通常は raster 内容を読まず candidate をそのまま使う。
@@ -567,7 +577,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 
 ### 20. 形式、白透過、一般画像入出力
 
-- exact-current 契約は `.inkpod` top-level format v33、runtime replay epoch 28、C ABI v33、`DocumentArchive` schema 7、必須 `DOCM` schema 9、`DocumentStateDigest` schema 13/domain 11、snapshot-composite schema 5、`.inkbatch` v5／operation schema 4、InkScript registry schema／language／file v2、73-command production catalog／owner manifest v6 とする。native v32以前、epoch 27以前、`.inkbatch` v4以前、catalog／owner manifest v5以前、および廃止した Cut descriptor・指示画像書き出しの契約は migration や shim を設けず拒否する。旧ABIの呼び出し元は現行headerでの再buildを必須とする。ABI v33 は Cut handle／records／functions、Cut 判別と指示画像の I/O flags、撮影 frame の指示 export flag を削除する。frame の入力・永続化・canonical procedure から指示 export flag を除去するため、`EditShootingFrame` schema は3、semantics revisionは2へ進める。通常Sequence、pair authority、resident bank、render preparationは引き続きruntime-onlyとする。今回の更新は native format freeze 宣言ではない。
+- exact-current 契約は `.inkpod` top-level format v34、runtime replay epoch 29、C ABI v34、`DocumentArchive` schema 7、必須 `DOCM` schema 9、`DocumentStateDigest` schema 13/domain 11、snapshot-composite schema 5、`.inkbatch` v5／operation schema 4、InkScript registry schema／language／file v2、74-command production catalog／owner manifest v7 とする。native v33以前、epoch 28以前、`.inkbatch` v4以前、catalog／owner manifest v6以前、および廃止した Cut descriptor・指示画像書き出しの契約は migration や shim を設けず拒否する。旧ABIの呼び出し元は現行headerでの再buildを必須とする。ABI v33 は Cut handle／records／functions、Cut 判別と指示画像の I/O flags、撮影 frame の指示 export flag を削除する。frame の入力・永続化・canonical procedure から指示 export flag を除去するため、`EditShootingFrame` schema は3、semantics revisionは2へ進める。通常Sequence、pair authority、resident bank、render preparationは引き続きruntime-onlyとする。今回の更新は native format freeze 宣言ではない。 ABI v34は線補正request・task APIと2種類のraster line toolを追加する。`ApplyLineCorrection` schema 2／semantics 1、`ApplyDustRemoval` schema 3／semantics 3、`ApplySelection` semantics 4とし、背景判定・成分全体判定・inclusive gap・探索前仮想境界・線幅modeをcanonical replayへ固定する。
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
 - frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
 - `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。

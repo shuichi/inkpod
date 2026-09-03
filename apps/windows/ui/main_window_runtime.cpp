@@ -1,3 +1,4 @@
+#include "ui/tools/line_correction_options.h"
 #include "ui/ui_resources.h"
 
 #include <windows.h>
@@ -209,6 +210,10 @@ using inkpod::windows::ui::tools::kInteractionEffectAirbrush;
 using inkpod::windows::ui::tools::kInteractionEffectAlphaGradient;
 using inkpod::windows::ui::tools::kInteractionEffectBlur;
 using inkpod::windows::ui::tools::kInteractionEffectDust;
+using inkpod::windows::ui::tools::kInteractionEffectLineConnect;
+using inkpod::windows::ui::tools::kInteractionEffectLineWidth;
+using inkpod::windows::ui::tools::IsLineCorrectionCommand;
+using inkpod::windows::ui::tools::IsGlobalLineCorrectionCommand;
 using inkpod::windows::ui::tools::kInteractionEffectGradient;
 using inkpod::windows::ui::tools::kInteractionEffectStamp;
 using inkpod::windows::ui::tools::kInteractionSelection;
@@ -5137,7 +5142,7 @@ const InkpodEditorStateInfo* PresentedEditorState(
         : nullptr;
 }
 
-bool BeginEditorProcedureCapture(ApplicationHost& state) noexcept {
+bool BeginEditorProcedureCapture(ApplicationHost& state, bool capture_line_frame = false) noexcept {
     const DocumentSession& document = state.Document();
     const InkpodEditorStateInfo* editor = PresentedEditorState(state);
     if (editor == nullptr) {
@@ -5148,8 +5153,43 @@ bool BeginEditorProcedureCapture(ApplicationHost& state) noexcept {
     state.Workspace().tools.procedure.generation = document.generation;
     state.Workspace().tools.procedure.core_view_id = state.ActiveView().core_view_id;
     state.Workspace().tools.procedure.state = *editor;
-    state.Workspace().tools.procedure.valid = true;
+    auto& capture = state.Workspace().tools.procedure;
+    capture.frame_valid = false;
+    const bool needs_frame = capture_line_frame || editor->active_tool == kInteractionSelection
+        || editor->active_tool == kInteractionEffectDust
+        || editor->active_tool == kInteractionEffectLineConnect
+        || editor->active_tool == kInteractionEffectLineWidth;
+    if (!needs_frame) {
+        capture.valid = true;
+        return true;
+    }
+    InkpodDocumentInfo info{};
+    inkpod::renderer::CanvasDocumentBounds bounds{};
+    if (QueryDocument(state, info) && info.width != 0U && info.height != 0U
+        && inkpod::renderer::GetCanvasDocumentBounds(state.Workspace().windows.canvas, bounds)) {
+        capture.canvas_left = bounds.left;
+        capture.canvas_top = bounds.top;
+        capture.zoom = (bounds.right - bounds.left) / static_cast<double>(info.width);
+        capture.width = info.width;
+        capture.height = info.height;
+        capture.document_revision = info.document_revision;
+        capture.flip_horizontal = state.ActiveView().presentation.flip_horizontal;
+        capture.flip_vertical = state.ActiveView().presentation.flip_vertical;
+        capture.frame_valid = std::isfinite(capture.zoom) && capture.zoom > 0.0;
+    }
+    capture.valid = true;
     return true;
+}
+
+InkpodSelectionPoint CapturedDocumentPoint(
+    const inkpod::app::EditorProcedureCapture& capture, const InkpodStrokeSample& sample) noexcept {
+    double x = (static_cast<double>(sample.x) - capture.canvas_left) / capture.zoom;
+    double y = (static_cast<double>(sample.y) - capture.canvas_top) / capture.zoom;
+    if (capture.flip_horizontal) x = static_cast<double>(capture.width) - x;
+    if (capture.flip_vertical) y = static_cast<double>(capture.height) - y;
+    // The Core clips the operation mask. Clamping samples here would move off-canvas ink onto an edge.
+    return {sizeof(InkpodSelectionPoint), 0U, static_cast<float>(x), static_cast<float>(y),
+        std::clamp(sample.pressure, 0.0F, 1.0F), 0U};
 }
 
 const InkpodEditorStateInfo* CapturedEditorState(
@@ -6342,6 +6382,9 @@ bool PrepareCanvasEffectEditor(
     UINT command,
     EffectEditorState& editor,
     std::uint32_t& interaction) noexcept {
+    if (IsLineCorrectionCommand(command)) {
+        return inkpod::windows::ui::tools::PrepareLineCorrectionEditor(command, editor, interaction);
+    }
     editor = {};
     editor.option1 = false;
     editor.option2 = false;
@@ -6434,34 +6477,6 @@ bool PrepareCanvasEffectEditor(
             editor.option2_label = UiText(UiStringId::Text0835);
             interaction = kInteractionEffectStamp;
             break;
-        case IDM_EFFECT_DUST:
-            editor.title = UiText(UiStringId::Text0188);
-            editor.parameter_labels = {
-                UiText(UiStringId::Text0731), UiText(UiStringId::Text0346), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746), UiText(UiStringId::Text0746)};
-            editor.parameters = {8, 24, 0, 0, 0};
-            editor.channel_labels = {UiText(UiStringId::Text0501), UiText(UiStringId::Text0345), UiText(UiStringId::Text0821), UiText(UiStringId::ToolPolyline), UiText(UiStringId::Text0664)};
-            editor.channel_values = {
-                0U,
-                INKPOD_SELECTION_TRACE,
-                INKPOD_SELECTION_RECTANGLE,
-                INKPOD_SELECTION_POLYLINE,
-                INKPOD_SELECTION_LASSO};
-            editor.channel_count = 5U;
-            editor.channel = 0U;
-            editor.mode_labels = {UiText(UiStringId::Text0542), UiText(UiStringId::Text0954), UiText(UiStringId::Text0871), nullptr};
-            editor.mode_values = {
-                INKPOD_DUST_REMOVE_FOREGROUND,
-                INKPOD_DUST_FILL_TRANSPARENT_HOLES,
-                INKPOD_DUST_REPLACE_COLOR_OUTLIERS,
-                0U};
-            editor.mode_count = 3U;
-            editor.mode = INKPOD_DUST_REMOVE_FOREGROUND;
-            editor.points.clear();
-            editor.option1 = true;
-            editor.option1_label = UiText(UiStringId::Text0314);
-            editor.option2_enabled = false;
-            interaction = kInteractionEffectDust;
-            break;
         default:
             return false;
     }
@@ -6478,6 +6493,21 @@ bool CanvasEffectOptionsFromEditor(
     options.mode = editor.mode;
     options.option = editor.option1;
     options.option2 = editor.option2;
+    if (IsLineCorrectionCommand(command)) {
+        const auto amount = editor.parameters[0];
+        const bool dust = editor.mode >= INKPOD_LINE_REMOVE_DUST
+            && editor.mode <= INKPOD_LINE_REPLACE_OUTLIERS;
+        const bool connect = editor.mode == INKPOD_LINE_CONNECT;
+        if (amount < (connect ? 0 : 1) || amount > (dust ? 65536 : (connect ? 64 : 256))
+            || editor.parameters[1] < 1 || editor.parameters[1] > 4096
+            || (connect && (editor.parameters[2] < 1 || editor.parameters[2] > 256))
+            || !inkpod::windows::ui::tools::ReadLineBackground(editor, options.background_rgba)) {
+            return false;
+        }
+        options.line_values = editor.line_values;
+        try { options.background_text = editor.points; }
+        catch (const std::bad_alloc&) { return false; }
+    }
     if (command == IDM_EFFECT_GRADIENT || command == IDM_EFFECT_ALPHA_GRADIENT
         || command == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
         const std::size_t minimum_stops = command == IDM_EFFECT_BOUNDARY_AIRBRUSH ? 2U : 3U;
@@ -6499,6 +6529,11 @@ void ApplyCanvasEffectOptionsToEditor(
     editor.mode = options.mode;
     editor.option1 = options.option;
     editor.option2 = options.option2;
+    if (editor.line_options) {
+        editor.line_values = options.line_values;
+        try { editor.points = options.background_text; }
+        catch (const std::bad_alloc&) { return; }
+    }
     if (!options.stops.empty()) {
         std::wstring points;
         try {
@@ -6755,39 +6790,48 @@ InkpodStatus QueueBlurGesture(
         : INKPOD_STATUS_INVALID_STATE;
 }
 
-InkpodStatus QueueDustRemoval(
+InkpodStatus QueueLineCorrection(
     ApplicationHost& state,
     const CommandContext& context,
     std::vector<InkpodStrokeSample> samples) noexcept {
     const InkpodEditorStateInfo* editor = CapturedEditorState(state);
-    if (editor == nullptr || !state.effects.gesture_options_valid
+    const auto& capture = state.Workspace().tools.procedure;
+    if (editor == nullptr || !capture.frame_valid || !state.effects.gesture_options_valid
         || (editor->flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U
-        || editor->active_plane_id == 0U) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
+        || editor->active_plane_id == 0U) return INKPOD_STATUS_INVALID_STATE;
     CanvasEffectOptions options{};
-    try {
-        options = state.effects.gesture_options;
-    } catch (const std::bad_alloc&) {
-        return INKPOD_STATUS_INVALID_STATE;
+    try { options = state.effects.gesture_options; }
+    catch (const std::bad_alloc&) { return INKPOD_STATUS_INVALID_STATE; }
+    for (auto& sample : samples) {
+        const auto point = CapturedDocumentPoint(capture, sample);
+        sample.x = point.x;
+        sample.y = point.y;
     }
-    const std::uint64_t plane_id = editor->active_plane_id;
+    InkpodLineCorrectionInput input{};
+    input.struct_size = sizeof(input);
+    input.mode = options.mode;
+    input.plane_id = editor->active_plane_id;
+    input.view_id = capture.core_view_id;
+    input.expected_document_revision = capture.document_revision;
+    input.coordinate_space = INKPOD_COORDINATE_SPACE_DOCUMENT;
+    input.shape = options.shape;
+    input.use_region = options.shape == 0U ? 0U : 1U;
+    input.diameter = static_cast<float>(options.parameters[1]);
+    input.brush_shape = options.line_values[0];
+    input.pressure_size = options.line_values[1] & 1U;
+    input.screen_size = (options.line_values[1] >> 1U) & 1U;
+    input.view_zoom_q16 = static_cast<std::int64_t>(std::llround(capture.zoom * 65536.0));
+    input.background_mode = options.line_values[2];
+    std::copy(options.background_rgba.begin(), options.background_rgba.end(), input.background_rgba);
+    if (options.mode == INKPOD_LINE_CONNECT) {
+        input.gap = static_cast<std::uint32_t>(options.parameters[0]);
+        input.line_width = static_cast<std::uint32_t>(options.parameters[2]);
+    } else {
+        input.amount = static_cast<std::uint32_t>(options.parameters[0]);
+    }
     const bool preview = options.option;
-    return StartEffectTask(
-        state,
-        context,
-        preview,
-        [samples = std::move(samples), options, plane_id, preview](
-            InkpodCore* core, InkpodTask* task) {
-            InkpodDustInput input{};
-            input.struct_size = sizeof(input);
-            input.mode = options.mode;
-            input.plane_id = plane_id;
-            input.coordinate_space = INKPOD_COORDINATE_SPACE_DEVICE;
-            input.shape = options.shape;
-            input.maximum_pixels = static_cast<std::uint32_t>(options.parameters[0]);
-            input.use_region = options.shape == 0U ? 0U : 1U;
-            input.diameter = static_cast<float>(options.parameters[1]);
+    return StartEffectTask(state, context, preview,
+        [samples = std::move(samples), input, preview](InkpodCore* core, InkpodTask* task) mutable {
             if (input.use_region != 0U) {
                 input.samples = samples.data();
                 input.sample_count = samples.size();
@@ -6796,11 +6840,11 @@ InkpodStatus QueueDustRemoval(
             if (preview) {
                 InkpodFilterPreviewInfo info{};
                 info.struct_size = sizeof(info);
-                return inkpod_core_dust_preview_begin(core, &input, task, &info);
+                return inkpod_core_line_preview_begin(core, &input, task, &info);
             }
             InkpodDispatchResult result{};
             result.struct_size = sizeof(result);
-            return inkpod_core_dust_remove(core, &input, task, &result);
+            return inkpod_core_line_correct(core, &input, task, &result);
         });
 }
 
@@ -6826,7 +6870,9 @@ InkpodStatus FinishEffectGesture(
         case kInteractionEffectStamp:
             return QueueStampGesture(state, context, std::move(samples));
         case kInteractionEffectDust:
-            return QueueDustRemoval(state, context, std::move(samples));
+        case kInteractionEffectLineConnect:
+        case kInteractionEffectLineWidth:
+            return QueueLineCorrection(state, context, std::move(samples));
         default:
             return INKPOD_STATUS_INVALID_STATE;
     }
@@ -7325,6 +7371,8 @@ void UpdateMainWindowStatus(
             case kInteractionEffectBlur: return UiText(UiStringId::ToolBlur);
             case kInteractionEffectStamp: return UiText(UiStringId::ToolStamp);
             case kInteractionEffectDust: return UiText(UiStringId::ToolDustRemoval);
+            case kInteractionEffectLineConnect: return UiText(UiStringId::LineConnect);
+            case kInteractionEffectLineWidth: return UiText(UiStringId::LineWidth);
             case kInteractionEffectAlphaGradient: return UiText(UiStringId::ToolAlphaGradient);
             case INKPOD_TOOL_ERASER: return UiText(UiStringId::ToolEraser);
             case INKPOD_TOOL_BRUSH: return UiText(UiStringId::ToolBrush);
@@ -8102,6 +8150,26 @@ bool GestureDocumentPoints(
     ApplicationHost& state,
     const std::vector<InkpodStrokeSample>& samples,
     std::vector<inkpod::renderer::CanvasGeometryPoint>& points) noexcept {
+    const auto& capture = state.Workspace().tools.procedure;
+    const bool captured_band = capture.valid && capture.frame_valid
+        && (capture.state.active_tool == kInteractionSelection
+            || capture.state.active_tool == kInteractionEffectDust
+            || capture.state.active_tool == kInteractionEffectLineConnect
+            || capture.state.active_tool == kInteractionEffectLineWidth);
+    if (captured_band) {
+        try {
+            points.clear();
+            const std::size_t limit = inkpod::renderer::kCanvasGeometryPreviewPoints;
+            const std::size_t count = std::min(samples.size(), limit);
+            points.reserve(count);
+            for (std::size_t index = 0U; index < count; ++index) {
+                const auto sample_index = count <= 1U ? 0U : index * (samples.size() - 1U) / (count - 1U);
+                const auto point = CapturedDocumentPoint(capture, samples[sample_index]);
+                points.push_back({point.x, point.y});
+            }
+            return !points.empty();
+        } catch (const std::bad_alloc&) { points.clear(); return false; }
+    }
     InkpodDocumentInfo info{};
     inkpod::renderer::CanvasDocumentBounds bounds{};
     if (samples.empty() || !QueryDocument(state, info) || info.width == 0U || info.height == 0U
@@ -8194,22 +8262,19 @@ void UpdateFillGeometryPreview(ApplicationHost& state) noexcept {
     publish_preview();
 }
 
-void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
+void UpdateBandGeometryPreview(ApplicationHost& state,
+    const InkpodEditorSelectionOptions& options,
+    const std::vector<InkpodStrokeSample>& samples) noexcept {
     inkpod::renderer::CanvasGeometryPreview preview{};
     preview.struct_size = sizeof(preview);
     const auto publish_preview = [&state, &preview] {
         inkpod::renderer::SetCanvasGeometryPreview(
             state.Workspace().windows.canvas, preview);
     };
-    const InkpodEditorStateInfo* editor = CapturedEditorState(state);
-    if (editor == nullptr) {
-        publish_preview();
-        return;
-    }
-    const std::uint32_t shape = editor->selection.shape;
+    const std::uint32_t shape = options.shape;
     std::vector<inkpod::renderer::CanvasGeometryPoint> points;
     if (!GestureDocumentPoints(
-            state, state.Workspace().tools.selection_gesture_samples, points)
+            state, samples, points)
         || shape == INKPOD_SELECTION_WAND) {
         publish_preview();
         return;
@@ -8226,7 +8291,7 @@ void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
             publish_preview();
             return;
         }
-        const bool from_center = (editor->selection.construction_flags
+        const bool from_center = (options.construction_flags
                 & INKPOD_SELECTION_FROM_CENTER)
             != 0U;
         const float delta_x = points.back().x - points.front().x;
@@ -8239,8 +8304,8 @@ void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
             : points.front().y + delta_y / 2.0F;
         float radius_x = std::abs(delta_x) / (from_center ? 1.0F : 2.0F);
         float radius_y = std::abs(delta_y) / (from_center ? 1.0F : 2.0F);
-        if (editor->selection.aspect_ratio_q16 != 0U) {
-            const float aspect = static_cast<float>(editor->selection.aspect_ratio_q16)
+        if (options.aspect_ratio_q16 != 0U) {
+            const float aspect = static_cast<float>(options.aspect_ratio_q16)
                 / 65536.0F;
             const float desired_x = radius_y * aspect;
             if (desired_x >= radius_x) {
@@ -8254,8 +8319,8 @@ void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
             publish_preview();
             return;
         }
-        std::uint64_t turns = editor->selection.rotation_turns;
-        if ((editor->selection.construction_flags
+        std::uint64_t turns = options.rotation_turns;
+        if ((options.construction_flags
                 & INKPOD_SELECTION_CONSTRAIN_ROTATION_45)
             != 0U) {
             constexpr std::uint64_t kTurn = UINT64_C(1) << 32U;
@@ -8303,33 +8368,20 @@ void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
         } else if (shape == INKPOD_SELECTION_TRACE) {
             preview.stroke_width = std::clamp(
                 static_cast<float>(
-                    static_cast<double>(editor->selection.diameter_q16)
+                    static_cast<double>(options.diameter_q16)
                     / 65536.0),
                 0.001F,
                 4096.0F);
-            if ((editor->selection.construction_flags
-                    & INKPOD_SELECTION_TRACE_PRESSURE_SIZE)
-                != 0U) {
-                preview.stroke_width *= std::clamp(
-                    state.Workspace().tools.selection_gesture_samples.back().pressure,
-                    0.0F,
-                    1.0F);
+            if ((options.construction_flags & INKPOD_SELECTION_TRACE_SCREEN_SIZE) != 0U) {
+                preview.stroke_width /= static_cast<float>(state.Workspace().tools.procedure.zoom);
             }
-            if ((editor->selection.construction_flags
-                    & INKPOD_SELECTION_TRACE_SCREEN_SIZE)
-                != 0U) {
-                InkpodDocumentInfo info{};
-                inkpod::renderer::CanvasDocumentBounds bounds{};
-                if (QueryDocument(state, info)
-                    && inkpod::renderer::GetCanvasDocumentBounds(
-                        state.Workspace().windows.canvas, bounds)
-                    && info.width != 0U) {
-                    const double zoom = (bounds.right - bounds.left)
-                        / static_cast<double>(info.width);
-                    if (std::isfinite(zoom) && zoom > 0.0) {
-                        preview.stroke_width /= static_cast<float>(zoom);
-                    }
-                }
+            preview.brush_shape = options.trace_shape;
+            for (std::size_t index = 0U; index < preview.point_count; ++index) {
+                const auto sample_index = preview.point_count <= 1U ? 0U
+                    : index * (samples.size() - 1U) / (preview.point_count - 1U);
+                preview.point_diameters[index] = preview.stroke_width
+                    * ((options.construction_flags & INKPOD_SELECTION_TRACE_PRESSURE_SIZE) != 0U
+                        ? std::clamp(samples[sample_index].pressure, 0.0F, 1.0F) : 1.0F);
             }
         }
     }
@@ -8337,6 +8389,30 @@ void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
         preview.active = 0U;
     }
     publish_preview();
+}
+
+void UpdateSelectionGeometryPreview(ApplicationHost& state) noexcept {
+    const auto* editor = CapturedEditorState(state);
+    if (editor == nullptr) {
+        inkpod::renderer::CanvasGeometryPreview preview{};
+        preview.struct_size = sizeof(preview);
+        inkpod::renderer::SetCanvasGeometryPreview(state.Workspace().windows.canvas, preview);
+        return;
+    }
+    UpdateBandGeometryPreview(state, editor->selection, state.Workspace().tools.selection_gesture_samples);
+}
+
+void UpdateLineGeometryPreview(ApplicationHost& state) noexcept {
+    const auto& line = state.effects.gesture_options;
+    InkpodEditorSelectionOptions options{};
+    options.struct_size = sizeof(options);
+    options.shape = line.shape;
+    options.diameter_q16 = static_cast<std::uint32_t>(line.parameters[1]) << 16U;
+    options.trace_shape = line.line_values[0];
+    options.construction_flags = (line.line_values[1] & 1U) != 0U
+        ? INKPOD_SELECTION_TRACE_PRESSURE_SIZE : 0U;
+    if ((line.line_values[1] & 2U) != 0U) options.construction_flags |= INKPOD_SELECTION_TRACE_SCREEN_SIZE;
+    UpdateBandGeometryPreview(state, options, state.effects.samples);
 }
 
 void UpdateColorReplaceGeometryPreview(ApplicationHost& state) noexcept {
@@ -8762,6 +8838,8 @@ UINT ActiveToolOptionsCommand(const ApplicationHost& state) noexcept {
         case kInteractionEffectBlur: return IDM_EFFECT_BLUR;
         case kInteractionEffectStamp: return IDM_EFFECT_STAMP;
         case kInteractionEffectDust: return IDM_EFFECT_DUST;
+        case kInteractionEffectLineConnect: return IDM_EFFECT_LINE_CONNECT;
+        case kInteractionEffectLineWidth: return IDM_EFFECT_LINE_WIDTH;
         case kInteractionEffectAlphaGradient: return IDM_EFFECT_ALPHA_GRADIENT;
         case kInteractionSelection: return IDM_SELECTION_OPTIONS;
         default: return IDM_TOOL_BRUSH;
@@ -8816,12 +8894,17 @@ bool QueryToolOptionsDetail(
             case IDM_EFFECT_BOUNDARY_AIRBRUSH:
             case IDM_EFFECT_BLUR:
             case IDM_EFFECT_STAMP:
+            case IDM_EFFECT_LINE_CONNECT:
+            case IDM_EFFECT_LINE_WIDTH:
+            case IDM_LINE_DUST_APPLY:
+            case IDM_LINE_CONNECT_APPLY:
+            case IDM_LINE_WIDTH_APPLY:
             case IDM_EFFECT_DUST:
             case IDM_EFFECT_ALPHA_GRADIENT: {
                 std::uint32_t interaction{};
-                output.kind = command == IDM_EFFECT_BOUNDARY_AIRBRUSH
-                    ? DetailKind::BoundaryEffect
-                    : DetailKind::Effect;
+                output.kind = IsGlobalLineCorrectionCommand(command) ? DetailKind::LineEffect
+                    : (command == IDM_EFFECT_BOUNDARY_AIRBRUSH
+                        ? DetailKind::BoundaryEffect : DetailKind::Effect);
                 if (!PrepareCanvasEffectEditor(
                         command, output.effect, interaction)) {
                     return false;
@@ -8870,7 +8953,7 @@ bool ChangeToolOptionsDetail(
                 return false;
             }
         } else if (value.kind == DetailKind::Effect
-            || value.kind == DetailKind::BoundaryEffect) {
+            || value.kind == DetailKind::BoundaryEffect || value.kind == DetailKind::LineEffect) {
             CanvasEffectOptions options{};
             changed = CanvasEffectOptionsFromEditor(
                 command, value.effect, options);
@@ -8884,6 +8967,17 @@ bool ChangeToolOptionsDetail(
                                   command, defaults, interaction)
                         && SetEditorActiveTool(*state, interaction)
                             == INKPOD_STATUS_OK;
+                } else if (execute && value.kind == DetailKind::LineEffect) {
+                    changed = BeginEditorProcedureCapture(*state, true);
+                    if (changed) {
+                        state->effects.gesture_options = state->effects.options;
+                        state->effects.gesture_options.shape = 0U;
+                        state->effects.gesture_options_valid = true;
+                        changed = QueueLineCorrection(*state, state->routing.targets.Capture(), {})
+                            == INKPOD_STATUS_OK;
+                        state->effects.gesture_options_valid = false;
+                        ClearEditorProcedureCapture(*state);
+                    }
                 } else if (execute) {
                     changed = QueueBoundaryAirbrush(
                                   *state,
@@ -14606,37 +14700,15 @@ InkpodStatus ApplySelectionGesture(
     ApplicationHost& state,
     const std::vector<InkpodStrokeSample>& samples,
     const InkpodEditorStateInfo* editor) noexcept {
-    InkpodDocumentInfo info{};
-    inkpod::renderer::CanvasDocumentBounds bounds{};
-    if (editor == nullptr
+    const auto& capture = state.Workspace().tools.procedure;
+    if (editor == nullptr || !capture.valid || !capture.frame_valid
         || (editor->flags & INKPOD_EDITOR_STATE_HAS_TARGET) == 0U
-        || editor->active_layer_id == 0U || editor->active_plane_id == 0U
-        || samples.empty() || !QueryDocument(state, info)
-        || !inkpod::renderer::GetCanvasDocumentBounds(
-               state.Workspace().windows.canvas, bounds)
-        || info.width == 0U || info.height == 0U) {
+        || editor->active_layer_id == 0U || editor->active_plane_id == 0U || samples.empty()) {
         return INKPOD_STATUS_INVALID_STATE;
     }
-    const double zoom = (bounds.right - bounds.left) / static_cast<double>(info.width);
-    if (!std::isfinite(zoom) || zoom <= 0.0) {
-        return INKPOD_STATUS_INVALID_STATE;
-    }
+    const double zoom = capture.zoom;
     const auto document_point = [&](const InkpodStrokeSample& sample) {
-        double x = (static_cast<double>(sample.x) - bounds.left) / zoom;
-        double y = (static_cast<double>(sample.y) - bounds.top) / zoom;
-        if (state.ActiveView().presentation.flip_horizontal) {
-            x = static_cast<double>(info.width) - x;
-        }
-        if (state.ActiveView().presentation.flip_vertical) {
-            y = static_cast<double>(info.height) - y;
-        }
-        return InkpodSelectionPoint{
-            sizeof(InkpodSelectionPoint),
-            0U,
-            static_cast<float>(std::clamp(x, 0.0, static_cast<double>(info.width))),
-            static_cast<float>(std::clamp(y, 0.0, static_cast<double>(info.height))),
-            std::clamp(sample.pressure, 0.0F, 1.0F),
-            0U};
+        return CapturedDocumentPoint(capture, sample);
     };
     std::vector<InkpodSelectionPoint> points;
     try {
@@ -14694,11 +14766,11 @@ InkpodStatus ApplySelectionGesture(
         input.seed_x = static_cast<std::uint32_t>(std::clamp(
             std::floor(static_cast<double>(point.x)),
             0.0,
-            static_cast<double>(info.width - 1U)));
+            static_cast<double>(capture.width - 1U)));
         input.seed_y = static_cast<std::uint32_t>(std::clamp(
             std::floor(static_cast<double>(point.y)),
             0.0,
-            static_cast<double>(info.height - 1U)));
+            static_cast<double>(capture.height - 1U)));
     } else {
         input.points = points.data();
         input.point_count = points.size();
@@ -20257,18 +20329,25 @@ std::optional<LRESULT> RouteToolCommand(
         case IDM_EFFECT_BOUNDARY_AIRBRUSH:
         case IDM_EFFECT_BLUR:
         case IDM_EFFECT_STAMP:
+        case IDM_EFFECT_LINE_CONNECT:
+        case IDM_EFFECT_LINE_WIDTH:
+        case IDM_LINE_DUST_APPLY:
+        case IDM_LINE_CONNECT_APPLY:
+        case IDM_LINE_WIDTH_APPLY:
         case IDM_EFFECT_DUST:
         case IDM_EFFECT_ALPHA_GRADIENT:
-            if (LOWORD(wparam) == IDM_EFFECT_BOUNDARY_AIRBRUSH) {
+            if (LOWORD(wparam) == IDM_EFFECT_BOUNDARY_AIRBRUSH
+                || IsGlobalLineCorrectionCommand(LOWORD(wparam))) {
                 return inkpod::windows::ui::panes::ShowToolOptionsFlyout(
                            state->Workspace().windows.tool_options_flyout,
                            inkpod::windows::ui::ToolPaletteCheckedOptionsAnchor(
                                state->Workspace().tools.palette),
-                           IDM_EFFECT_BOUNDARY_AIRBRUSH)
+                           LOWORD(wparam))
                     ? 1
                     : 0;
             }
-            if (state->Workspace().tools.active_plane == INKPOD_PLANE_COLOR
+            if ((state->Workspace().tools.active_plane == INKPOD_PLANE_COLOR
+                    || IsLineCorrectionCommand(LOWORD(wparam)))
                 && SelectCanvasEffect(*state, LOWORD(wparam))) {
                 UpdateMenuState(*state);
             }
@@ -22007,7 +22086,7 @@ std::optional<LRESULT> RouteCanvasMessage(
                     return 1;
                 }
                 const bool effect_interaction = procedure_tool >= kInteractionEffectGradient
-                    && procedure_tool <= kInteractionEffectAlphaGradient;
+                    && procedure_tool <= kInteractionEffectLineWidth;
                 if (effect_interaction) {
                     if (procedure_tool == kInteractionEffectStamp
                         && input->kind == inkpod::renderer::CanvasStrokeEventKind::Begin
@@ -22085,6 +22164,16 @@ std::optional<LRESULT> RouteCanvasMessage(
                         DisarmCommandTimer(
                             *state, window, CommandTimerKind::ContinuousSpray);
                         return 0;
+                    }
+                    if (procedure_tool == kInteractionEffectDust
+                        || procedure_tool == kInteractionEffectLineConnect
+                        || procedure_tool == kInteractionEffectLineWidth) {
+                        if (input->kind == inkpod::renderer::CanvasStrokeEventKind::Cancel
+                            || input->kind == inkpod::renderer::CanvasStrokeEventKind::End) {
+                            inkpod::renderer::CanvasGeometryPreview preview{};
+                            preview.struct_size = sizeof(preview);
+                            inkpod::renderer::SetCanvasGeometryPreview(state->Workspace().windows.canvas, preview);
+                        } else { UpdateLineGeometryPreview(*state); }
                     }
                     if (procedure_tool == kInteractionEffectAirbrush
                         && input->kind != inkpod::renderer::CanvasStrokeEventKind::Cancel

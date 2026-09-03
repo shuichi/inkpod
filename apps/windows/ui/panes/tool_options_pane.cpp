@@ -110,6 +110,8 @@ const wchar_t* ToolLabel(std::uint32_t tool) noexcept {
     if (tool == tools::kInteractionEffectAirbrush) return UiText(UiStringId::ToolAirbrush);
     if (tool == tools::kInteractionEffectBlur) return UiText(UiStringId::ToolBlur);
     if (tool == tools::kInteractionEffectStamp) return UiText(UiStringId::ToolStamp);
+    if (tool == tools::kInteractionEffectLineConnect) return UiText(UiStringId::LineConnect);
+    if (tool == tools::kInteractionEffectLineWidth) return UiText(UiStringId::LineWidth);
     if (tool == tools::kInteractionEffectDust) return UiText(UiStringId::ToolDustRemoval);
     if (tool == tools::kInteractionEffectAlphaGradient) return UiText(UiStringId::ToolAlphaGradient);
     return UiText(UiStringId::ToolGeneric);
@@ -299,6 +301,34 @@ void PopulateEffectControls(
             value.data(), value.size(), _TRUNCATE, L"%d", effect.parameters[index]);
         SetDlgItemTextW(pane, kEffectEditIds[index], value.data());
     }
+    if (effect.line_options) {
+        const std::array<const wchar_t*, 3U> labels{
+            UiText(UiStringId::LineBrushShape), UiText(UiStringId::LineSizing),
+            UiText(UiStringId::LineBackground)};
+        for (std::size_t index = 0U; index < labels.size(); ++index) {
+            SetDlgItemTextW(pane, kViewLabelIds[index], labels[index]);
+            SetVisible(pane, kViewLabelIds[index], true);
+            SetVisible(pane, kViewChoiceIds[index], true);
+            SendDlgItemMessageW(pane, kViewChoiceIds[index], CB_RESETCONTENT, 0, 0);
+        }
+        const HWND shape = GetDlgItem(pane, kViewChoiceIds[0]);
+        AddComboItem(shape, UiText(UiStringId::Text0508), INKPOD_TRACE_ROUND);
+        AddComboItem(shape, UiText(UiStringId::Text0821), INKPOD_TRACE_SQUARE);
+        const HWND sizing = GetDlgItem(pane, kViewChoiceIds[1]);
+        AddComboItem(sizing, UiText(UiStringId::LineDocumentSize), 0);
+        AddComboItem(sizing, UiText(UiStringId::LineDocumentPressure), 1);
+        AddComboItem(sizing, UiText(UiStringId::LineScreenSize), 2);
+        AddComboItem(sizing, UiText(UiStringId::LineScreenPressure), 3);
+        const HWND background = GetDlgItem(pane, kViewChoiceIds[2]);
+        AddComboItem(background, UiText(UiStringId::LineBackgroundDefault), 0);
+        AddComboItem(background, UiText(UiStringId::LineBackgroundTransparent), 1);
+        AddComboItem(background, UiText(UiStringId::LineBackgroundCustom), 2);
+        for (std::size_t index = 0U; index < labels.size(); ++index) {
+            SelectComboValue(GetDlgItem(pane, kViewChoiceIds[index]), effect.line_values[index]);
+        }
+    }
+    SetDlgItemTextW(pane, IDC_TOOL_OPTIONS_EFFECT_POINTS_LABEL,
+        effect.points_label != nullptr ? effect.points_label : UiText(UiStringId::Text0775));
     const HWND channel = GetDlgItem(pane, IDC_EFFECT_CHANNEL);
     SendMessageW(channel, CB_RESETCONTENT, 0, 0);
     for (std::size_t index = 0U; index < effect.channel_count; ++index) {
@@ -361,8 +391,10 @@ void PopulateDetailControls(HWND pane, ToolOptionsPaneState& state) noexcept {
     } else if (detail.kind == ToolOptionsDetailKind::View) {
         PopulateViewControls(pane, detail.view);
     } else {
-        for (const int id : kEffectLabelIds) SetVisible(pane, id, true);
-        for (const int id : kEffectEditIds) SetVisible(pane, id, true);
+        for (std::size_t index = 0U; index < detail.effect.parameter_count; ++index) {
+            SetVisible(pane, kEffectLabelIds[index], true);
+            SetVisible(pane, kEffectEditIds[index], true);
+        }
         SetVisible(
             pane,
             IDC_TOOL_OPTIONS_EFFECT_CHANNEL_LABEL,
@@ -383,7 +415,8 @@ void PopulateDetailControls(HWND pane, ToolOptionsPaneState& state) noexcept {
         PopulateEffectControls(
             pane,
             detail.effect,
-            detail.kind == ToolOptionsDetailKind::BoundaryEffect);
+            detail.kind == ToolOptionsDetailKind::BoundaryEffect
+                || detail.kind == ToolOptionsDetailKind::LineEffect);
     }
     state.updating_detail = false;
 }
@@ -601,7 +634,7 @@ int LayoutPane(HWND pane) noexcept {
         return finish(y);
     }
 
-    for (std::size_t index = 0U; index < kEffectEditIds.size(); ++index) {
+    for (std::size_t index = 0U; index < state->detail.effect.parameter_count; ++index) {
         LayoutLabeledRow(
             pane,
             kEffectLabelIds[index],
@@ -651,6 +684,15 @@ int LayoutPane(HWND pane) noexcept {
             ScaleForDpi(160, dpi));
         y += row + gap;
     }
+    if (state->detail.effect.line_options) {
+        for (std::size_t index = 0U; index < state->detail.effect.line_values.size(); ++index) {
+            LayoutLabeledRow(pane, kViewLabelIds[index], kViewChoiceIds[index],
+                margin, y, width, row, label_width);
+            SetControlBounds(pane, kViewChoiceIds[index], margin + label_width, y,
+                std::max(0, width - margin * 2 - label_width), ScaleForDpi(160, dpi));
+            y += row + gap;
+        }
+    }
     if (!state->detail.effect.points.empty()) {
         const int points_height = ScaleForDpi(72, dpi);
         LayoutLabeledRow(
@@ -676,7 +718,8 @@ int LayoutPane(HWND pane) noexcept {
             y += row;
         }
     }
-    if (state->detail.kind == ToolOptionsDetailKind::BoundaryEffect) {
+    if (state->detail.kind == ToolOptionsDetailKind::BoundaryEffect
+        || state->detail.kind == ToolOptionsDetailKind::LineEffect) {
         SetControlBounds(
             pane,
             IDC_TOOL_OPTIONS_APPLY,
@@ -803,7 +846,7 @@ bool ReadViewControls(HWND pane, ViewOptionsDialogState& view) noexcept {
 
 bool ReadEffectControls(HWND pane, EffectEditorState& effect) noexcept {
     auto parameters = effect.parameters;
-    for (std::size_t index = 0U; index < parameters.size(); ++index) {
+    for (std::size_t index = 0U; index < effect.parameter_count; ++index) {
         if (!ReadSignedValue(pane, kEffectEditIds[index], parameters[index])) {
             return false;
         }
@@ -823,6 +866,13 @@ bool ReadEffectControls(HWND pane, EffectEditorState& effect) noexcept {
         effect.points.assign(points.data());
     } catch (const std::bad_alloc&) {
         return false;
+    }
+    if (effect.line_options) {
+        for (std::size_t index = 0U; index < effect.line_values.size(); ++index) {
+            std::int32_t value{};
+            if (!ReadComboValue(pane, kViewChoiceIds[index], value)) return false;
+            effect.line_values[index] = static_cast<std::uint32_t>(value);
+        }
     }
     effect.parameters = parameters;
     effect.channel = static_cast<std::uint32_t>(channel);

@@ -399,6 +399,7 @@ fn worker_cancel_and_dust_never_commit_partial_results() {
                 height: 1
             })),
             DustRemoval {
+                background: Default::default(),
                 mode: DustMode::ReplaceColorOutliers,
                 maximum_pixels: 1
             },

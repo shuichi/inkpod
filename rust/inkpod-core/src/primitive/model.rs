@@ -113,6 +113,8 @@ impl PrimitiveId {
     pub const EDIT_PLANE_ALPHA: Self = Self(0x0005_0019);
     /// Primitive ID for applying a gradient to raster alpha.
     pub const APPLY_ALPHA_GRADIENT: Self = Self(0x0005_001a);
+    /// Explicit line correction with captured region construction.
+    pub const APPLY_LINE_CORRECTION: Self = Self(0x0005_001b);
     /// Primitive ID for committing a filter operation.
     pub const APPLY_FILTER: Self = Self(0x0005_0020);
     /// Primitive ID for exact bounded raster color replacement.
@@ -234,14 +236,14 @@ impl StateId {
 
 impl ReplayEpoch {
     /// Replay epoch used by every built-in primitive in this Core version.
-    pub const CURRENT: Self = Self(28);
+    pub const CURRENT: Self = Self(29);
 }
 
 /// Exact current top-level procedure-authoritative native format version.
 ///
 /// The build, reader, writer, and replay contract all use this value. Earlier
 /// and later top-level versions are rejected without migration.
-pub const PROCEDURE_FORMAT_VERSION: u32 = 33;
+pub const PROCEDURE_FORMAT_VERSION: u32 = 34;
 
 /// Version of the canonical scalar, rounding, alpha, and geometry contract.
 pub const CANONICAL_NUMERIC_VERSION: u32 = 1;

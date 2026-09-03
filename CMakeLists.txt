@@ -531,6 +531,7 @@ if(WIN32)
         apps/windows/ui/command_state.cpp
         apps/windows/ui/command_state.h
         apps/windows/ui/command_state_catalog.inc
+        apps/windows/ui/tools/line_correction_options.cpp
         apps/windows/ui/tools/tool_state.cpp
         apps/windows/ui/tools/tool_state.h
         tests/windows_command_state.cpp)
@@ -927,6 +928,7 @@ if(WIN32)
         apps/windows/app/workspace_window.cpp
         apps/windows/app/workspace_window.h
         apps/windows/app/app_smoke.cpp
+        apps/windows/app/line_correction_smoke.cpp
         apps/windows/app/sequence_performance_smoke.cpp
         apps/windows/app/app_smoke.h
         apps/windows/app/application.cpp
@@ -992,6 +994,7 @@ if(WIN32)
         apps/windows/ui/tools/color_replace_controller.h
         apps/windows/ui/tools/selection_controller.cpp
         apps/windows/ui/tools/floating_paste_controller.cpp
+        apps/windows/ui/tools/line_correction_options.cpp
         apps/windows/ui/tools/tool_state.cpp
         apps/windows/ui/command_state.cpp
         apps/windows/ui/command_state_catalog.inc

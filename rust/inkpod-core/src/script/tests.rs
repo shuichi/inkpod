@@ -138,7 +138,7 @@ fn assert_export_round_trip(base: &Core, scripted: &Core) {
 fn complete_source(parameters: &str, bindings: &str, program: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 6; replay_epoch = 28; }}
+requires {{ procedure_catalog = 7; replay_epoch = 29; }}
 inputs {{ current_document; }}
 parameters {{ {parameters} }}
 bindings {{ {bindings} }}
@@ -152,7 +152,7 @@ execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
 fn complete_source_with_assets(bindings: &str, program: &str, assets: &str) -> InkScriptSource {
     source(format!(
         r#"inkscript 2;
-requires {{ procedure_catalog = 6; replay_epoch = 28; }}
+requires {{ procedure_catalog = 7; replay_epoch = 29; }}
 inputs {{ current_document; }}
 parameters {{}}
 bindings {{ {bindings} }}
@@ -212,6 +212,75 @@ fn core() -> Core {
     core.new_cell(4, 4, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI)
         .unwrap();
     core
+}
+
+#[test]
+fn line_corrections_export_execute_and_replay_the_same_canonical_edit() {
+    let mut bytes = vec![0_u8; 24 * 24 * 4];
+    for x in 3..21 {
+        if x != 10 {
+            bytes[(12 * 24 + x) * 4..(12 * 24 + x + 1) * 4].copy_from_slice(&[0, 0, 0, 255]);
+        }
+    }
+    bytes[(3 * 24 + 3) * 4..(3 * 24 + 4) * 4].copy_from_slice(&[0, 0, 0, 255]);
+    let raster =
+        inkpod_format::CommonRaster::new(24, 24, PixelFormat::StraightRgba8, None, None, bytes)
+            .unwrap();
+    let mut base = Core::new();
+    base.import_decoded_common_raster(crate::CommonRasterFormat::Png, &raster, 0x1c0)
+        .unwrap();
+    let background = crate::LineBackground::PlaneDefault;
+    for correction in [
+        crate::LineCorrection::Dust(crate::DustRemoval {
+            mode: crate::DustMode::RemoveForeground,
+            maximum_pixels: 1,
+            background,
+        }),
+        crate::LineCorrection::Connect {
+            gap: 1,
+            width: 1,
+            background,
+        },
+        crate::LineCorrection::Width {
+            mode: crate::LineWidthMode::Thicken,
+            amount: 1,
+            background,
+        },
+        crate::LineCorrection::Width {
+            mode: crate::LineWidthMode::Thin,
+            amount: 1,
+            background,
+        },
+        crate::LineCorrection::Width {
+            mode: crate::LineWidthMode::Uniform,
+            amount: 3,
+            background,
+        },
+    ] {
+        let mut direct = base.clone();
+        direct
+            .apply_line_correction(
+                &crate::LineCorrectionRequest {
+                    plane_id: base.document_info().unwrap().main_plane_id,
+                    region: Some(SelectionShape::Rectangle(RectI32 {
+                        x: 1,
+                        y: 1,
+                        width: 22,
+                        height: 22,
+                    })),
+                    construction: SelectionConstructionOptions::default(),
+                    correction,
+                },
+                |_, _| true,
+            )
+            .unwrap();
+        assert_ne!(
+            direct.document_state_digest().unwrap(),
+            base.document_state_digest().unwrap()
+        );
+        assert_export_round_trip(&base, &direct);
+        direct.verify_journal_replay().unwrap();
+    }
 }
 
 fn success_source(core: &Core) -> InkScriptSource {
@@ -348,7 +417,7 @@ fn compiler_freezes_parameters_and_checks_cancel_invalid_and_aggregate_resources
     assert_eq!(limited, Err(ScriptCompileError::ResourceLimit));
 
     let invalid =
-        source("inkscript 2; requires { procedure_catalog = 6; replay_epoch = 28; }".to_owned());
+        source("inkscript 2; requires { procedure_catalog = 7; replay_epoch = 29; }".to_owned());
     assert!(matches!(
         compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())),
         Err(ScriptCompileError::Syntax) | Err(ScriptCompileError::Semantic(_))

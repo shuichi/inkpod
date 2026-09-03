@@ -227,6 +227,7 @@ fn paint_003_dust_modes_preview_bounds_and_cancel_are_atomic() {
         &point,
         None,
         DustRemoval {
+            background: Default::default(),
             mode: DustMode::RemoveForeground,
             maximum_pixels: 1,
         },
@@ -248,6 +249,7 @@ fn paint_003_dust_modes_preview_bounds_and_cancel_are_atomic() {
         &hole,
         None,
         DustRemoval {
+            background: Default::default(),
             mode: DustMode::FillTransparentHoles,
             maximum_pixels: 1,
         },
@@ -268,6 +270,7 @@ fn paint_003_dust_modes_preview_bounds_and_cancel_are_atomic() {
         &outlier,
         None,
         DustRemoval {
+            background: Default::default(),
             mode: DustMode::ReplaceColorOutliers,
             maximum_pixels: 1,
         },
@@ -286,6 +289,7 @@ fn paint_003_dust_modes_preview_bounds_and_cancel_are_atomic() {
             &outlier,
             None,
             DustRemoval {
+                background: Default::default(),
                 mode: DustMode::ReplaceColorOutliers,
                 maximum_pixels: 8
             },

@@ -76,7 +76,7 @@ bool BindingMatches(
 
 bool SparseBuiltInProfileIsAuthoritative(const ShortcutProfile& profile) {
     const auto commands = inkpod::windows::ui::ShortcutCommandCatalog();
-    if (!profile.built_in || commands.size() != 312U
+    if (!profile.built_in || commands.size() != 317U
         || profile.bindings.size() != 33U
         || ValidateShortcutProfile(profile, false)
             != ShortcutProfileValidation::Ok) {

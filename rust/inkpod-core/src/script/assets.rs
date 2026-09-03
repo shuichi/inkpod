@@ -922,7 +922,7 @@ mod tests {
     ) -> Result<InkScriptDeclarationModel, InkScriptTypeDiagnosticCode> {
         let text = format!(
             r#"inkscript 2;
-requires {{ procedure_catalog = 6; replay_epoch = 28; }}
+requires {{ procedure_catalog = 7; replay_epoch = 29; }}
 inputs {{ current_document; }}
 program {{}}
 output {{ policy = duplicate; format = inkpod; folder = "out"; cell_folder = false; basename = "asset"; start_number = 1; direction = ascending; }}

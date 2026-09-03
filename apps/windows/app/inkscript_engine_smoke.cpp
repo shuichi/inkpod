@@ -203,7 +203,7 @@ int RunPrivateInkScriptEngineSmoke() noexcept {
         request.source_generation = 1U;
         request.context = context;
         request.source_utf8 = R"(inkscript 2;
-requires { procedure_catalog = 6; replay_epoch = 28; }
+requires { procedure_catalog = 7; replay_epoch = 29; }
 inputs { current_document; }
 program {
     step "Add guide" { enabled = true; invoke add_guide { axis = vertical; position = 2; }; }

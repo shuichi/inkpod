@@ -1,8 +1,8 @@
 # Native file format
 
-`.inkpod` v33 is the bounded, procedure-authoritative, little-endian native
-container and the only accepted top-level contract. Cell files require runtime
-replay epoch 28. Cut descriptors and instruction-raster export are no longer supported. The current `DocumentArchive` is schema 7, its nested `DOCM` schema 9 is
+`.inkpod` v34 is the bounded, procedure-authoritative, little-endian native
+container and the only accepted top-level contract. Version 34 adds explicit raster line correction, whole-source dust components, and pre-flood virtual wand boundaries; older versions are rejected. Line correction uses primitive schema 2/semantics 1, dust schema 3/semantics 3, and selection semantics 4. Editor defaults include both raster line tools. Cell files require runtime
+replay epoch 29. Cut descriptors and instruction-raster export are no longer supported. The current `DocumentArchive` is schema 7, its nested `DOCM` schema 9 is
 mandatory, `DocumentStateDigest` is schema 13/domain 11, and the canonical
 snapshot-composite is schema 5. The current image tree has one standard layer
 structure: exactly one MainLine plane, exactly one Color plane, and zero or more
@@ -21,7 +21,7 @@ schema should be replaced whenever a more robust or efficient design is found.
 ## Current procedure-authoritative contract
 
 This section defines the implemented procedure-authoritative container at
-top-level format version 33 and runtime replay epoch 28. It uses a hierarchical document
+top-level format version 34 and runtime replay epoch 29. It uses a hierarchical document
 commitment, an exact-depth target-explicit `ApplyRasterStroke/v3` schema, a
 bounded resolved `ApplyGeometry/canonical-v2` schema,
 distinct stable Cell ID, and an explicit immutable Genesis base surface:
@@ -29,14 +29,14 @@ metadata, raster, and raster-tile commitments are domain-separated so a raster
 edit hashes only changed tile payloads instead of every allocated document
 pixel. This semantic digest is independent of the renderer's canonical
 revision-max cache identity. Asset and procedure-payload digest contracts are
-version 1. Every version other than 33 is rejected before Core state replacement;
+version 1. Every version other than 34 is rejected before Core state replacement;
 there is no migration or compatibility reader. Any schema or replay-semantics change
 after this contract increments the top-level version before that change is
 merged. A replay-result change also increments the replay epoch.
 
 The authoritative sections are `META`, `GENS`, `ASST`, `PROC`, and `EDIT`.
 `EXTM`, `CKPT`, and unknown opaque-preserve sections are optional. `CKPT` is a
-schema-1 acceleration record in v33. There is no `HIST` section: history moves and
+schema-1 acceleration record in v34. There is no `HIST` section: history moves and
 branch cuts are records in `PROC`, while cursor, active branch, savepoints, and
 ID high-watermarks are fields in `META`. A materialized document or checkpoint
 is never sufficient without Genesis, retained assets, and the procedure/control
@@ -314,7 +314,7 @@ the common 16-byte record header defined below, then these exact payload bytes:
 - An asset-reference record is `argument ordinal u32`, zero `u32`, then the
   32-byte `AssetId`. Input/output-ID records are `role ordinal u32`, reserved
   zero `u32`, and stable ID `u64`; the typed canonical invocation is the object-
-  kind authority in v33. Each sequence is strictly increasing
+  kind authority in v34. Each sequence is strictly increasing
   by ordinal with no duplicate role. The primitive schema fixes whether each
   input/output role is required; transient object IDs are forbidden.
 - When payload length is zero, `ProcedurePayloadDigest` is 32 zero bytes and no
@@ -484,7 +484,7 @@ resources, and OS
 DPI are excluded. `RenderSnapshot::canonical_composite_digest` and
 `inkpod_snapshot_get_canonical_digest` expose this result without a test-only
 state accessor. This derived snapshot digest is not serialized in `.inkpod` and
-does not independently change native format v33 or runtime replay epoch 28.
+does not independently change native format v34 or runtime replay epoch 29.
 
 A sequence field is `element-count u64`, then for every element `element-length
 u64` and exact element bytes. A schema-declared ordered sequence retains its
@@ -522,7 +522,7 @@ digest, 5 semantics revision `u32`, 6 work-formula ID `u32`, and 7 replay-policy
 argument-schema digest is BLAKE3 `derive_key` over the exact canonical ASCII
 label `<canonical-name>/canonical-v<schema-version>` using the primitive-
 argument-schema context above. This label identifies the closed typed schema;
-the v33 reader selects its decoder through the same catalog entry and accepts
+the v34 reader selects its decoder through the same catalog entry and accepts
 only a byte-exact canonical re-encoding.
 
 An argument descriptor is a schema-1 frame with fields 1 ordinal `u32`; 2
@@ -591,7 +591,7 @@ and is invalid with ExplicitOverwrite.
 `ApplyBatchOperations/canonical-v3` has primitive ID `0x0005_0044`, semantics
 revision 1, and work-formula ID `0x0005_0044`. It is a private catalog entry:
 `.inkbatch` and the C ABI may construct its four typed operations, but InkScript
-catalog v6 does not expose it as a command. The canonical value is a nonempty
+catalog v7 does not expose it as a command. The canonical value is a nonempty
 bounded ordered sequence of enabled v3 operations. Every target, exact tagged
 native-depth color, enabled replacement row, and operation kind is copied into
 the procedure; no external path, frontend command ID, session ID, generation,
@@ -693,7 +693,7 @@ follows:
   editable plane, current-selection, saved-selection, fill-protection, and other
   stable object IDs therefore obey cross-kind numeric-ID uniqueness. This
   document-state frame is schema 13/domain 11. The current build contract is
-  runtime replay epoch 28 and top-level version 33; optional
+  runtime replay epoch 29 and top-level version 34; optional
   checkpoint/streaming records do not change the state-digest schema.
   Collections whose UI order is not semantic are ID-sorted.
 
@@ -800,7 +800,7 @@ owners. The current materialized document and checkpoints are not sufficient
 roots by themselves. Assets referenced only by an inactive branch remain
 available for cache-free replay, and the owning Core session releases its
 registry only after transient work has drained. These runtime rules establish
-  the exact graph serialized by v33 `GENS` and `ASST`.
+  the exact graph serialized by v34 `GENS` and `ASST`.
 
 Cache-free save/reopen-equivalent verification is detached from that live
 registry: it walks the same roots, deep-copies every unique payload in
@@ -808,7 +808,7 @@ registry: it walks the same roots, deep-copies every unique payload in
 then rebinds Genesis and retained procedures before fresh replay. Descriptor,
 payload, identity, and duplicate-root reference counts must match, while the
 source and rebuilt `AssetRecord`, payload, and raster allocations must not share
-ownership. That detached archive remains test infrastructure; v33 provides
+ownership. That detached archive remains test infrastructure; v34 provides
 the production encoder and staged reader.
 
 Self-referential digest fields are present as thirty-two zero bytes during
@@ -826,14 +826,14 @@ change digest output. The Core production dependency computes the
 hierarchical schema-12 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
-never these digests. The same pinned implementation computes the v33 section,
+never these digests. The same pinned implementation computes the v34 section,
 root, asset-chunk, journal, document, editor, and procedure-payload commitments.
 
 ### Header, directory, and record bytes
 
-The v33 header is exactly 128 bytes. Its outer container-layout epoch is 9;
+The v34 header is exactly 128 bytes. Its outer container-layout epoch is 9;
 the authoritative `META` and procedure records independently require runtime
-replay epoch 28 before staged Core publication:
+replay epoch 29 before staged Core publication:
 
 | Offset | Size | Field |
 |---:|---:|---|
@@ -931,7 +931,7 @@ the decoded source format; a new blank Cell uses the application default (PNG un
 changed in Preferences). Native open, recovery, sequence switching, and explicit
 compaction preserve this field. Changing the application default affects only later
 blank Cells. This file metadata does not put a filesystem path into a procedure or
-change replay epoch 28. The outer META section and record are version 2; the generic
+change replay epoch 29. The outer META section and record are version 2; the generic
 length-framed field envelope remains schema 1.
 
 The cursor counts visible states after Genesis on the active branch and must
@@ -947,7 +947,7 @@ followed by its 32-byte `AssetId`, 3 Transparent), then nested payload
 length `u64` and the exact current schema-7 `DocumentArchive` payload. That nested
 payload is not a standalone `.inkpod` container and is not accepted through
 the native-file entrypoint; it is the bounded Genesis document DTO owned by the
-v33 GENS schema. Its fixed manifest is 200 bytes before palette, required document
+v34 GENS schema. Its fixed manifest is 200 bytes before palette, required document
 metadata, optional Light-Table metadata, plane descriptors, and blob descriptors:
 stable Document ID, distinct
 stable Cell ID, primary layer/main/color plane IDs, document UUID, raster size,
@@ -968,7 +968,7 @@ descriptor IDs must match metadata records one-to-one; all mask rasters are exac
 geometry, kind, format, and ID relationships, and rejects trailing bytes before
 publication. No replay default comes from the build.
 
-For an initial-raster source, v33 accepts `SolidWhite` only when the exact RGBA8/16
+For an initial-raster source, v34 accepts `SolidWhite` only when the exact RGBA8/16
 source asset is fully opaque; any source containing non-opaque alpha requires
 `Transparent`. The source always materializes the initially empty editable MainLine
 plane and is not itself composited as the base surface. Its pixel values, depth, and
@@ -994,7 +994,7 @@ index `u32`; ordinal 13 is the
 ordered multi-edit-target sequence. The cursor is absent for an empty chart and
 is validated/reconciled against document entries during staged open.
 
-The v33 writer emits this bounded canonical EDIT payload and the staged reader
+The v34 writer emits this bounded canonical EDIT payload and the staged reader
 verifies its digest, target IDs, revision, and META savepoint before replacing
 the live Core. The decoder rejects an EDIT frame larger than 4 MiB.
 
@@ -1193,7 +1193,7 @@ graph before any item runs. Each source is loaded into a separate working Core,
 enabled operations execute in order, and cancellation/failure cannot publish a
 partial item. Dry-run creates no output or temporary file.
 
-Folder results use the ordinary v33 native writer or the common-raster codecs;
+Folder results use the ordinary v34 native writer or the common-raster codecs;
 each encoded item is completed, flushed, synchronized, and closed through a
 same-directory temporary file before atomic installation. A graph containing
 Masking rejects PNG/TIFF/TGA/BMP output because those formats cannot retain the
@@ -1241,7 +1241,7 @@ storage, and public DTO metadata is revalidated before every conversion.
 
 Normal editable File Open and Sequence activation share one same-directory,
 same-stem raster-pair resolver. Selecting a raster derives its `.inkpod` candidate.
-If that native candidate exists, the reader completes the ordinary staged v33
+If that native candidate exists, the reader completes the ordinary staged v34
 decode, asset validation, and replay, then compares its normal raster composite
 with the selected raster's canonical decode. Dimensions, native depth, straight
 alpha, every pixel value, and representable DPI must match the META field-21
@@ -1265,7 +1265,7 @@ replay and canonical comparison as part of its runtime proof.
 complete stamps are runtime/session authority. They are not stored in META, GENS,
 ASST, PROC, EDIT, CKPT, or EXTM. The resolver uses existing field 21 plus the
 canonical Genesis/assets/composite contracts, so this behavior does not change
-top-level format v33, replay epoch 28, or any section/record schema. A future
+top-level format v34, replay epoch 29, or any section/record schema. A future
 serialized pair path, filesystem identity, or source digest would require a new
 top-level format version under the current-only policy.
 These are exactly three authority states. A missing raster companion is the
@@ -1379,7 +1379,7 @@ path as a normal document path. `open_recovery` loads the container into a
 dirty, recovered, pathless Core document, so a later ordinary Save must choose
 a destination and cannot silently overwrite the pre-recovery normal file.
 
-Sequence-cell autosave-before-switch uses this same exact-current v33 recovery
+Sequence-cell autosave-before-switch uses this same exact-current v34 recovery
 container and sidecar metadata. The live frontend associates the artifact with
 the source document UUID and sequence-source generation; revisiting that entry
 opens, validates, and replays the full native artifact in a staged Core rather
@@ -1398,13 +1398,13 @@ replacement instead adopts only the target resolver's authority.
 Whole-document Revert was introduced as an ABI v30 runtime operation and is retained by ABI v31; it is not a native schema
 feature. It is accepted only as `OPEN_NATIVE` with both force-reload and explicit
 current-document Revert flags, and apply requires the exact live current native
-path and document UUID. The staged v33 data replaces document/history/editor/
+path and document UUID. The staged v34 data replaces document/history/editor/
 savepoints while runtime sequence catalog, active index, every live stable view
 ID/logical view state, the next-view ID, and inactive recovery associations
 survive. Render-cache entries for the replaced document revision are invalidated.
 The frontend then rebases the active
 pair binding and projection to the new owner generation. None of these runtime
-associations are serialized into the v33 container.
+associations are serialized into the v34 container.
 
 ### Historical version evolution through v29
 

@@ -12,6 +12,7 @@ mod clipboard;
 mod geometry;
 mod mask;
 mod operations;
+mod wand;
 
 pub(super) use clipboard::*;
 pub(super) use geometry::*;

@@ -4,7 +4,7 @@ This document is the M00 traceability authority connecting the product requireme
 [`SPEC.md`](../SPEC.md), the normative language contract in
 [`INKSCRIPT.md`](../INKSCRIPT.md), the machine-readable registries, milestones, and
 planned evidence. It is not a command reference. The exact-current command signatures are in
-[`catalog-v6.json`](../schemas/inkscript/catalog-v6.json); the derived presentation is
+[`catalog-v7.json`](../schemas/inkscript/catalog-v7.json); the derived presentation is
 [`inkscript-command-reference.md`](inkscript-command-reference.md).
 
 ## Ratified contract
@@ -15,8 +15,8 @@ rebaseline, and the layer/plane contract rebaseline were separately approved bef
 implementation:
 
 - InkScript registry schema/language/file version 2, procedure catalog and owner
-  manifest version 6, replay epoch 28, `.inkpod` top-level version 33, and C ABI
-  version 33 are the exact-current values. Catalog/owner v6 expose the same 73 public
+  manifest version 7, replay epoch 29, `.inkpod` top-level version 34, and C ABI
+  version 34 are the exact-current values. Catalog/owner v7 expose 74 public
   commands; the private `ApplyBatchOperations` canonical procedure is not an InkScript command.
   ABI v31 changes only application-owned validated-sidecar cache control/telemetry and does not
   change InkScript syntax, catalog entries, procedure semantics, replay, or native payloads.
@@ -86,14 +86,14 @@ atomicity parity. Batch v5 itself does not imply that product route.
 
 ## Current machine-readable ownership
 
-[`owner-manifest-v6.json`](../schemas/inkscript/owner-manifest-v6.json) assigns all 73
+[`owner-manifest-v7.json`](../schemas/inkscript/owner-manifest-v7.json) assigns all 74
 current command owners exactly once. The allocation is deliberately
 reviewable before signatures are added:
 
 | Owner | Replayable primitives | Scope |
 | --- | ---: | --- |
 | M07 | 6 | property, plane-format conversion and document transforms |
-| M08 | 6 | legacy fill, replacement, separation, filter, boundary-airbrush and dust adapters |
+| M08 | 7 | legacy fill, replacement, separation, filter, boundary-airbrush, dust and raster line correction adapters |
 | M15 | 13 | paper/frame and remaining document tree operations |
 | M16 | 8 | color metadata and guide/grid operations |
 | M17 | 3 | raster stroke, geometry and canonical raster import |
@@ -107,7 +107,7 @@ reviewable before signatures are added:
 `APPLY_BATCH_OPERATIONS` procedure is excluded because `.inkbatch` v5 owns that route.
 Query, view, preview, export, save/open, history-control, and frontend
 command IDs remain outside the manifest. M24's journal-fragment query therefore remains
-outside the 73-command catalog while exhaustively consuming its typed runtime variants.
+outside the 74-command catalog while exhaustively consuming its typed runtime variants.
 
 ## Registry and completeness evidence
 
@@ -126,7 +126,7 @@ The `inkscript_registry` integration target provides these current checks:
 PowerShell `Test-Json -SchemaFile` additionally validates the language, production catalog, and owner
 documents against the formal Draft 2020-12 meta-schema. The Rust tests validate the closed
 meta-schema and JSON syntax, duplicate/malformed/overflow rejection, language type/nonterminal
-references, unique field/order/type names, current version constants, the 73-entry
+references, unique field/order/type names, current version constants, the 74-entry
 primitive-owner bijection, the two explicit exclusions, requirement/document
 drift, immutable catalog fingerprint, generated-reference drift, public Rust ownership, absence of
 the removed draft, and absence of private typed catalog models or Windows InkScript routes.
@@ -166,3 +166,12 @@ Core is unchanged. Negative evidence covers v15 rejection, NULL, short/unknown r
 saturation, cancellation, stale authority/confirmation and save failure. The ABI delegates to the
 existing M11/M12 planner/runner, invokes callbacks without a Core lock, and adds no Windows
 authority adapter, command, UI, product route, parser/catalog node, or second executor.
+
+## Raster line correction (approved 2026-09-03)
+
+Catalog/owner v7 adds `apply_line_correction` (INKS-EQ-0089) and explicitly records native background,
+gesture construction and independent width modes. The original v6 rebaseline above is historical.
+`line_correction_codec_preserves_all_modes_background_and_brush_options` checks canonical encoding;
+`line_corrections_export_execute_and_replay_the_same_canonical_edit` exercises live edits, fragment
+export, compilation, execution and replay against exact canonical procedures and state.
+The public line-selection suite covers native save/reopen and one-step Undo/Redo as well.

@@ -110,35 +110,8 @@ pub(crate) fn selection_mask_for_shape(
             let source = document
                 .plane_by_id(active_plane_id)
                 .ok_or(CoreError::InvalidState("active plane is missing"))?;
-            let target = source.raster.pixel(*x, *y)?;
-            let mut visited = BTreeSet::new();
-            let mut queue = VecDeque::from([(*x, *y)]);
-            while let Some((candidate_x, candidate_y)) = queue.pop_front() {
-                if !visited.insert((candidate_x, candidate_y)) {
-                    continue;
-                }
-                let value = source.raster.pixel(candidate_x, candidate_y)?;
-                if !pixel_within_tolerance(value, target, *tolerance) {
-                    continue;
-                }
-                mask.set_pixel(candidate_x, candidate_y, PixelValue::Binary(255), revision)?;
-                if candidate_x > 0 {
-                    queue.push_back((candidate_x - 1, candidate_y));
-                }
-                if candidate_x + 1 < document.width {
-                    queue.push_back((candidate_x + 1, candidate_y));
-                }
-                if candidate_y > 0 {
-                    queue.push_back((candidate_x, candidate_y - 1));
-                }
-                if candidate_y + 1 < document.height {
-                    queue.push_back((candidate_x, candidate_y + 1));
-                }
-            }
-            if *gap_close > 0 {
-                mask = morphology_selection(&mask, i32::from(*gap_close), revision)?;
-                mask = morphology_selection(&mask, -i32::from(*gap_close), revision)?;
-            }
+            mask =
+                super::wand::wand_mask(&source.raster, *x, *y, *tolerance, *gap_close, revision)?;
         }
     }
     let source = document

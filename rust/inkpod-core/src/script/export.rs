@@ -266,7 +266,7 @@ pub fn export_inkscript_fragment_with_limits(
     let strict_owners = augment_light_table_owner_bindings(&snapshot, &mut strict)?;
 
     let mut source = String::from(
-        "inkscript_fragment 2;\nrequires { procedure_catalog = 6; replay_epoch = 28; }\n",
+        "inkscript_fragment 2;\nrequires { procedure_catalog = 7; replay_epoch = 29; }\n",
     );
     if !strict.is_empty() {
         source.push_str("bindings {\n");
@@ -1352,6 +1352,7 @@ fn lift_invocation(
         | CanonicalInvocation::ApplyFill { .. }
         | CanonicalInvocation::ApplyBoundaryAirbrush { .. }
         | CanonicalInvocation::ApplyDustRemoval { .. }
+        | CanonicalInvocation::ApplyLineCorrection { .. }
         | CanonicalInvocation::ApplyFilter { .. }
         | CanonicalInvocation::ReplaceRasterColors { .. }
         | CanonicalInvocation::SeparateRasterColors { .. }

@@ -861,12 +861,16 @@ public:
             || preview.active > 1U || preview.closed > 1U
             || preview.point_count > kCanvasGeometryPreviewPoints
             || !std::isfinite(preview.stroke_width) || preview.stroke_width < 0.0F
-            || preview.stroke_width > 4096.0F || preview.reserved != 0U) {
+            || preview.stroke_width > 4096.0F || preview.reserved != 0U
+            || preview.brush_shape > INKPOD_TRACE_SQUARE) {
             return E_INVALIDARG;
         }
         for (std::uint32_t index = 0U; index < preview.point_count; ++index) {
             if (!std::isfinite(preview.points[index].x)
-                || !std::isfinite(preview.points[index].y)) {
+                || !std::isfinite(preview.points[index].y)
+                || !std::isfinite(preview.point_diameters[index])
+                || preview.point_diameters[index] < 0.0F
+                || preview.point_diameters[index] > 4096.0F) {
                 return E_INVALIDARG;
             }
         }
@@ -877,6 +881,9 @@ public:
                 && preview.point_count == geometry_preview_.point_count
                 && preview.closed == geometry_preview_.closed
                 && preview.stroke_width == geometry_preview_.stroke_width
+                && preview.brush_shape == geometry_preview_.brush_shape
+                && std::equal(preview.point_diameters, preview.point_diameters + preview.point_count,
+                    geometry_preview_.point_diameters)
                 && std::equal(preview.points, preview.points + preview.point_count,
                     geometry_preview_.points,
                     [](const CanvasGeometryPoint& first, const CanvasGeometryPoint& second) {
@@ -1751,6 +1758,30 @@ private:
         }
         if (FAILED(result)) {
             return result;
+        }
+        if (geometry_preview_.brush_shape != 0U) {
+            // Interpolate bounded display samples only. The Core owns the exact pixel mask.
+            for (std::uint32_t index = 0U; index < geometry_preview_.point_count; ++index) {
+                const auto& a = geometry_preview_.points[index == 0U ? 0U : index - 1U];
+                const auto& b = geometry_preview_.points[index];
+                const float da = geometry_preview_.point_diameters[index == 0U ? 0U : index - 1U];
+                const float db = geometry_preview_.point_diameters[index];
+                const double distance = std::hypot(static_cast<double>(b.x) - a.x, static_cast<double>(b.y) - a.y);
+                const auto steps = static_cast<std::uint32_t>(std::clamp(std::ceil(distance * 2.0), 1.0, 256.0));
+                for (std::uint32_t step = 0U; step <= steps; ++step) {
+                    const float t = static_cast<float>(step) / static_cast<float>(steps);
+                    const auto center = D2D1::Point2F(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
+                    const float radius = (da + (db - da) * t) / 2.0F;
+                    if (radius <= 0.0F) continue;
+                    if (geometry_preview_.brush_shape == INKPOD_TRACE_SQUARE) {
+                        d2d_context_->FillRectangle(D2D1::RectF(center.x - radius, center.y - radius,
+                            center.x + radius, center.y + radius), foreground.Get());
+                    } else {
+                        d2d_context_->FillEllipse(D2D1::Ellipse(center, radius, radius), foreground.Get());
+                    }
+                }
+            }
+            return S_OK;
         }
         const float device_width =
             static_cast<float>(std::max(1.0, 1.5 / transform_.zoom));

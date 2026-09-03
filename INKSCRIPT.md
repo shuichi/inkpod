@@ -39,11 +39,11 @@ product file routeは後続milestoneまで公開しない。
 | 項目                                |                                       初期値 |
 | ----------------------------------- | -------------------------------------------: |
 | InkScript file format version       |                                            2 |
-| InkScript procedure catalog version | 6（指示画像export flag廃止、73 command） |
-| required replay epoch               | 28 |
+| InkScript procedure catalog version | 7（線補正追加、74 command） |
+| required replay epoch               | 29 |
 | native output                       |                      exact-current `.inkpod` |
-| native top-level format             | 33 |
-| C ABI                               | 33 |
+| native top-level format             | 34 |
+| C ABI                               | 34 |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に
 exact-current version だけを受理する。grammar、serialized field、selector の

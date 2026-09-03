@@ -21,7 +21,9 @@ const APPLY_BATCH_OPERATIONS_INVOCATION_SCHEMA_VERSION: u16 = 3;
 const COMMIT_FLOATING_INVOCATION_SCHEMA_VERSION: u16 = 3;
 
 const fn invocation_schema_version(primitive_id: PrimitiveId) -> u16 {
-    if primitive_id.get() == PrimitiveId::CREATE_LAYER.get() {
+    if primitive_id.get() == PrimitiveId::APPLY_DUST_REMOVAL.get() {
+        3
+    } else if primitive_id.get() == PrimitiveId::CREATE_LAYER.get() {
         CREATE_LAYER_INVOCATION_SCHEMA_VERSION
     } else if primitive_id.get() == PrimitiveId::CREATE_PLANE.get() {
         CREATE_PLANE_INVOCATION_SCHEMA_VERSION
@@ -172,6 +174,9 @@ pub(crate) enum CanonicalInvocation {
         diameter: f32,
         radius: u32,
         strength_milli: u32,
+    },
+    ApplyLineCorrection {
+        request: LineCorrectionRequest,
     },
     ApplyDustRemoval {
         plane_id: u64,
@@ -685,6 +690,10 @@ fn decode_persistent_invocation(
             shape: has_shape.then(|| reader.selection_shape()).transpose()?,
             options: reader.dust_removal()?,
         }
+    } else if primitive_id == PrimitiveId::APPLY_LINE_CORRECTION {
+        CanonicalInvocation::ApplyLineCorrection {
+            request: reader.line_correction_request()?,
+        }
     } else if primitive_id == PrimitiveId::EDIT_PLANE_ALPHA {
         CanonicalInvocation::EditPlaneAlpha {
             plane_id: reader.u64()?,
@@ -947,6 +956,11 @@ impl CanonicalInvocation {
                 radius,
                 strength_milli,
             }),
+            Self::ApplyLineCorrection { mut request } => {
+                request.region = request.region.map(canonical_selection_shape).transpose()?;
+                request.construction = canonical_selection_options(request.construction)?;
+                Ok(Self::ApplyLineCorrection { request })
+            }
             Self::ApplyDustRemoval {
                 plane_id,
                 shape,
@@ -1035,6 +1049,7 @@ impl CanonicalInvocation {
                 PrimitiveId::APPLY_BLUR_TOOL
             }
             Self::ApplyDustRemoval { .. } => PrimitiveId::APPLY_DUST_REMOVAL,
+            Self::ApplyLineCorrection { .. } => PrimitiveId::APPLY_LINE_CORRECTION,
             Self::EditPlaneAlpha { .. } => PrimitiveId::EDIT_PLANE_ALPHA,
             Self::ApplyAlphaGradient { .. } => PrimitiveId::APPLY_ALPHA_GRADIENT,
             Self::ApplyFilter { .. } => PrimitiveId::APPLY_FILTER,
@@ -1123,6 +1138,7 @@ impl CanonicalInvocation {
             | Self::ApplyAlphaGradient { plane_id, .. }
             | Self::ApplyFilter { plane_id, .. } => vec![*plane_id],
             Self::ApplyGeometry { geometry } => vec![geometry.plane_id],
+            Self::ApplyLineCorrection { request } => vec![request.plane_id],
             Self::ReplaceRasterColors { plane_id, .. }
             | Self::ScopedColorReplace { plane_id, .. }
             | Self::SeparateRasterColors { plane_id, .. }
@@ -1404,6 +1420,9 @@ impl CanonicalInvocation {
                 .map(InvocationResult::dispatch),
             Self::EditPlaneAlpha { plane_id, alpha } => core
                 .edit_plane_alpha(*plane_id, alpha)
+                .map(InvocationResult::dispatch),
+            Self::ApplyLineCorrection { request } => core
+                .apply_line_correction(request, |_, _| true)
                 .map(InvocationResult::dispatch),
             Self::ApplyAlphaGradient { plane_id, gradient } => core
                 .apply_alpha_gradient_to_plane(*plane_id, gradient)
@@ -1762,6 +1781,7 @@ impl CanonicalInvocation {
                 writer.u64(*plane_id);
                 writer.raster(alpha)?;
             }
+            Self::ApplyLineCorrection { request } => writer.line_correction_request(request)?,
             Self::ApplyAlphaGradient { plane_id, gradient } => {
                 writer.u64(*plane_id);
                 writer.gradient(gradient)?;
@@ -2118,6 +2138,7 @@ pub(super) const fn schema_version(primitive_id: PrimitiveId) -> Option<u16> {
         || value == PrimitiveId::EDIT_PLANE_ALPHA.get()
         || value == PrimitiveId::APPLY_ALPHA_GRADIENT.get()
         || value == PrimitiveId::APPLY_FILTER.get()
+        || value == PrimitiveId::APPLY_LINE_CORRECTION.get()
         || value == PrimitiveId::REPLACE_RASTER_COLORS.get()
         || value == PrimitiveId::SCOPED_COLOR_REPLACE.get()
         || value == PrimitiveId::SEPARATE_RASTER_COLORS.get()
@@ -2618,6 +2639,56 @@ impl<'a> CanonicalReader<'a> {
         Ok(DustRemoval {
             mode,
             maximum_pixels: self.u32()?,
+            background: self.line_background()?,
+        })
+    }
+
+    fn line_background(&mut self) -> Result<LineBackground, CoreError> {
+        Ok(match self.u32()? {
+            0 => LineBackground::PlaneDefault,
+            1 => LineBackground::Transparent,
+            2 => LineBackground::TransparentOrColor([
+                self.u16()?,
+                self.u16()?,
+                self.u16()?,
+                self.u16()?,
+            ]),
+            _ => return Err(self.invalid("invalid line background")),
+        })
+    }
+
+    fn line_correction_request(&mut self) -> Result<LineCorrectionRequest, CoreError> {
+        let plane_id = self.u64()?;
+        let region = if self.boolean()? {
+            Some(self.selection_shape()?)
+        } else {
+            None
+        };
+        let construction = self.selection_construction_options()?;
+        let correction = match self.u32()? {
+            1 => LineCorrection::Dust(self.dust_removal()?),
+            2 => LineCorrection::Connect {
+                gap: self.u32()?,
+                width: self.u32()?,
+                background: self.line_background()?,
+            },
+            3 => LineCorrection::Width {
+                mode: match self.u32()? {
+                    1 => LineWidthMode::Thicken,
+                    2 => LineWidthMode::Thin,
+                    3 => LineWidthMode::Uniform,
+                    _ => return Err(self.invalid("invalid line width mode")),
+                },
+                amount: self.u32()?,
+                background: self.line_background()?,
+            },
+            _ => return Err(self.invalid("invalid line correction")),
+        };
+        Ok(LineCorrectionRequest {
+            plane_id,
+            region,
+            construction,
+            correction,
         })
     }
 
@@ -3500,6 +3571,63 @@ impl CanonicalWriter {
             DustMode::ReplaceColorOutliers => 3,
         });
         self.u32(options.maximum_pixels);
+        self.line_background(options.background);
+    }
+
+    fn line_background(&mut self, background: LineBackground) {
+        match background {
+            LineBackground::PlaneDefault => self.u32(0),
+            LineBackground::Transparent => self.u32(1),
+            LineBackground::TransparentOrColor(color) => {
+                self.u32(2);
+                for channel in color {
+                    self.u16(channel);
+                }
+            }
+        }
+    }
+
+    fn line_correction_request(
+        &mut self,
+        request: &LineCorrectionRequest,
+    ) -> Result<(), CoreError> {
+        self.u64(request.plane_id);
+        self.boolean(request.region.is_some());
+        if let Some(shape) = &request.region {
+            self.selection_shape(shape)?;
+        }
+        self.selection_construction_options(request.construction);
+        match request.correction {
+            LineCorrection::Dust(options) => {
+                self.u32(1);
+                self.dust_removal(options);
+            }
+            LineCorrection::Connect {
+                gap,
+                width,
+                background,
+            } => {
+                self.u32(2);
+                self.u32(gap);
+                self.u32(width);
+                self.line_background(background);
+            }
+            LineCorrection::Width {
+                mode,
+                amount,
+                background,
+            } => {
+                self.u32(3);
+                self.u32(match mode {
+                    LineWidthMode::Thicken => 1,
+                    LineWidthMode::Thin => 2,
+                    LineWidthMode::Uniform => 3,
+                });
+                self.u32(amount);
+                self.line_background(background);
+            }
+        }
+        Ok(())
     }
 
     fn raster(&mut self, raster: &TileRaster) -> Result<(), CoreError> {

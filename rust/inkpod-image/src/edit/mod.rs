@@ -214,6 +214,7 @@ pub enum DustMode {
 pub struct DustRemoval {
     pub mode: DustMode,
     pub maximum_pixels: u32,
+    pub background: crate::LineBackground,
 }
 
 #[cfg(test)]

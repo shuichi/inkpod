@@ -7,8 +7,10 @@ use super::inkscript_reference::{
 use crate::{
     BatchColorPair, BatchSeparation, BatchSeparationDestination, BoundaryAirbrush, Channel,
     ColorBalance, CurveInterpolation, CurvePoint, DustMode, DustRemoval, EditorTarget,
-    FillOperation, FillRequest, Filter, HsvAdjustment, InclusionMode, Levels, PixelValue, PointF32,
-    PrimitiveId, RectI32, SelectionSample, SelectionShape,
+    FillOperation, FillRequest, Filter, HsvAdjustment, InclusionMode, Levels, LineBackground,
+    LineCorrection, LineCorrectionRequest, LineWidthMode, PixelValue, PointF32, PrimitiveId,
+    RectI32, SelectionConstructionOptions, SelectionSample, SelectionShape, TraceBrushOptions,
+    TraceBrushShape,
 };
 use inkpod_format::{
     InkScriptCommandSchema, InkScriptEnumSchema, InkScriptFieldSchema, InkScriptRecordSchema,
@@ -22,6 +24,15 @@ use std::collections::BTreeMap;
 const ADAPTER_SOURCE_UUID: &str = "00000000-0000-0000-0000-000000000008";
 
 pub(crate) const LEGACY_IMAGE_ENUMS: &[InkScriptEnumSchema] = &[
+    InkScriptEnumSchema::new(
+        "line_background_mode",
+        &["plane_default", "transparent", "transparent_or_color"],
+    ),
+    InkScriptEnumSchema::new(
+        "line_correction_kind",
+        &["dust", "connect", "thicken", "thin", "uniform"],
+    ),
+    InkScriptEnumSchema::new("line_trace_shape", &["round", "square"]),
     InkScriptEnumSchema::new("fill_operation", &["seed", "closed_region", "extend"]),
     InkScriptEnumSchema::new(
         "fill_inclusion_mode",
@@ -139,9 +150,35 @@ const BOUNDARY_AIRBRUSH_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("width", "u32", 1),
     InkScriptFieldSchema::required("strength_milli", "u32", 2),
 ];
+const LINE_BACKGROUND_FIELDS: &[InkScriptFieldSchema] = &[
+    InkScriptFieldSchema::required("mode", "line_background_mode", 0),
+    InkScriptFieldSchema::required("color", "rgba16", 1),
+];
+const LINE_TRACE_OPTIONS_FIELDS: &[InkScriptFieldSchema] = &[
+    InkScriptFieldSchema::required("shape", "line_trace_shape", 0),
+    InkScriptFieldSchema::required("pressure_size", "bool", 1),
+    InkScriptFieldSchema::required("screen_size", "bool", 2),
+    InkScriptFieldSchema::required("view_zoom", "q16", 3),
+];
+const LINE_CONSTRUCTION_FIELDS: &[InkScriptFieldSchema] = &[
+    InkScriptFieldSchema::required("aspect_ratio_q16", "u32", 0),
+    InkScriptFieldSchema::required("from_center", "bool", 1),
+    InkScriptFieldSchema::required("constrain_rotation_45", "bool", 2),
+    InkScriptFieldSchema::required("rotation_turns", "u32", 3),
+    InkScriptFieldSchema::required("trace", "line_trace_options", 4),
+];
+const LINE_CORRECTION_FIELDS: &[InkScriptFieldSchema] = &[
+    InkScriptFieldSchema::required("kind", "line_correction_kind", 0),
+    InkScriptFieldSchema::required("dust", "nullable<dust_removal>", 1),
+    InkScriptFieldSchema::required("gap", "u32", 2),
+    InkScriptFieldSchema::required("width", "u32", 3),
+    InkScriptFieldSchema::required("amount", "u32", 4),
+    InkScriptFieldSchema::required("background", "line_background", 5),
+];
 const DUST_REMOVAL_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("mode", "dust_mode", 0),
     InkScriptFieldSchema::required("maximum_pixels", "u32", 1),
+    InkScriptFieldSchema::required("background", "line_background", 2),
 ];
 const COLOR_PAIR_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("enabled", "bool", 0),
@@ -174,6 +211,10 @@ const SELECTION_SHAPE_FIELDS: &[InkScriptFieldSchema] = &[
 ];
 
 pub(crate) const LEGACY_IMAGE_RECORDS: &[InkScriptRecordSchema] = &[
+    InkScriptRecordSchema::new("line_background", LINE_BACKGROUND_FIELDS),
+    InkScriptRecordSchema::new("line_trace_options", LINE_TRACE_OPTIONS_FIELDS),
+    InkScriptRecordSchema::new("line_construction", LINE_CONSTRUCTION_FIELDS),
+    InkScriptRecordSchema::new("line_correction", LINE_CORRECTION_FIELDS),
     InkScriptRecordSchema::new("fill_request", FILL_REQUEST_FIELDS),
     InkScriptRecordSchema::new("curve_point", CURVE_POINT_FIELDS),
     InkScriptRecordSchema::new("filter_levels", LEVELS_FIELDS),
@@ -199,6 +240,12 @@ const PLANE_BOUNDARY_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("plane_id", "plane_ref", 0),
     InkScriptFieldSchema::required("effect", "boundary_airbrush", 1),
 ];
+const PLANE_LINE_FIELDS: &[InkScriptFieldSchema] = &[
+    InkScriptFieldSchema::required("plane_id", "plane_ref", 0),
+    InkScriptFieldSchema::required("shape", "nullable<selection_shape>", 1),
+    InkScriptFieldSchema::required("construction", "line_construction", 2),
+    InkScriptFieldSchema::required("correction", "line_correction", 3),
+];
 const PLANE_DUST_FIELDS: &[InkScriptFieldSchema] = &[
     InkScriptFieldSchema::required("plane_id", "plane_ref", 0),
     InkScriptFieldSchema::required("shape", "nullable<selection_shape>", 1),
@@ -220,6 +267,7 @@ pub(crate) const LEGACY_IMAGE_COMMANDS: &[InkScriptCommandSchema] = &[
     InkScriptCommandSchema::new("apply_fill", APPLY_FILL_FIELDS),
     InkScriptCommandSchema::new("apply_boundary_airbrush", PLANE_BOUNDARY_FIELDS),
     InkScriptCommandSchema::new("apply_dust_removal", PLANE_DUST_FIELDS),
+    InkScriptCommandSchema::new("apply_line_correction", PLANE_LINE_FIELDS),
     InkScriptCommandSchema::new("apply_filter", PLANE_FILTER_FIELDS),
     InkScriptCommandSchema::new("replace_raster_colors", PLANE_PAIRS_FIELDS),
     InkScriptCommandSchema::new("separate_raster_colors", PLANE_SEPARATION_FIELDS),
@@ -235,6 +283,13 @@ pub(crate) struct LegacyImageCatalogEntry {
 }
 
 pub(crate) const LEGACY_IMAGE_CATALOG: &[LegacyImageCatalogEntry] = &[
+    LegacyImageCatalogEntry {
+        command: "apply_line_correction",
+        primitive_id: PrimitiveId::APPLY_LINE_CORRECTION,
+        semantics_revision: 1,
+        cancellation_boundary: "bounded_work_chunk",
+        legacy_projection: "line_correction",
+    },
     LegacyImageCatalogEntry {
         command: "apply_fill",
         primitive_id: PrimitiveId::APPLY_FILL,
@@ -252,7 +307,7 @@ pub(crate) const LEGACY_IMAGE_CATALOG: &[LegacyImageCatalogEntry] = &[
     LegacyImageCatalogEntry {
         command: "apply_dust_removal",
         primitive_id: PrimitiveId::APPLY_DUST_REMOVAL,
-        semantics_revision: 2,
+        semantics_revision: 3,
         cancellation_boundary: "bounded_work_chunk",
         legacy_projection: "dust_removal",
     },
@@ -310,7 +365,7 @@ impl LegacyImageScriptStep {
         }
         let (command, layer_id, plane_id, arguments) = lift_arguments(invocation)?;
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 6; replay_epoch = 28; }\n",
+            "inkscript_fragment 2;\nrequires { procedure_catalog = 7; replay_epoch = 29; }\n",
         );
         let mut bindings = InkScriptRuntimeReferences::default();
         source.push_str("bindings { ");
@@ -431,6 +486,14 @@ impl LegacyImageScriptStep {
                 shape: nullable(field(arguments, "shape")?, selection_shape)?,
                 options: dust_removal(field(arguments, "options")?)?,
             }),
+            "apply_line_correction" => Ok(CanonicalInvocation::ApplyLineCorrection {
+                request: LineCorrectionRequest {
+                    plane_id,
+                    region: nullable(field(arguments, "shape")?, selection_shape)?,
+                    construction: line_construction(field(arguments, "construction")?)?,
+                    correction: line_correction(field(arguments, "correction")?)?,
+                },
+            }),
             "apply_filter" => Ok(CanonicalInvocation::ApplyFilter {
                 plane_id,
                 filter: filter(field(arguments, "filter")?)?,
@@ -500,6 +563,22 @@ pub(crate) fn lift_arguments(
                 dust_removal_literal(*options),
             ),
         ),
+        CanonicalInvocation::ApplyLineCorrection { request } => (
+            "apply_line_correction",
+            None,
+            request.plane_id,
+            format!(
+                "plane_id = $target_plane; shape = {}; construction = {}; correction = {};",
+                request
+                    .region
+                    .as_ref()
+                    .map(selection_shape_literal)
+                    .transpose()?
+                    .unwrap_or_else(|| "none".to_owned()),
+                line_construction_literal(request.construction),
+                line_correction_literal(request.correction)
+            ),
+        ),
         CanonicalInvocation::ApplyFilter { plane_id, filter } => (
             "apply_filter",
             None,
@@ -566,10 +645,151 @@ fn boundary_airbrush_literal(effect: &BoundaryAirbrush) -> String {
 
 fn dust_removal_literal(options: DustRemoval) -> String {
     format!(
-        "{{ mode = {}; maximum_pixels = {}; }}",
+        "{{ mode = {}; maximum_pixels = {}; background = {}; }}",
         dust_mode_name(options.mode),
         options.maximum_pixels,
+        line_background_literal(options.background),
     )
+}
+
+fn line_background_literal(background: LineBackground) -> String {
+    let (mode, color) = match background {
+        LineBackground::PlaneDefault => ("plane_default", [0; 4]),
+        LineBackground::Transparent => ("transparent", [0; 4]),
+        LineBackground::TransparentOrColor(color) => ("transparent_or_color", color),
+    };
+    format!("{{ mode = {mode}; color = {}; }}", rgba16_literal(color))
+}
+
+fn line_construction_literal(options: SelectionConstructionOptions) -> String {
+    format!(
+        "{{ aspect_ratio_q16 = {}; from_center = {}; constrain_rotation_45 = {}; rotation_turns = {}; trace = {{ shape = {}; pressure_size = {}; screen_size = {}; view_zoom = q16({}); }}; }}",
+        options.aspect_ratio_q16,
+        options.from_center,
+        options.constrain_rotation_45,
+        options.rotation_turns,
+        match options.trace.shape {
+            TraceBrushShape::Round => "round",
+            TraceBrushShape::Square => "square",
+        },
+        options.trace.pressure_size,
+        options.trace.screen_size,
+        options.trace.view_zoom_q16
+    )
+}
+
+fn line_correction_literal(correction: LineCorrection) -> String {
+    let (kind, dust, gap, width, amount, background) = match correction {
+        LineCorrection::Dust(options) => (
+            "dust",
+            dust_removal_literal(options),
+            0,
+            0,
+            0,
+            LineBackground::PlaneDefault,
+        ),
+        LineCorrection::Connect {
+            gap,
+            width,
+            background,
+        } => ("connect", "none".to_owned(), gap, width, 0, background),
+        LineCorrection::Width {
+            mode,
+            amount,
+            background,
+        } => (
+            match mode {
+                LineWidthMode::Thicken => "thicken",
+                LineWidthMode::Thin => "thin",
+                LineWidthMode::Uniform => "uniform",
+            },
+            "none".to_owned(),
+            0,
+            0,
+            amount,
+            background,
+        ),
+    };
+    format!(
+        "{{ kind = {kind}; dust = {dust}; gap = {gap}; width = {width}; amount = {amount}; background = {}; }}",
+        line_background_literal(background)
+    )
+}
+
+fn line_background(value: &InkScriptTypedValue) -> Result<LineBackground, LegacyImageAdapterError> {
+    let fields = record(value)?;
+    let color = rgba16(field(fields, "color")?)?;
+    match enum_value(field(fields, "mode")?)? {
+        "plane_default" if color == [0; 4] => Ok(LineBackground::PlaneDefault),
+        "transparent" if color == [0; 4] => Ok(LineBackground::Transparent),
+        "transparent_or_color" => Ok(LineBackground::TransparentOrColor(color)),
+        _ => Err(LegacyImageAdapterError::InvalidValue),
+    }
+}
+
+fn line_construction(
+    value: &InkScriptTypedValue,
+) -> Result<SelectionConstructionOptions, LegacyImageAdapterError> {
+    let fields = record(value)?;
+    let trace = record(field(fields, "trace")?)?;
+    let view_zoom_q16 = match field(trace, "view_zoom")?.kind() {
+        InkScriptTypedValueKind::Q16(value) if *value > 0 => *value,
+        _ => return Err(LegacyImageAdapterError::InvalidValue),
+    };
+    Ok(SelectionConstructionOptions {
+        aspect_ratio_q16: u32_value(field(fields, "aspect_ratio_q16")?)?,
+        from_center: boolean(field(fields, "from_center")?)?,
+        constrain_rotation_45: boolean(field(fields, "constrain_rotation_45")?)?,
+        rotation_turns: u32_value(field(fields, "rotation_turns")?)?,
+        trace: TraceBrushOptions {
+            shape: match enum_value(field(trace, "shape")?)? {
+                "round" => TraceBrushShape::Round,
+                "square" => TraceBrushShape::Square,
+                _ => return Err(LegacyImageAdapterError::InvalidValue),
+            },
+            pressure_size: boolean(field(trace, "pressure_size")?)?,
+            screen_size: boolean(field(trace, "screen_size")?)?,
+            view_zoom_q16,
+        },
+    })
+}
+
+fn line_correction(value: &InkScriptTypedValue) -> Result<LineCorrection, LegacyImageAdapterError> {
+    let fields = record(value)?;
+    let dust = nullable(field(fields, "dust")?, dust_removal)?;
+    let gap = u32_value(field(fields, "gap")?)?;
+    let width = u32_value(field(fields, "width")?)?;
+    let amount = u32_value(field(fields, "amount")?)?;
+    let background = line_background(field(fields, "background")?)?;
+    match enum_value(field(fields, "kind")?)? {
+        "dust"
+            if gap == 0
+                && width == 0
+                && amount == 0
+                && background == LineBackground::PlaneDefault =>
+        {
+            Ok(LineCorrection::Dust(
+                dust.ok_or(LegacyImageAdapterError::InvalidValue)?,
+            ))
+        }
+        "connect" if dust.is_none() && amount == 0 => Ok(LineCorrection::Connect {
+            gap,
+            width,
+            background,
+        }),
+        kind @ ("thicken" | "thin" | "uniform") if dust.is_none() && gap == 0 && width == 0 => {
+            Ok(LineCorrection::Width {
+                mode: match kind {
+                    "thicken" => LineWidthMode::Thicken,
+                    "thin" => LineWidthMode::Thin,
+                    _ => LineWidthMode::Uniform,
+                },
+                amount,
+                background,
+            })
+        }
+        _ => Err(LegacyImageAdapterError::InvalidValue),
+    }
 }
 
 fn color_pair_literal(pair: &BatchColorPair) -> String {
@@ -1121,6 +1341,7 @@ fn boundary_airbrush(
 fn dust_removal(value: &InkScriptTypedValue) -> Result<DustRemoval, LegacyImageAdapterError> {
     let fields = record(value)?;
     Ok(DustRemoval {
+        background: line_background(field(fields, "background")?)?,
         mode: match enum_value(field(fields, "mode")?)? {
             "remove_foreground" => DustMode::RemoveForeground,
             "fill_transparent_holes" => DustMode::FillTransparentHoles,
@@ -1690,6 +1911,7 @@ mod tests {
                     diameter: 3.5,
                 }),
                 options: DustRemoval {
+                    background: Default::default(),
                     mode: DustMode::ReplaceColorOutliers,
                     maximum_pixels: 16,
                 },
@@ -1733,7 +1955,7 @@ mod tests {
 
     #[test]
     fn exact_catalog_codec_covers_all_m08_primitives_and_full_typed_payloads() {
-        assert_eq!(LEGACY_IMAGE_CATALOG.len(), 6);
+        assert_eq!(LEGACY_IMAGE_CATALOG.len(), 7);
         for (index, invocation) in invocations().iter().enumerate() {
             let step = LegacyImageScriptStep::from_canonical(
                 invocation,
@@ -1746,7 +1968,10 @@ mod tests {
             assert_eq!(step.editor_group(), Some(format!("image_{index}").as_str()));
             let metadata = step.metadata().unwrap();
             assert_eq!(metadata.primitive_id, invocation.primitive_id());
-            assert_eq!(metadata.semantics_revision, if index == 5 { 3 } else { 2 });
+            assert_eq!(
+                metadata.semantics_revision,
+                if index == 2 || index == 5 { 3 } else { 2 }
+            );
             assert!(!metadata.cancellation_boundary.is_empty());
             assert!(!metadata.legacy_projection.is_empty());
         }
@@ -1755,7 +1980,7 @@ mod tests {
     #[test]
     fn unknown_field_enum_and_nonexact_filter_variant_are_rejected() {
         let prefix = format!(
-            "inkscript_fragment 2; requires {{ procedure_catalog = 6; replay_epoch = 28; }} bindings {{ let target_plane = select plane {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = 12; }}; }} "
+            "inkscript_fragment 2; requires {{ procedure_catalog = 7; replay_epoch = 29; }} bindings {{ let target_plane = select plane {{ source_document_uuid = uuid\"{ADAPTER_SOURCE_UUID}\"; persistent_id = 12; }}; }} "
         );
         let fields = "radius = none; strength_milli = none; amount_milli = none; threshold = none; channel = none; brightness_milli = none; contrast_milli = none; interpolation = none; points = []; levels = none; hsv = none; color_balance = none;";
         let unknown_enum = format!(
@@ -1788,6 +2013,64 @@ mod tests {
             step.to_canonical(),
             Err(LegacyImageAdapterError::InvalidValue)
         );
+    }
+
+    #[test]
+    fn line_correction_codec_preserves_all_modes_background_and_brush_options() {
+        for correction in [
+            LineCorrection::Dust(DustRemoval {
+                mode: DustMode::FillTransparentHoles,
+                maximum_pixels: 3,
+                background: LineBackground::TransparentOrColor([1, 2, 3, 65535]),
+            }),
+            LineCorrection::Connect {
+                gap: 2,
+                width: 5,
+                background: LineBackground::Transparent,
+            },
+            LineCorrection::Width {
+                mode: LineWidthMode::Thicken,
+                amount: 2,
+                background: LineBackground::PlaneDefault,
+            },
+            LineCorrection::Width {
+                mode: LineWidthMode::Thin,
+                amount: 1,
+                background: LineBackground::Transparent,
+            },
+            LineCorrection::Width {
+                mode: LineWidthMode::Uniform,
+                amount: 3,
+                background: LineBackground::TransparentOrColor([65535; 4]),
+            },
+        ] {
+            let invocation = CanonicalInvocation::ApplyLineCorrection {
+                request: LineCorrectionRequest {
+                    plane_id: 12,
+                    region: Some(SelectionShape::TraceBrush {
+                        samples: vec![SelectionSample {
+                            x: 1.25,
+                            y: -2.5,
+                            pressure: 1.0,
+                        }],
+                        diameter: 5.0,
+                    }),
+                    construction: SelectionConstructionOptions {
+                        trace: TraceBrushOptions {
+                            shape: TraceBrushShape::Square,
+                            pressure_size: true,
+                            screen_size: true,
+                            view_zoom_q16: 123_456,
+                        },
+                        ..Default::default()
+                    },
+                    correction,
+                },
+            };
+            let step = LegacyImageScriptStep::from_canonical(&invocation, true, "line").unwrap();
+            assert_eq!(step.to_canonical().unwrap(), invocation);
+            assert_eq!(step.metadata().unwrap().semantics_revision, 1);
+        }
     }
 
     #[test]

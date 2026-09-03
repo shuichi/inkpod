@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(33)
+#define INKPOD_ABI_VERSION UINT32_C(34)
 #define INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE UINT32_C(1)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
@@ -254,6 +254,8 @@ typedef uint32_t InkpodEditorTool;
 #define INKPOD_EDITOR_TOOL_EFFECT_STAMP UINT32_C(1104)
 #define INKPOD_EDITOR_TOOL_EFFECT_DUST UINT32_C(1105)
 #define INKPOD_EDITOR_TOOL_EFFECT_ALPHA_GRADIENT UINT32_C(1106)
+#define INKPOD_EDITOR_TOOL_EFFECT_LINE_CONNECT UINT32_C(1107)
+#define INKPOD_EDITOR_TOOL_EFFECT_LINE_WIDTH UINT32_C(1108)
 /* Retired vector editor-tool codes 1201..1207 remain unassigned. */
 
 #define INKPOD_EDITOR_STATE_DIRTY (UINT32_C(1) << 0)
@@ -512,6 +514,18 @@ typedef uint32_t InkpodDustMode;
 #define INKPOD_DUST_REMOVE_FOREGROUND UINT32_C(1)
 #define INKPOD_DUST_FILL_TRANSPARENT_HOLES UINT32_C(2)
 #define INKPOD_DUST_REPLACE_COLOR_OUTLIERS UINT32_C(3)
+
+/** @brief Explicit native-depth raster line correction modes. */
+#define INKPOD_LINE_REMOVE_DUST UINT32_C(1)
+#define INKPOD_LINE_FILL_HOLES UINT32_C(2)
+#define INKPOD_LINE_REPLACE_OUTLIERS UINT32_C(3)
+#define INKPOD_LINE_CONNECT UINT32_C(4)
+#define INKPOD_LINE_THICKEN UINT32_C(5)
+#define INKPOD_LINE_THIN UINT32_C(6)
+#define INKPOD_LINE_UNIFORM UINT32_C(7)
+#define INKPOD_LINE_BACKGROUND_DEFAULT UINT32_C(0)
+#define INKPOD_LINE_BACKGROUND_TRANSPARENT UINT32_C(1)
+#define INKPOD_LINE_BACKGROUND_COLOR UINT32_C(2)
 
 /** @brief thread-safe task の進行状態型。 */
 typedef uint32_t InkpodTaskState;
@@ -2849,6 +2863,42 @@ typedef struct InkpodDustInput {
     uint64_t sample_count;
     uint64_t sample_stride_bytes;
 } InkpodDustInput;
+
+/** @brief Explicit line edit; mode-specific inactive parameters must be zero.
+ * Modes: dust/hole/outlier use amount=1..65536 pixels (inclusive); connect uses
+ * gap=0..64 empty grid steps (inclusive) and line_width=1..256 full pixels;
+ * thicken/thin use amount=1..256 one-sided radius; uniform uses amount=1..256
+ * full target width. Default MainLine background is white+transparent; other
+ * raster planes use transparent. COLOR adds the exact native RGBA background.
+ * Samples are borrowed; diameter uses document/screen units selected below,
+ * independently of sample coordinate_space. Capture view_zoom_q16 at begin.
+ * expected_document_revision must match. Locks apply; ordinary coloring's
+ * main-line protection does not block this explicitly targeted line edit.
+ */
+typedef struct InkpodLineCorrectionInput {
+    uint32_t struct_size;
+    uint32_t mode;
+    uint64_t feature_flags;
+    uint64_t plane_id;
+    uint64_t view_id;
+    uint64_t expected_document_revision;
+    InkpodCoordinateSpace coordinate_space;
+    InkpodSelectionShape shape;
+    uint32_t use_region;
+    uint32_t background_mode;
+    uint32_t gap;
+    uint32_t line_width;
+    uint32_t amount;
+    uint32_t brush_shape;
+    uint32_t pressure_size;
+    uint32_t screen_size;
+    uint16_t background_rgba[4];
+    float diameter;
+    int64_t view_zoom_q16;
+    const InkpodStrokeSample* samples;
+    uint64_t sample_count;
+    uint64_t sample_stride_bytes;
+} InkpodLineCorrectionInput;
 
 /**
  * @brief floating paste の五点基準、絶対位置、拡縮、回転 preview 値を渡す borrowed 入力。
@@ -5735,6 +5785,27 @@ InkpodStatus inkpod_core_dust_remove(
 InkpodStatus inkpod_core_dust_preview_begin(
     InkpodCore* core,
     const InkpodDustInput* input,
+    InkpodTask* task,
+    InkpodFilterPreviewInfo* out_info);
+/** @brief One atomic captured line correction on the Core owner thread.
+ * All four pointers must be non-NULL, live, aligned, and complete; task is READY
+ * and samples are borrowed for this call only. Success publishes one Undo unit
+ * if pixels changed. No-op, invalid, cancel, stale, and failure publish no edit;
+ * non-success leaves the output unchanged. Status includes OK, CANCELLED,
+ * INVALID_ARGUMENT, INVALID_STATE, NO_DOCUMENT, WRONG_THREAD, and PANIC.
+ */
+InkpodStatus inkpod_core_line_correct(
+    InkpodCore* core,
+    const InkpodLineCorrectionInput* input,
+    InkpodTask* task,
+    InkpodDispatchResult* result);
+/** @brief Isolated line preview with the same lifetime/thread contract as
+ * inkpod_core_line_correct. Success publishes transient preview/info only;
+ * use filter-preview apply/cancel to commit one Undo unit or discard it.
+ */
+InkpodStatus inkpod_core_line_preview_begin(
+    InkpodCore* core,
+    const InkpodLineCorrectionInput* input,
     InkpodTask* task,
     InkpodFilterPreviewInfo* out_info);
 /**

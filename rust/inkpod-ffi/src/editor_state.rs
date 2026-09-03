@@ -28,6 +28,8 @@ fn editor_tool(code: u32) -> Result<EditorTool, u32> {
         1_104 => EditorTool::EffectStamp,
         1_105 => EditorTool::EffectDust,
         1_106 => EditorTool::EffectAlphaGradient,
+        1_107 => EditorTool::EffectLineConnect,
+        1_108 => EditorTool::EffectLineWidth,
         _ => {
             return Err(fail(
                 INKPOD_STATUS_INVALID_ARGUMENT,

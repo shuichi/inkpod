@@ -97,7 +97,7 @@ pub use editor::{
     EditorStrokeInput, EditorTarget, EditorTool, EditorToolStyle, InitialDocumentSpec,
     MAX_EDIT_TARGETS, PaletteCursor,
 };
-pub use effects::FilterPreviewInfo;
+pub use effects::{FilterPreviewInfo, LineCorrectionRequest};
 pub use error::CoreError;
 pub use file_io::{
     DEFAULT_VALIDATED_TARGET_CACHE_BYTES, FileIoApply, FileIoItem, FileIoJob, FileIoKind,
@@ -177,6 +177,7 @@ pub use inkpod_image::{
     AirbrushGesture, AirbrushStroke, BoundaryAirbrush, Channel, ColorBalance, ColorCheckMode,
     CurveInterpolation, CurvePoint, DustMode, DustRemoval, EffectSample, EyedropperSource, Filter,
     Gradient, GradientKind, GradientMode, GradientStop, HsvAdjustment, InclusionMode, Levels,
-    MAX_CURVE_POINTS, MAX_GRADIENT_STOPS, MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, PixelFormat,
-    PixelValue, Stamp, StampGesture, StampShape, TileRaster,
+    LineBackground, LineCorrection, LineWidthMode, MAX_CURVE_POINTS, MAX_GRADIENT_STOPS,
+    MAX_IMAGE_EDIT_PIXELS, MAX_RASTER_DIMENSION, PixelFormat, PixelValue, Stamp, StampGesture,
+    StampShape, TileRaster,
 };

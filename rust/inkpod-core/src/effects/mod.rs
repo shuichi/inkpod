@@ -17,10 +17,11 @@ use inkpod_image::{
 };
 
 mod helpers;
+mod line_correction;
 mod model;
 mod operations;
 mod preview;
 mod tools;
 
-pub use model::FilterPreviewInfo;
 pub(crate) use model::{FilterPreview, PreviewProcedure};
+pub use model::{FilterPreviewInfo, LineCorrectionRequest};

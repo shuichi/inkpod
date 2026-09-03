@@ -421,7 +421,7 @@ void ProvideToolCommandStates(
         && input.tool.active_tool != tools::kInteractionShootingFrame
         && !tools::IsGeometryCanvasTool(input.tool.active_tool)
         && !(input.tool.active_tool >= tools::kInteractionEffectGradient
-            && input.tool.active_tool <= tools::kInteractionEffectAlphaGradient);
+            && input.tool.active_tool <= tools::kInteractionEffectLineWidth);
     if (ordinary_tool) {
         SetChecked(states, tool_command, true);
     }
@@ -474,10 +474,16 @@ void ProvideToolCommandStates(
          IDM_EFFECT_BOUNDARY_AIRBRUSH,
          IDM_EFFECT_BLUR,
          IDM_EFFECT_STAMP,
-         IDM_EFFECT_DUST,
          IDM_EFFECT_ALPHA_GRADIENT,
          IDM_EFFECT_ALPHA_VIEW},
         effect_available);
+    SetEnabled(states, {IDM_EFFECT_DUST, IDM_EFFECT_LINE_CONNECT, IDM_EFFECT_LINE_WIDTH,
+        IDM_LINE_DUST_APPLY, IDM_LINE_CONNECT_APPLY, IDM_LINE_WIDTH_APPLY},
+        input.document.has_document && input.tool.geometry_drawable_plane);
+    SetChecked(states, IDM_EFFECT_LINE_CONNECT,
+        input.tool.active_tool == tools::kInteractionEffectLineConnect);
+    SetChecked(states, IDM_EFFECT_LINE_WIDTH,
+        input.tool.active_tool == tools::kInteractionEffectLineWidth);
     SetUnchecked(
         states,
         {IDM_EFFECT_GRADIENT,

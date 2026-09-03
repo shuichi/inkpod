@@ -787,8 +787,8 @@
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 楕円</div><div class="command-desc">ドラッグ範囲へラスター輪郭の楕円を作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 多角形</div><div class="command-desc">ドラッグ範囲へラスター輪郭の多角形を作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 折れ線</div><div class="command-desc">入力点列をラスター折れ線として確定します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 線つなぎ...</div><div class="command-desc">選択範囲内のラスター線端を距離・角度に基づいて接続します。誤接続を確認し、確定後は一回のUndoで戻せます。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 線幅修正...</div><div class="command-desc">ラスター線を太く／細く、倍率、一定幅などの設定で修正します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 線つなぎ...</div><div class="command-desc">なぞった帯などの局所範囲で、向かい合うラスター線端を接続します。設定gap以下の空白を対象とし、確定後は一回のUndoで戻せます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 線幅修正...</div><div class="command-desc">描画済みのラスター線を局所的に太く／細くするか、指定した均一幅へ変換します。増減量は片側の画素数、均一幅は線の全幅です。</div></li>
               <li class="search-unit"><div class="command-name">ツール › グラデーション... <kbd>G</kbd></div><div class="command-desc">線形／放射、3色以上の停止点、各アルファ、合成方法等を設定して適用します。選択なしでは対象プレーン全体です。</div></li>
               <li class="search-unit"><div class="command-name">ツール › エアブラシ... <kbd>A</kbd></div><div class="command-desc">太さ、硬さ、間隔、フェード、筆圧を設定した噴霧描画を行います。</div></li>
               <li class="search-unit"><div class="command-name">ツール › 境界色エアブラシ...</div><div class="command-desc">指定した複数色の境界部分だけへ設定幅のグラデーションを作ります。</div></li>
@@ -1083,7 +1083,7 @@
                 <tr><td>境界ブラシ</td><td>色境界だけへ階調効果</td><td>境界色群と幅</td></tr>
                 <tr><td>ぼかし</td><td>局所ぼかし</td><td>範囲形状、太さ、ぼかし量、筆圧</td></tr>
                 <tr><td>スタンプ</td><td>別位置から画像を複製</td><td>元位置、形、硬さ、間隔、筆圧</td></tr>
-                <tr><td>ゴミ取り</td><td>小点／小穴／異色小領域の修正</td><td>範囲形状、モード、最大サイズ</td></tr>
+                <tr><td>ゴミ取り</td><td>小点／小穴／異色小領域の修正</td><td>範囲形状、モード、最大画素数、背景</td></tr>
                 <tr><td>アルファ階調</td><td>アルファだけへグラデーション</td><td>ラスターのアルファ編集表示と組み合わせる</td></tr>
               </tbody>
             </table></div>
@@ -1091,6 +1091,18 @@
           <div class="search-unit" data-search="selection tools rectangle ellipse lasso polyline trace magic wand modes modifiers">
             <h3 id="selection-tools">選択ツールと作成モード</h3>
             <p>長方形、楕円、投げ縄、折れ線、トレース、色の杖があります。作成モードは新規、追加、削除、交差です。修飾キーの基本は<kbd>Shift</kbd>=追加、<kbd>Alt</kbd>=削除、<kbd>Shift</kbd>+<kbd>Alt</kbd>=交差です。選択中の内容を動かす場合、マスクだけを動かす操作と、対象プレーンの内容をフローティング選択として動かす操作を区別してください。</p>
+          </div>
+          <div class="search-unit" data-search="line correction dust connect width thicken thin uniform background gap 線修正 ゴミ取り 線つなぎ 線幅">
+            <h3 id="line-correction">既存の線を修正する</h3>
+            <p>ツールの「ゴミ取り」「線つなぎ」「線幅修正」で、丸／角ブラシの帯、長方形、折れ線、投げ縄の範囲を指定します。既存の選択がある場合はその内側に制限されます。編集メニューの「線修正」からは選択範囲へ一括適用でき、選択がなければ対象プレーン全体へ適用します。別プレーンは変わりません。プレビューをキャンセルすると変更されず、確定した一操作は一回のUndoで戻せます。</p>
+            <p>ゴミ取りには小点除去、小穴埋め、異色小領域の置換があります。最大サイズは1〜65,536画素で上限を含み、元画像での成分全体が操作範囲に入る場合だけ修正します。帯を横切る大きな線の一部分を小点として消したり、画像外へ開いた背景を穴として埋めたりしません。RGBA主線の初期背景は白と透明、彩色・ラスターは透明です。指定背景色も使えます。除去跡の白／透明が一意に決まらない成分は残ります。</p>
+            <p>線つなぎはカーソルの軌跡を描く操作ではありません。向かい合う線端間に、設定した全幅の線を追加します。gapは空白の格子ステップ数で、水平・垂直・45度方向の一画素欠けはgap=1です。設定値以下を対象とし、競合や別の線を横切る接続は避けます。</p>
+            <p>線幅の「太くする」「細くする」は片側1〜256画素の増減量です。量1なら幅1／3／7は太くすると3／5／9、細くすると0／1／5になり、細線は消える場合があります。「均一幅にする」は独立した処理で、既存の中心線から全幅1〜256画素で作り直します。十分長い直線部は指定幅になり、分岐や交差の重なりは太くなる場合があります。輪郭やアンチエイリアスも変わり得ます。</p>
+          </div>
+          <div class="search-unit" data-search="trace brush band wand virtual gap selection トレース なぞり 色の杖 隙間">
+            <h3 id="trace-wand-selection">なぞりと色の杖</h3>
+            <p>トレースはカーソルでなぞった帯そのものを選択します。通常モードでは帯に入った線も背景も選ばれ、開いたL字の内側や外接矩形全体が選ばれるわけではありません。丸／角、太さ、筆圧による径変化を設定できます。画面サイズ固定は操作開始時のズームから文書上の径を決めます。表示用の帯は色を塗らず、元の画像画素は変えません。</p>
+            <p>色の杖はクリック位置から連続する、許容差内の色を選びます。同色でも離れた領域は無条件に選びません。gapを有効にすると、線つなぎと同じ条件で短い切れ目を選択探索上だけ閉じ、囲みから外への漏れを防ぎます。元の線を描き足す操作とは独立しています。新規／追加／削除／交差とUndo／Redoを使えます。</p>
           </div>
           <div class="search-unit" data-search="raster geometry line curve rectangle ellipse polygon polyline">
             <h3 id="raster-geometry-tools">Raster Geometry</h3>
@@ -1250,10 +1262,10 @@
             <h3 id="savepoint-history">通常保存の基準とUndo／Redo</h3>
             <p>通常保存が成功した履歴位置が「保存済み」の基準です。そこから編集、Undo、Redoで別の状態へ移るとタブに未保存の「*」が付きます。履歴上で保存した状態へ正確に戻ると未保存表示も解消できます。Recovery保存や書き出しだけでは基準は動きません。</p>
           </div>
-          <div class="search-unit" data-search="supported formats inkpod v33 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch v5 cell">
+          <div class="search-unit" data-search="supported formats inkpod v34 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch v5 cell">
             <h3 id="file-formats">対応形式</h3>
             <ul>
-              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン33、リプレイエポック28）。標準レイヤー／プレーン、撮影フレーム、現在の選択と名前付き保存マスク、保存基準、履歴、パレット、ライトテーブル、色深度を保持します。</li>
+              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン34、リプレイエポック29）。標準レイヤー／プレーン、撮影フレーム、現在の選択と名前付き保存マスク、保存基準、履歴、パレット、ライトテーブル、色深度を保持します。</li>
               <li><strong>一般ラスター:</strong> PNG、TIFF、TGA、BMP。各形式が表現できる8／16 bit、アルファ、寸法、DPIを扱います。形式で表せないレイヤー構造等は平坦化されます。</li>
               <li><strong>バッチセット:</strong> `.inkbatch`（現在の形式バージョン5）。現行版だけを読み書きします。</li>
             </ul>

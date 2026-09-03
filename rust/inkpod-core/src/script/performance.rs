@@ -523,7 +523,7 @@ fn build_source_fixture() -> SourceFixture {
     let asset_id = raster_asset_id(payload.clone());
     let encoded = base64(&payload);
     let mut text = String::from(
-        "inkscript 2;\nrequires { procedure_catalog = 6; replay_epoch = 28; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
+        "inkscript 2;\nrequires { procedure_catalog = 7; replay_epoch = 29; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
     );
     for index in 0..STEP_COUNT {
         let name = probe_name(index / 2);

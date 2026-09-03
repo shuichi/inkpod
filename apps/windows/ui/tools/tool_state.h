@@ -27,6 +27,8 @@ inline constexpr std::uint32_t kInteractionEffectBlur = 1103U;
 inline constexpr std::uint32_t kInteractionEffectStamp = 1104U;
 inline constexpr std::uint32_t kInteractionEffectDust = 1105U;
 inline constexpr std::uint32_t kInteractionEffectAlphaGradient = 1106U;
+inline constexpr std::uint32_t kInteractionEffectLineConnect = 1107U;
+inline constexpr std::uint32_t kInteractionEffectLineWidth = 1108U;
 inline constexpr std::uint32_t kInteractionGeometryLine =
     INKPOD_EDITOR_TOOL_GEOMETRY_LINE;
 inline constexpr std::uint32_t kInteractionGeometryCurve =

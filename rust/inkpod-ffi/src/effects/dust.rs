@@ -93,6 +93,7 @@ pub unsafe extern "C" fn inkpod_core_dust_remove(
             &samples,
             input.diameter,
             DustRemoval {
+                background: Default::default(),
                 mode,
                 maximum_pixels: input.maximum_pixels,
             },
@@ -203,6 +204,7 @@ pub unsafe extern "C" fn inkpod_core_dust_preview_begin(
             &samples,
             input.diameter,
             DustRemoval {
+                background: Default::default(),
                 mode,
                 maximum_pixels: input.maximum_pixels,
             },

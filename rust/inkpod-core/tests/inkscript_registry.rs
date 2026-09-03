@@ -437,7 +437,7 @@ fn inkscript_registry_meta_schema_and_production_catalog_are_closed() {
         assert_ne!(number(version), 1, "{registry} must reject superseded v1");
     }
 
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
     assert_exact_keys(
         &draft,
         &[
@@ -455,9 +455,9 @@ fn inkscript_registry_meta_schema_and_production_catalog_are_closed() {
     );
     assert_eq!(string(member(&draft, "kind")), "inkpod.inkscript.catalog");
     assert_eq!(member(&draft, "production"), &Json::Bool(true));
-    assert_eq!(array(member(&draft, "entries")).len(), 73);
-    assert_eq!(array(member(&draft, "enums")).len(), 29);
-    assert_eq!(array(member(&draft, "records")).len(), 43);
+    assert_eq!(array(member(&draft, "entries")).len(), 74);
+    assert_eq!(array(member(&draft, "enums")).len(), 32);
+    assert_eq!(array(member(&draft, "records")).len(), 47);
     assert_eq!(array(member(&draft, "constructors")).len(), 10);
     assert!(
         !repository()
@@ -482,8 +482,8 @@ fn inkscript_registry_meta_schema_and_production_catalog_are_closed() {
 #[test]
 fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
         ("update_paper_frames", ("0x00010001", 2, 2, "INKS-EQ-0001")),
@@ -520,7 +520,7 @@ fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert_eq!(
@@ -598,8 +598,8 @@ fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_metadata_color_and_guide_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
         ("set_main_line_color", ("0x00030001", 1, 3, "INKS-EQ-0021")),
@@ -649,7 +649,7 @@ fn inkscript_metadata_color_and_guide_entries_are_closed_typed_and_owner_exact()
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert_eq!(
@@ -702,8 +702,8 @@ fn inkscript_metadata_color_and_guide_entries_are_closed_typed_and_owner_exact()
 #[test]
 fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
         ("apply_raster_stroke", ("0x00050001", 3, 5, "INKS-EQ-0029")),
@@ -751,7 +751,7 @@ fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert_eq!(
@@ -805,8 +805,8 @@ fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact
 #[test]
 fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "18A");
 
@@ -852,7 +852,7 @@ fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
     );
     assert_eq!(string(member(gradient, "primitive_id")), "0x00050010");
     assert_eq!(number(member(gradient, "primitive_schema_version")), 2);
-    assert_eq!(number(member(gradient, "replay_epoch")), 28);
+    assert_eq!(number(member(gradient, "replay_epoch")), 29);
     assert_eq!(number(member(gradient, "semantics_revision")), 2);
     assert_eq!(string(member(gradient, "owner_milestone")), OWNER_MILESTONE);
     assert_eq!(string(member(gradient, "equivalence_test")), "INKS-EQ-0032");
@@ -924,8 +924,8 @@ fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_gesture_alpha_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "18B");
     let expected = BTreeMap::from([
@@ -977,7 +977,7 @@ fn inkscript_gesture_alpha_entries_are_closed_typed_and_owner_exact() {
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert_eq!(
@@ -1049,8 +1049,8 @@ fn inkscript_gesture_alpha_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "19");
     let expected = BTreeMap::from([
@@ -1058,7 +1058,7 @@ fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
             "restore_selected_pixels",
             ("0x00050042", 2, 2, "INKS-EQ-0048"),
         ),
-        ("apply_selection", ("0x00060001", 2, 3, "INKS-EQ-0050")),
+        ("apply_selection", ("0x00060001", 2, 4, "INKS-EQ-0050")),
         ("invert_selection", ("0x00060002", 2, 2, "INKS-EQ-0051")),
         ("clear_selection", ("0x00060003", 2, 2, "INKS-EQ-0052")),
         ("resize_selection", ("0x00060004", 2, 2, "INKS-EQ-0053")),
@@ -1121,7 +1121,7 @@ fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
@@ -1213,14 +1213,14 @@ fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
 }
 
 #[test]
-fn inkscript_v6_shooting_frame_contract_is_exact() {
+fn inkscript_current_shooting_frame_contract_is_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     assert_eq!(number(member(&language, "file_version")), 2);
-    assert_eq!(number(member(&language, "procedure_catalog_version")), 6);
+    assert_eq!(number(member(&language, "procedure_catalog_version")), 7);
     assert_eq!(number(member(&draft, "file_version")), 2);
-    assert_eq!(number(member(&draft, "catalog_version")), 6);
+    assert_eq!(number(member(&draft, "catalog_version")), 7);
     let shooting_frame = named(member(&language, "selector_entities"), "shooting_frame");
     assert_eq!(string(member(shooting_frame, "owner")), "document");
     assert!(
@@ -1251,7 +1251,7 @@ fn inkscript_v6_shooting_frame_contract_is_exact() {
         let (primitive_id, schema, semantics, equivalence, result_name) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
@@ -1293,8 +1293,8 @@ fn inkscript_v6_shooting_frame_contract_is_exact() {
 #[test]
 fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands_are_excluded() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     const OWNER_MILESTONE: &str = concat!("M", "22");
     let expected = BTreeMap::from([
@@ -1365,7 +1365,7 @@ fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
@@ -1453,8 +1453,8 @@ fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands
 #[test]
 fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
 
     let expected = BTreeMap::from([
@@ -1504,7 +1504,7 @@ fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "owner_milestone")), OWNER_MILESTONE);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
@@ -1596,8 +1596,8 @@ fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
 #[test]
 fn inkscript_legacy_image_catalog_entries_are_closed_typed_and_owner_exact() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let type_names = composed_catalog_type_names(&language, &draft);
     let expected = BTreeMap::from([
         ("apply_fill", ("0x00050002", 2, 2, "INKS-EQ-0030")),
@@ -1605,7 +1605,11 @@ fn inkscript_legacy_image_catalog_entries_are_closed_typed_and_owner_exact() {
             "apply_boundary_airbrush",
             ("0x00050011", 2, 2, "INKS-EQ-0033"),
         ),
-        ("apply_dust_removal", ("0x00050018", 2, 2, "INKS-EQ-0040")),
+        ("apply_dust_removal", ("0x00050018", 3, 3, "INKS-EQ-0040")),
+        (
+            "apply_line_correction",
+            ("0x0005001b", 2, 1, "INKS-EQ-0089"),
+        ),
         ("apply_filter", ("0x00050020", 2, 2, "INKS-EQ-0043")),
         (
             "replace_raster_colors",
@@ -1636,7 +1640,7 @@ fn inkscript_legacy_image_catalog_entries_are_closed_typed_and_owner_exact() {
         let (primitive_id, schema, semantics, equivalence) = expected[name];
         assert_eq!(string(member(entry, "primitive_id")), primitive_id);
         assert_eq!(number(member(entry, "primitive_schema_version")), schema);
-        assert_eq!(number(member(entry, "replay_epoch")), 28);
+        assert_eq!(number(member(entry, "replay_epoch")), 29);
         assert_eq!(number(member(entry, "semantics_revision")), semantics);
         assert_eq!(string(member(entry, "equivalence_test")), equivalence);
         assert!(array(member(entry, "results")).is_empty());
@@ -2054,7 +2058,7 @@ fn parse_catalog_entries(repository: &Path) -> Vec<CatalogEntry> {
 
 #[test]
 fn inkscript_owner_manifest_is_a_bijection_with_replayable_primitives() {
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     assert_exact_keys(
         &manifest,
         &[
@@ -2109,7 +2113,7 @@ fn inkscript_owner_manifest_is_a_bijection_with_replayable_primitives() {
         .iter()
         .filter(|entry| entry.replayable)
         .collect::<Vec<_>>();
-    assert_eq!(replayable.len(), 73);
+    assert_eq!(replayable.len(), 74);
     assert_eq!(actual.len(), replayable.len());
     for entry in replayable {
         let owner = actual
@@ -2146,11 +2150,11 @@ fn inkscript_owner_manifest_is_a_bijection_with_replayable_primitives() {
 
 #[test]
 fn inkscript_production_catalog_is_bijective_with_runtime_and_equivalence_evidence() {
-    let catalog = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let catalog = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     let entries = array(member(&catalog, "entries"));
     let owners = array(member(&manifest, "owners"));
-    assert_eq!(entries.len(), 73);
+    assert_eq!(entries.len(), 74);
     assert_eq!(owners.len(), entries.len());
     assert_eq!(
         entries.len(),
@@ -2158,7 +2162,7 @@ fn inkscript_production_catalog_is_bijective_with_runtime_and_equivalence_eviden
     );
     assert_eq!(
         inkpod_format::INKSCRIPT_PRODUCTION_CATALOG_FINGERPRINT,
-        0x30710ef97be617af
+        0xb1633b30813e7eff
     );
 
     let owners_by_command = owners
@@ -2289,7 +2293,7 @@ fn inkscript_production_catalog_is_bijective_with_runtime_and_equivalence_eviden
     assert_eq!(commands.len(), replayable_by_id.len());
     assert_eq!(
         evidence,
-        (1..=88)
+        (1..=89)
             .filter(|index| { !matches!(*index, 14 | 18 | 20 | 44 | 45 | 56 | 57 | 63..=70) })
             .map(|index| format!("INKS-EQ-{index:04}"))
             .collect::<BTreeSet<_>>()
@@ -2327,16 +2331,16 @@ fn fnv1a64_normalized(bytes: &[u8]) -> u64 {
 
 #[test]
 fn inkscript_generated_command_reference_has_no_drift() {
-    let catalog = load_json("schemas/inkscript/catalog-v6.json");
+    let catalog = load_json("schemas/inkscript/catalog-v7.json");
     let reference_path = repository().join("docs/inkscript-command-reference.md");
     let bytes = fs::read(&reference_path).expect("generated command reference must be readable");
-    assert_eq!(fnv1a64_normalized(&bytes), 0xa651b28e944a47fc);
+    assert_eq!(fnv1a64_normalized(&bytes), 0xe0924f63ae56d277);
     let reference = std::str::from_utf8(&bytes).expect("reference must be UTF-8");
     let reference = reference.replace("\r\n", "\n");
     assert!(reference.starts_with(
         "<!-- @generated by scripts/generate_inkscript_reference.py; do not edit. -->\n"
     ));
-    assert!(reference.contains("| Catalog FNV-1a drift fingerprint | `30710ef97be617af` |"));
+    assert!(reference.contains("| Catalog FNV-1a drift fingerprint | `b1633b30813e7eff` |"));
     let headings = reference
         .lines()
         .filter_map(|line| line.strip_prefix("### `")?.strip_suffix('`'))
@@ -2371,16 +2375,16 @@ fn inkscript_generated_command_reference_has_no_drift() {
 #[test]
 fn inkscript_versions_and_traceability_match_repository_contracts() {
     let language = load_json("schemas/inkscript/language-v2.json");
-    let draft = load_json("schemas/inkscript/catalog-v6.json");
-    let manifest = load_json("schemas/inkscript/owner-manifest-v6.json");
+    let draft = load_json("schemas/inkscript/catalog-v7.json");
+    let manifest = load_json("schemas/inkscript/owner-manifest-v7.json");
     for value in [&language, &draft] {
         assert_eq!(number(member(value, "registry_schema_version")), 2);
         assert_eq!(number(member(value, "file_version")), 2);
-        assert_eq!(number(member(value, "required_replay_epoch")), 28);
+        assert_eq!(number(member(value, "required_replay_epoch")), 29);
     }
     assert_eq!(number(member(&manifest, "registry_schema_version")), 2);
-    assert_eq!(number(member(&language, "procedure_catalog_version")), 6);
-    assert_eq!(number(member(&draft, "catalog_version")), 6);
+    assert_eq!(number(member(&language, "procedure_catalog_version")), 7);
+    assert_eq!(number(member(&draft, "catalog_version")), 7);
 
     let contract = member(&manifest, "replay_contract");
     assert_exact_keys(
@@ -2394,10 +2398,10 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
         ],
     );
     assert_eq!(number(member(contract, "inkscript_file_version")), 2);
-    assert_eq!(number(member(contract, "procedure_catalog_version")), 6);
-    assert_eq!(number(member(contract, "replay_epoch")), 28);
-    assert_eq!(number(member(contract, "inkpod_top_level_version")), 33);
-    assert_eq!(number(member(contract, "c_abi_version")), 33);
+    assert_eq!(number(member(contract, "procedure_catalog_version")), 7);
+    assert_eq!(number(member(contract, "replay_epoch")), 29);
+    assert_eq!(number(member(contract, "inkpod_top_level_version")), 34);
+    assert_eq!(number(member(contract, "c_abi_version")), 34);
 
     let repository = repository();
     let model = fs::read_to_string(repository.join("rust/inkpod-core/src/primitive/model.rs"))
@@ -2406,10 +2410,10 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
         .expect("format contract must be readable");
     let header = fs::read_to_string(repository.join("include/inkpod/core_ffi.h"))
         .expect("ABI header must be readable");
-    assert!(model.contains("pub const CURRENT: Self = Self(28);"));
-    assert!(model.contains("pub const PROCEDURE_FORMAT_VERSION: u32 = 33;"));
-    assert!(format.contains("pub const FORMAT_VERSION: u32 = 33;"));
-    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(33)"));
+    assert!(model.contains("pub const CURRENT: Self = Self(29);"));
+    assert!(model.contains("pub const PROCEDURE_FORMAT_VERSION: u32 = 34;"));
+    assert!(format.contains("pub const FORMAT_VERSION: u32 = 34;"));
+    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(34)"));
 
     let spec = fs::read_to_string(repository.join("SPEC.md")).expect("SPEC must be readable");
     let compatibility = fs::read_to_string(repository.join("docs/compatibility.md"))
