@@ -1293,8 +1293,14 @@ bool VerifyFirstSequenceEditTileReuse(
     };
     const auto read = [&](UINT x, std::uint8_t red, std::uint8_t green, std::uint8_t blue) {
         inkpod::renderer::CanvasPixelRgba8 pixel{};
-        return ReadPresentedPixel(host, route.canvas, route.surface_generation, x, 16U, pixel) == S_OK
+        const HRESULT result = ReadPresentedPixel(host, route.canvas, route.surface_generation, x, 16U, pixel);
+        const bool matches = result == S_OK
             && pixel.red == red && pixel.green == green && pixel.blue == blue;
+        if (!matches) {
+            std::fprintf(stderr, "first sequence pixel: result=%08lx actual=%u,%u,%u expected=%u,%u,%u\n",
+                static_cast<unsigned long>(result), pixel.red, pixel.green, pixel.blue, red, green, blue);
+        }
+        return matches;
     };
     const auto publish = [&](CoreOwner& core) {
         inkpod::renderer::SnapshotEnvelope envelope{};

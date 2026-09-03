@@ -2976,13 +2976,16 @@ bool RunSubpaletteFileLoadSmoke(ApplicationHost& state) {
         };
         const auto presented = [&]() {
             const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+            renderer::RendererSurfaceResourceUsage usage{};
+            bool queried{};
+            bool route_matches{};
             do {
                 PumpPendingWindowMessages();
-                renderer::RendererSurfaceResourceUsage usage{};
                 const auto* sink = renderer::GetCanvasSnapshotSink(canvas);
-                if (sink != nullptr && state.renderer->GetSurfaceResourceUsage(
-                        sink->Route().canvas, sink->Route().surface_generation, usage)
-                    && usage.route == sink->Route()
+                queried = sink != nullptr && state.renderer->GetSurfaceResourceUsage(
+                    sink->Route().canvas, sink->Route().surface_generation, usage);
+                route_matches = queried && usage.route == sink->Route();
+                if (route_matches
                     && usage.route.auxiliary_source == workspace.subpalette_source_id
                     && usage.visible && usage.retained_snapshot_bytes != 0U
                     && usage.first_presented_revision_qpc != 0U) {
@@ -2990,6 +2993,16 @@ bool RunSubpaletteFileLoadSmoke(ApplicationHost& state) {
                 }
                 (void)MsgWaitForMultipleObjectsEx(0U, nullptr, 10U, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             } while (std::chrono::steady_clock::now() < deadline);
+            std::fprintf(stderr,
+                "subpalette presentation: phase=%s queried=%d route=%d source=%llu/%llu "
+                "visible=%d occluded=%d retained=%llu submitted=%llu presented=%llu epoch=%llu "
+                "latency_timeouts=%llu last_render=%08lx renderer_queue=%llu\n",
+                phase, queried, route_matches, usage.route.auxiliary_source.Value(),
+                workspace.subpalette_source_id.Value(), usage.visible, usage.occluded,
+                usage.retained_snapshot_bytes, usage.last_snapshot_submission_qpc,
+                usage.first_presented_revision_qpc, usage.last_presented_presentation_epoch,
+                usage.frame_latency_timeout_count, static_cast<unsigned long>(usage.last_render_result),
+                state.renderer->ResourceUsage().queued_work_count);
             return false;
         };
         phase = "first file on empty hidden Canvas";
@@ -3055,9 +3068,16 @@ bool RunSubpaletteFileLoadSmoke(ApplicationHost& state) {
         phase = "first folder on empty hidden Canvas";
         ResetSubpaletteTarget(state, workspace);
         PresentSubpalettePane(workspace);
-        if (IsWindowVisible(canvas) != FALSE
-            || !InstallSubpaletteSources(state, workspace, {files.directory}, true)
-            || !loaded(2U) || !presented()) {
+        const bool folder_hidden = IsWindowVisible(canvas) == FALSE;
+        const bool folder_installed = folder_hidden
+            && InstallSubpaletteSources(state, workspace, {files.directory}, true);
+        const bool folder_loaded = folder_installed && loaded(2U);
+        const bool folder_presented = folder_loaded && presented();
+        if (!folder_presented) {
+            std::fprintf(stderr, "subpalette folder: hidden=%d installed=%d loaded=%d count=%u flags=%llu error=%d visible=%d\n",
+                folder_hidden, folder_installed, folder_loaded, workspace.subpalette_info.item_count,
+                static_cast<unsigned long long>(workspace.subpalette_info.flags),
+                !workspace.subpalette_error.empty(), IsWindowVisible(canvas));
             return false;
         }
         phase = "minimize before replacement completes";

@@ -305,6 +305,12 @@ add_test(
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
             -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_workspace_persistence.cmake")
 
+add_test(
+    NAME inkpod_windows_native_colors
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_windows_native_colors.cmake")
+
 add_library(inkpod_header_c11 OBJECT tests/header_c11.c)
 target_include_directories(inkpod_header_c11 PRIVATE "${CMAKE_SOURCE_DIR}/include")
 

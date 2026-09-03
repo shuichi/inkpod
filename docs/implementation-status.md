@@ -22,7 +22,7 @@ past acceptance records are summarized in [`legacy.md`](legacy.md).
 | Windows frontend | Layer/Plane presents one standard layer with MainLine, Color and optional Raster rows; add-plane creates Raster only and conversion changes storage format without changing role. Selection Mask commands manage a document-owned named-mask list. File Open adds a tab; Sequence resident hits exchange complete COW editing states without a file job or loading status and start dirty autosave separately, while misses retain the common resolver fallback. Revert reconciles pair identity/shell/binding. Batch targets Color/Raster roles through `.inkbatch` v5/ABI v32. |
 | Right-pane tab presentation | Right-zone top-level tabs use their stable layout IDs for thresholded same-strip drag reordering and for bounded owner-drawn close buttons. Closing atomically hides all member panes, removes the addressed tab, and applies the model's deterministic replacement selection. Labels, tooltips, move-menu entries, and accessible descriptions resolve pane descriptor resource IDs through the active Japanese/English catalog at the DockHost boundary. Color/Palette/Chart retain semantic IDs while their visual order can be changed only within the Color tab control; the active page and all child `HWND`s remain loaded, and the order is session-local. Splitter focus gain/loss now synchronously redraws its system-color rule, clearing focus emphasis as soon as another component receives focus. |
 | Right-pane resize transaction | Right-pane child layouts use fixed-capacity `PaneDialogLayoutPlan` objects: they register final geometry first, skip controls already at their platform-normalized bounds, publish changed bounds through one `BeginDeferWindowPos`/`DeferWindowPos`/`EndDeferWindowPos` batch with `SWP_NOREDRAW | SWP_NOCOPYBITS`, verify final/rollback geometry, and request one clipped-subtree completion only on success. DockHost defers affected same-parent pane roots while batching pane/tab/splitter geometry; Structure additionally dirties old/new right-zone and tool-tab bounds. Synchronous DockHost mutations restore the DockLayout/right-tab snapshot, attempt and verify physical rollback, and reject the candidate model when outer or inner placement fails. Structure may resynchronize DockHost chrome tab items under redraw suppression, but geometry and Structure relayout do not recreate surviving pane controls or reset pane-owned tab/list contents, selection, top index or a still-valid scroll position; resize/reflow may clamp an offset only when it falls outside the new range. Relayout does not independently reset focus; a successful hidden-pane toggle selects its destination tab and moves focus to the pane's natural first target. Floating/expanded AutoHide/reparenting complete under their destination parent. |
-| Canvas viewport scrollbars | Every Main Canvas and workspace Subpalette Canvas now owns permanent native horizontal/vertical bars. Checked accepted-transform projection uses `q = -pan`, half-viewport base padding, per-view sticky extension, frozen thumb endpoints, a 32-DIP line step and a page step with one-line overlap. Bars never publish a candidate position before renderer-queue acceptance; Fit/1:1/rebind/document or source replacement carries a one-shot reset cause, while an interaction ending back inside base may discard only that axis's extension. Scroll state is nonpersistent and changes no document/editor/history/savepoint state. Subpalette keeps unmodified Arrow/Page image navigation and maps exact Shift+Arrow/Page to pan. Pure-model and CoreHost reset tests pass; focused real-`HWND` scrollbar assertions run before the current locked-desktop Present gate. Full resize/frame, accessibility and cache-reuse verification remains. |
+| Canvas viewport scrollbars | Every Main Canvas and workspace Subpalette Canvas now owns permanent native horizontal/vertical bars. Checked accepted-transform projection uses `q = -pan`, half-viewport base padding, per-view sticky extension, frozen thumb endpoints, a 32-DIP line step and a page step with one-line overlap. Bars never publish a candidate position before renderer-queue acceptance; Fit/1:1/rebind/document or source replacement carries a one-shot reset cause, while an interaction ending back inside base may discard only that axis's extension. Scroll state is nonpersistent and changes no document/editor/history/savepoint state. Subpalette keeps unmodified Arrow/Page image navigation and maps exact Shift+Arrow/Page to pan. Pure-model and CoreHost reset tests pass; focused real-`HWND` scrollbar assertions and the current local visible RendererHost runs pass. Full resize/frame, accessibility and cache-reuse verification remains. |
 | Preferences and shortcuts | `編集 > 環境設定` keeps its owner-centered two-tab, scroll-free form. Animation includes localized numeric Sequence thumbnail width (32–96 DIP, default 64) and validated sidecar cache (0–1024 MiB, default 1024) fields. Apply/OK persists the v5 candidate and applies both live presentation and cache state transactionally; failure restores settings, cache limit, shortcuts and presentation, while Cancel changes nothing. Existing shortcut import/export remains v3. |
 | Subpalette | Each workspace owns a standalone read-only catalog and view under ABI v32, with no hidden editable Core, Genesis or history. Its native scrollbar projection is independent from every Main Canvas, preserves unmodified Arrow/Page navigation, and carries source-scoped reset causes until an accepted publication. Catalog replacement keeps a stable auxiliary route and advances `presentation_epoch` so repeated tile IDs cannot reuse the old GPU image; visible rejection keeps the old catalog/view/snapshot, while hidden replacement clears the retained old snapshot before deferring publication. Strict active-image navigation rollback after renderer-queue rejection still needs a prepare/commit catalog ABI, so this route remains Experimental. |
 | Tool options presentation | The left Tool rows retain the compact split layout and bounded owned popup with accessible pin/close actions, natural-height measurement, work-area clamping and overflow scrolling. Fill, selection, raster geometry, eyedropper, gradient, alpha gradient, airbrush, blur, stamp, dust and boundary-airbrush settings are embedded pages; only boundary airbrush exposes an explicit destructive Apply. Pin state is session-only. The retired TopContext ToolOptions pane is neither created nor persisted; Workspace state is stored as current-only readable JSON without registry or old-file migration. |
@@ -46,9 +46,9 @@ Only the following requirements are not yet `Verified` in
 | `IO-001` | Native v32/epoch 27, required DOCM, exact decoded-pixel Genesis assets, full journal/inactive-branch/EditorState reopen and v32-only rejection are covered together with existing native replay/save/recovery. | Compression code 0, physical/manual coverage and unrun configurations remain. Source container bytes are intentionally outside the lossless pixel contract. |
 | `IO-002` | PNG/TIFF retain exact RGBA8/16 in codec and pair contracts; TGA/BMP reject unsupported 16-bit companions without quantization. Save As is pair-only and flat raster is Export. | A current full product end-to-end normal-pair Save/reopen check for 16-bit PNG and TIFF remains. |
 | `IO-003`, `SESSION-001`, `SEQ-001` | All Sequence source tiles/thumbnails and up to 64 complete editable Core states remain resident while dense decoder-cache ownership is discarded. Exact sidecar-less target provenance constructs Genesis/Asset from resident tiles and a precomputed ID; active/inactive states COW-share graph/asset/tile backing. Resident hits exchange Core states without a file job, read, decode, replay or full rebuild; dirty autosave publication follows separately. The validated-sidecar LRU is configurable 0–1024 MiB with a 1-GiB default. Live pair authority is retained without duplicating the active Core, with a focused explicit-sequence regression. | Unrun configurations/platform/manual/physical checks remain. First catalog attachment to existing sidecars still replays/compares before admission. Backends without a strong namespace observer retain uncached enumeration. Two-file filesystem atomicity is not promised. |
-| `PERF-001` | Core workflow workloads and `revision-max` are unchanged. CPU/GPU sequence caches now prepare up to 64 sources under 1-GiB bounds, renderer frame retry is 4 ms, and warm x64 Release A/B/A plus A/B/C/B/A retain zero reads/decodes/uploads and one snapshot per step. Latest handler p95 is 2.01/2.48 ms and snapshot-submission p95 is 1.49/2.09 ms. | DWM Present p95 in the current non-foreground desktop exceeded the existing target despite zero frame-latency timeouts. First sidecar attachment, edited/recovered/background latency and unrun configurations remain separate. |
-| `VIEW-001` | The zoom/box/fit/1:1/pan/flip baseline now includes permanent native bars, checked accepted-only `SCROLLINFO`, per-view sticky range state, frozen thumb tracking, Shift-modified line/page input, a latest-wins accepted-projection mailbox, and targeted/session reset causes retained across queue rejection. Pure-model and CoreHost regressions pass; the actual-`HWND` test reaches projection on two document-bound Canvas instances and its no-optimistic-line assertion. | Complete page/thumb, two-view, post-Core renderer-rejection reconciliation, resize/final-frame, disabled-state, accessible range/value and cache-hit performance evidence remains. The current renderer-host rerun cannot clear its pre-existing visible-Present gate while the desktop returns permanent `DXGI_STATUS_OCCLUDED`. |
-| `WIN-001`, `PREF-001`, `SHORT-001`, `HIST-002`, `FILTER-001`, `FILTER-002`, `FILTER-PREVIEW-001` | Native Windows shell with explicit Common Controls registration and a system-dark title-bar opt-in, Japanese/English UI with persisted System/Japanese/English selection and non-Japanese English fallback, offline Help/About/Acknowledgements with locked BLAKE3/PNG/Fluent icon dependency attribution, typed Fluent icons for all 14 Tool commands and the applicable Layer/Plane/pin states with localized text fallback, owner-centered work-area-clamped modal dialogs, DPI-aware layout, keyboard routes, MSAA/UIA names, theme and accessibility hooks; 316 localized menu IDs and 324 command-state entries, exact-current v5 settings/v3 shortcut presets and statusbar job selection/cancellation. The current shortcut/menu change defines a complete editable catalog, sparse Windows/VS Code defaults, preserved custom profiles, collision-free mnemonics, and Window submenu regrouping without changing direct pane toggles. ARM64 Debug settings/localization tests and both full English/Japanese product smokes pass with the new cache field. | A 9-or-more-document dynamic History Visualization paging regression remains before `SHORT-001` returns to Verified. Dark presentation is limited to the system title bar; physical high-contrast/200%-DPI, complete screen-reader, and Japanese IME validation/fixes remain; the embedded offline Help body is Japanese-only |
+| `PERF-001` | Core workflow workloads and `revision-max` are unchanged. CPU/GPU sequence caches prepare up to 64 sources under 1-GiB bounds, renderer frame retry is 4 ms, and current ARM64/x64 Release A/B/A plus A/B/C/B/A tests complete 128 measured switches with zero reads/decodes/uploads/timeouts and one snapshot per step. Full Release CTest suites pass on the normal desktop; detailed timing/counter logs and environment distinctions are recorded below. | The separate 1-ms UI-handler p95 goal remains unmet. Passing semantic/Present checks is not full performance-goal acceptance. Formal physical-platform baselines, first sidecar attachment and edited/recovered latency remain separate. |
+| `VIEW-001` | The zoom/box/fit/1:1/pan/flip baseline now includes permanent native bars, checked accepted-only `SCROLLINFO`, per-view sticky range state, frozen thumb tracking, Shift-modified line/page input, a latest-wins accepted-projection mailbox, and targeted/session reset causes retained across queue rejection. Pure-model and CoreHost regressions pass; the actual-`HWND` test reaches projection on two document-bound Canvas instances and its no-optimistic-line assertion. | Complete page/thumb, two-view, post-Core renderer-rejection reconciliation, resize/final-frame, disabled-state, accessible range/value and cache-hit performance evidence remains. The older locked-desktop Present failure is not reproduced in the current normal-desktop runs; this does not complete the remaining UI/platform checks. |
+| `WIN-001`, `PREF-001`, `SHORT-001`, `HIST-002`, `FILTER-001`, `FILTER-002`, `FILTER-PREVIEW-001` | Native Windows shell with explicit Common Controls registration, native client colors and documented DWM title-bar-only dark opt-in, Japanese/English UI with persisted System/Japanese/English selection and non-Japanese English fallback, offline Help/About/Acknowledgements with locked BLAKE3/PNG/Fluent icon dependency attribution, typed Fluent icons for all 14 Tool commands and the applicable Layer/Plane/pin states with localized text fallback, owner-centered work-area-clamped modal dialogs, DPI-aware layout, keyboard routes, MSAA/UIA names, theme and accessibility hooks; 316 localized menu IDs and 324 command-state entries, exact-current v5 settings/v3 shortcut presets and statusbar job selection/cancellation. The current shortcut/menu change defines a complete editable catalog, sparse Windows/VS Code defaults, preserved custom profiles, collision-free mnemonics, and Window submenu regrouping without changing direct pane toggles. ARM64 Debug settings/localization tests and both full English/Japanese product smokes pass with the new cache field. | A 9-or-more-document dynamic History Visualization paging regression remains before `SHORT-001` returns to Verified. Client UI intentionally retains native Win32 colors and visual styles without Windows app-color following. Canvas/Light Table/Subpalette content stays unchanged; physical high-contrast/200%-DPI, complete screen-reader, and Japanese IME validation/fixes remain; the embedded offline Help body is Japanese-only |
 | `WORKSPACE-001`, `VIEW-004`, `SEQ-001` | Persistent and auxiliary panes retain DockHost and Tool Options remains an owned flyout. The right side uses dynamic stable-ID tabs with nonempty unique membership, deterministic add/remove/move/reorder, accessible descriptions and current-only human-readable settings-JSON persistence without registry migration. Every right-pane layout records final child geometry in a fixed-capacity `PaneDialogLayoutPlan`, skips platform-normalized unchanged bounds, batches the changed set without redraw, verifies final/rollback geometry and publishes inner failure to the pane root. DockHost defers affected same-parent completions until all outer geometry is installed, then synchronously repaints a bounded dirty union; Structure includes old/new right-zone and tool-tab bounds. Synchronous DockHost mutation failure restores the DockLayout/right-tab snapshot, attempts and verifies physical rollback, reprojects the old chrome and returns failure without committing the candidate model. Structure may rebuild DockHost chrome tab projection, but does not reset surviving pane-owned tab/list contents, selection, top index, a still-valid scroll position or control identity; resize/reflow may clamp an offset only when it falls outside the new range. Geometry notification itself does not reset focus; the successful hidden-pane toggle applies the required destination selection and new-pane focus. Color attempts and verifies restoration of its sibling tab/page z-order before reporting a shared-completion failure. Sequence commits geometry before guarded ListBox metric/top-index updates. Right-tab splitters stop at adjacent descriptor minimums. Canvas tabs keep stable view/session identity and the final tab closes to an empty workspace. The actual-`HWND`, DockHost boundary, workspace-layout and owner-model focused tests plus the x64 Debug MSVC `/W4 /WX` build pass. | Reference Check AutoHide edge buttons are not reachable by F6/Tab/Shift+Tab. Floating/expanded AutoHide/reparenting use their destination-parent flow rather than the same-parent transaction. Non-x64-Debug configurations and the unrelated sequence-performance test remain pending for this change; cold/background and whole-sequence editable-document residency are outside this layout result |
 | `SUBPALETTE-001` | ABI v32 retains the read-only catalog/view and parallel manager jobs. The independent permanent bars, sticky range/reset causes, exact Shift+Arrow/Page pan, unmodified Arrow/Page navigation, stable auxiliary route and catalog `presentation_epoch` are implemented. Visible catalog replacement rejection preserves the prior publication; hidden replacement clears the old retained snapshot before deferral. | Exact post-scroll sampling, durable hidden-publication retry, strict active-image renderer-rejection rollback, page/thumb/resize/accessibility product evidence, interactive file-dialog and unrun platform checks remain; see [correction record](subpalette-first-load-diagnosis.md). |
 | `BATCH-001`–`BATCH-004` | Batch v5 resolves Color/Raster role or fixed-ID selectors, deduplicates overlaps and commits one private primitive/Undo unit through ABI v32. | Physical accessibility and unrun platform/configuration checks remain. |
@@ -122,6 +122,105 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
   OS file APIs confined to the private `inkpod-io` backend.
 
 ## Latest representative verification
+
+### Native client colors and visible-test revalidation (`WIN-001`, `PERF-001`, 2026-09-03)
+
+The experimental partial client-area dark mode was withdrawn on user request.
+Client controls and owner-draw UI again use their original Win32 colors and
+visual styles. App-color detection/subscriptions, custom palette/brush ownership,
+and native-control visual-style opt-outs are removed. Only the original documented
+DWM workspace-title-bar opt-in remains. Canvas, Light Table, Subpalette images,
+alpha/checkers, sampling, thumbnails, Core/renderer logic and persistence are
+unchanged. The two experiment-only theme tests and their theme-transition smoke
+probes were removed with that feature; the original product/renderer/performance
+checks remain. One new native-color source gate gives 49 CTests (48 original + 1).
+
+The earlier failed runs are not counted as successes:
+
+- Product smoke stopped with error 930 at `first folder on empty hidden Canvas`.
+  Two Subpalette images had loaded and the Canvas was visible, but the compound
+  route/retained-snapshot/first-Present gate did not succeed within five seconds.
+- Sequence performance stopped with error 18007 during warm-up and subsequently
+  hit the 180-second CTest timeout (ARM64 Release: 180.27 seconds). Reported
+  document revision and active index matched, but the complete identity/epoch/
+  presentation condition was not established. A prior unchanged ARM64 Release
+  executable both reproduced error 930 and passed one performance run, so these
+  results did not establish either a theme-caused or a baseline-only failure.
+- The independent RendererHost test failed its first Sequence-edit readback;
+  `read=0` combined HRESULT and expected-pixel checks, with 30 frame-latency
+  timeouts. That target did not link the experimental theme code.
+
+Failure-only diagnostics now distinguish route/source, identity/generation,
+submitted/presented epoch and QPC, visibility/occlusion, queue/timeouts and
+readback HRESULT/actual-versus-expected pixels. Existing pass criteria, deadlines,
+workloads, envelopes and renderer production code are unchanged. Passing reruns
+show the failures are no longer reproduced in the checked runs; they do not
+prove a common root cause or a renderer bug fix.
+
+An additional x64 Release attempt under the restricted runner failed 7/49 in
+58.77 seconds. InkScript engine-route/file-authority, ABI and both product smokes
+failed with I/O status 7 (product error 828); RendererHost and Sequence failed
+before their first Present with `DXGI_STATUS_OCCLUDED` (`0x087a0001`, Sequence
+error 18006). The same executables pass these early gates under the normal
+desktop runner without a rebuild. This distinguishes that restricted-runner
+failure from the earlier errors 930/18007; neither failed attempt is silently
+discarded. Real-window/OS-file-authority tests require their normal desktop and
+filesystem environment, not a restricted substitute.
+
+Current no-profile validation on the local Windows ARM64 desktop:
+
+- ARM64 Debug builds with `/W4 /WX`; native-color, RendererHost and complete
+  English product smoke pass (3/3, 399.17 seconds; product smoke 390.71 seconds).
+  The separate Sequence performance smoke passes in 44.14 seconds.
+- ARM64 Release configure/build, static-CRT and package checks pass. The full
+  CTest suite passes 49/49 in 291.71 seconds: RendererHost 6.10 seconds, Sequence
+  performance 9.78 seconds, English product smoke 146.55 seconds, Japanese
+  product smoke 110.99 seconds.
+- x64 Release configure/build, static-CRT and package checks also pass. On the
+  normal desktop, all 49 CTests pass in 197.27 seconds: RendererHost 6.35 seconds,
+  Sequence performance 11.97 seconds, English product smoke 77.02 seconds and
+  Japanese product smoke 80.95 seconds. Both complete product smokes reach the
+  Subpalette folder-first-load, later Light Table, save/recovery and shutdown
+  phases instead of stopping at the earlier failed gates.
+- RendererHost and Sequence performance each pass five consecutive additional
+  runs per Release architecture (20 executions, no failures), using
+  `--repeat until-fail:5` with the unchanged tests. ARM64 takes 88.23 seconds
+  and x64 90.33 seconds; GPU tests run serially, without concurrent builds.
+- Rust format, all-target/all-feature warnings-denied Clippy, all 801 workspace
+  tests (one pre-existing ignored test), all nine unchanged quick benchmark
+  scenarios and warnings-denied Core rustdoc pass.
+
+Every completed Release Sequence run retains 128 measured switches, zero
+additional reads/decodes/uploads, one snapshot per step, zero frame-latency
+timeouts and 50/50 burst completions. Each records 256 warm Presents, not one
+Present per step. The display is 120 Hz at 192 DPI. In the full suites, ARM64
+has 128 foreground measured samples and x64 has zero; the five subsequent runs
+per architecture each have all 128 measured samples foreground.
+
+The table gives the median of the five per-run p95 values, in milliseconds;
+each pair is A/B/A then A/B/C/B/A. Full samples and counters remain in the logs.
+
+| Release target | UI handler | Snapshot submission | First successful Present |
+| --- | --- | --- | --- |
+| ARM64 native | 2.481 / 2.034 | 1.461 / 1.345 | 7.687 / 8.133 |
+| x64 under ARM64 emulation | 2.219 / 2.259 | 1.766 / 1.684 | 8.139 / 7.869 |
+
+The separate 1-ms handler goal is still not met. Passing CTest therefore does
+not make `PERF-001` Verified, and successful Present is not physical-display
+arrival. These measurements are not an approved physical-x64 performance
+baseline or a before/after speedup claim.
+Physical high-contrast/DPI transitions, complete screen-reader/IME, physical x64
+hardware, the final x64 Debug configuration, edited/recovered latency and other
+unrun platform checks remain outside this result. The ARM64 Debug checks above
+are focused runs, not another complete Debug CTest matrix.
+
+Detailed local logs: `build/native-ctest-arm-release.log`,
+`build/native-ctest-x64-release.log` (restricted-runner failures),
+`build/native-ctest-x64-release-desktop.log` (normal desktop),
+`build/native-render-repeat-arm-release.log`,
+`build/native-render-repeat-x64-release.log`,
+`build/native-colors-initial-tests.log`, `build/native-sequence-arm-debug-result.log`
+and `build/native-rust-validation.log`.
 
 ### Complete resident Sequence switching (`IO-003`, `SEQ-001`, `PERF-001`, 2026-09-03)
 

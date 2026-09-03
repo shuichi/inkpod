@@ -216,6 +216,20 @@ bool WaitPresented(app::ApplicationHost& state, std::uint32_t index,
         state.routing.sequence_switch_pending_token.load(std::memory_order_acquire),
         state.routing.sequence_navigation_queue.size(), surface.visible, surface.occluded,
         surface.last_presented_source.flags);
+    const auto& cells = state.Workspace().sequence_dialog.view.cells;
+    const bool identity_matches = index < cells.size()
+        && document.document_uuid_high == cells[index].document_uuid_high
+        && document.document_uuid_low == cells[index].document_uuid_low;
+    std::fprintf(stderr,
+        "sequence presentation: identity=%d session=%llu/%llu generation=%llu/%llu "
+        "epoch=%llu/%llu submitted=%llu presented=%llu latency_timeouts=%llu "
+        "last_render=%08lx renderer_queue=%llu\n",
+        identity_matches, surface.route.document_session.Value(), state.Document().id.Value(),
+        surface.route.document_generation.Value(), state.Document().generation.Value(),
+        surface.last_presented_presentation_epoch, state.Document().sequence_required_present_epoch,
+        surface.last_snapshot_submission_qpc, surface.first_presented_revision_qpc,
+        surface.frame_latency_timeout_count, static_cast<unsigned long>(surface.last_render_result),
+        state.renderer->ResourceUsage().queued_work_count);
     return false;
 }
 

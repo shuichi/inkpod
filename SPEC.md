@@ -72,6 +72,10 @@ inkpod は次の構成を維持する。
 Windows GUI は標準的な Windows 11 desktop application とし、古典的 MDI
 や別 GUI framework へ移行せず、次の構造を持たせてください。
 
+- `WIN-001` の通常 UI は Windows のアプリ配色へ自動追従せず、タイトルバー以外は既定のライト配色（Win32 標準の描画色）を使用する。標準 control の visual style は Windows に任せ、owner-draw UI も `GetSysColor`／`GetSysColorBrush` の背景・文字・選択色の組を使う。ハイコントラストの system color を固定 RGB で上書きしない。
+- タイトルバーだけは公開 DWM API による OS 標準のダーク表示を許可する。独自の client-area ダーク palette、アプリ配色監視、標準 control の visual-style opt-out は設けない。第三者のダークモード library、非公開 Win32 ordinal／API／theme class は使わない。
+- Canvas の画像・余白・透明 checker・overlay、ライトテーブルの参照画像・opacity・合成、サブパレットの参照画像・透明 checker・採色結果、および色見本・thumbnail の画像値は UI テーマに依存させず、従来の表示と内容を維持する。テーマ変更で文書／view revision、履歴、dirty、色値、選択、focus、scroll position、pane contents を変更・再生成せず、テーマ設定を文書や workspace 保存へ追加しない。
+
 - process には一つの `ApplicationHost` を置き、同一 UI/Input thread 上で複数の `WorkspaceWindow` を所有できるようにする。各 window は独立した menu bar、制約付き dock、editor area、status bar、focus history を持つ。`WM_QUIT` は最後の workspace window が閉じたときだけ発行する。
 - 独立した常設 toolbar は置かない。利用者が実行できる全機能を menu bar の末端項目から呼び出せることを優先する。選択中 tool の option は、左 tool button の独立した展開領域から開く縦型の owned flyout に表示し、同じ command/state と既存の option callback を使う。flyout は標準 caption、window icon、resize frame を持たず、30 DIP の compact header に accessible な pin toggle と close button だけを置く。非 pin 時は owner workspace または別 application へ pointer/focus が移った後に、flyout 自身と combo 等の owned popup を除外して自動的に閉じる。pin は workspace session 内だけの状態とし、自動 close を抑止するが system-wide topmost にはしない。flyout の高さは可視 control の末尾と下余白から算出し、monitor work area を超える場合だけ内部を縦 scroll する。配置は button の右側を優先し、収まらない場合は左右を反転して work area 内へ clamp する。
 - editor area は一つまたは二つの `EditorGroup` を持つ。二分割は左右または上下だけを許し、再帰分割しない。各 group は独立した tab strip、active `DocumentView`、一つの可視 Canvas slot、focus history を持つ。

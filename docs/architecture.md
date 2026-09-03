@@ -572,6 +572,22 @@ main -> Application -> MainWindow/controllers -> CoreHost -> C ABI
 - The renderer is reached only through Canvas and the snapshot sink; controllers
   never call renderer APIs.
 
+### Native Windows UI colors
+
+Client controls retain their standard Win32 visual styles and drawing colors.
+Existing owner-draw UI uses `GetSysColor`/`GetSysColorBrush` foreground,
+background and selection pairs. Windows app Light/Dark preferences do not
+replace these colors; high-contrast system colors are not overridden.
+There is no app-theme monitor, custom client palette, visual-style opt-out,
+or theme setting in document/workspace persistence.
+
+Workspace title bars retain the documented
+`DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` opt-in, leaving frame
+rendering to Windows. Canvas/Light Table composition, Subpalette images and
+sampling, color swatches, checker colors and thumbnails remain unchanged.
+The native-color source gate rejects reintroducing app-color subscriptions or
+client palette overrides.
+
 ### Win32 multi-pane resize painting contract
 
 Splitter, docking, floating-window, DPI, and parent-size changes are geometry
