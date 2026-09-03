@@ -80,7 +80,7 @@ after each row.
    a modeless pane open. Composition must remain in the edit control; workspace
    shortcuts must not consume it or retarget the result.
 6. **Language resources.** Select System, Japanese, and English under Edit >
-   Settings > Language, restarting after each change. Verify the checked state
+   Preferences > General, restarting after each language change. Verify the selection
    persists; System resolves Japanese when the first preferred Windows UI
    language is `ja` and English otherwise; menus, common dialogs, pane titles,
    command errors, accessibility names, and About follow the selection. Confirm
@@ -113,8 +113,7 @@ System/English resources: Pass | Fail | Blocked — evidence
 Faulted shutdown: Pass | Fail | Blocked — evidence
 ```
 
-Update [`implementation-status.md`](implementation-status.md) with only the
-latest representative result and [`compatibility.md`](compatibility.md) only
-when a requirement status, representative evidence, or known difference
-changes. Do not append completed release records to this checklist; superseded
-milestone observations belong in [`legacy.md`](legacy.md) or Git history.
+Update [compatibility.md](compatibility.md) when a requirement status,
+representative result or known gap changes. Record the tested revision and scope;
+do not overwrite a failed full run with a later isolated success. Do not append
+completed release logs here. Older release observations remain in Git history.

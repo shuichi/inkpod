@@ -1395,7 +1395,7 @@ rebases the active frontend file binding to the current pair paths/identities;
 document/history/dirty/savepoints and pair authority remain unchanged. A real
 replacement instead adopts only the target resolver's authority.
 
-Whole-document Revert was introduced as an ABI v30 runtime operation and is retained by ABI v31; it is not a native schema
+Whole-document Revert is a runtime operation; it is not a native schema
 feature. It is accepted only as `OPEN_NATIVE` with both force-reload and explicit
 current-document Revert flags, and apply requires the exact live current native
 path and document UUID. The staged v34 data replaces document/history/editor/
@@ -1405,56 +1405,6 @@ survive. Render-cache entries for the replaced document revision are invalidated
 The frontend then rebases the active
 pair binding and projection to the new owner generation. None of these runtime
 associations are serialized into the v34 container.
-
-### Historical version evolution through v29
-
-That M11 change did
-not alter its then-current v17/runtime replay epoch 14, EDIT schema 4, or
-`.inkbatch` v2 contract; M12 independently advances native persistence to
-v18/runtime replay epoch 15 for the bulk Light Table primitive; M13 advances
-the then-current contract to v19/runtime replay epoch 16 and EDIT schema 5 for
-the independent document Color chart, its canonical replacement, and cursor;
-M14 advances the then-current contract to v20/runtime replay epoch 17 for the
-canonical output-color guard selection procedure without changing EDIT or
-document-state schemas; M16 advances it to v21/runtime replay epoch 18 for
-`CommitFloating/canonical-v3` five-point absolute-anchor semantics, again without
-changing EDIT or document-state schemas; M17 advances the then-current top-level
-contract to v22/runtime replay epoch 19 and outer container-layout epoch 9 while
-adding the separate Cut descriptor schema and persistent Cell identity exposure.
-M18 advances the contract to v23/runtime replay epoch 20 and Cut payload schema 2
-for ordered atomic membership edits and membership-bearing Cut history; Cell
-primitive semantics and the outer container-layout epoch remain unchanged.
-M20 advances the then-current contract to v25/runtime replay epoch 22,
-`DocumentArchive`/document-metadata schema 4, and `DocumentStateDigest` schema
-8/domain 7 for the independent angled shooting-frame object and
-`EditShootingFrame/canonical-v2`; exact v24/epoch-21 input is rejected without
-migration. Canonical snapshot-composite schema 3 is unchanged because the
-shooting-frame overlay is not flattened into normal output.
-M22 advances the then-current contract to v26/runtime replay epoch 23,
-`DocumentArchive`/document-metadata schema 5, `DocumentStateDigest` schema
-9/domain 8, and EditorState schema 6/domain 2 for persistent stable-ID
-vanishing-point objects, `EditVanishingPoints/canonical-v2`, and the
-VanishingPoint active-tool code. Exact v25/epoch-22 input is rejected without
-migration. Canonical snapshot-composite schema 3 remains unchanged because
-vanishing points and derived radial guides are view overlays and are excluded
-from flattened normal and thumbnail output.
-M27 re-baselines the then-current contract to v27/runtime replay epoch 24,
-`DocumentArchive`/document-metadata schema 6, `DocumentStateDigest` schema 10
-in domain 8, EditorState schema 7/domain 2, and canonical snapshot-composite
-schema 4. The retired drawing-model records and primitive assignments remain
-reserved tombstones; exact v26/epoch-23 input is rejected without migration.
-Batch Pane v3 advances the then-current contract to v28/runtime replay epoch
-25, document-metadata schema 7, and `DocumentStateDigest` schema 11/domain 8.
-It adds the dedicated sparse fill-protection Plane ID/raster and private
-`ApplyBatchOperations/canonical-v2`; `.inkbatch` advances from v2 to v3 and the
-InkScript catalog/owner manifest advances from v3 to v4 while retaining the
-same 75 public commands. Exact v27/epoch-24 Cell input, `.inkbatch` v2, and
-catalog/owner v3 are rejected without migration. Cut payload schema 2 and Cut
-replay epoch 24 are unchanged, though the shared top-level `.inkpod` version is
-28. Shared file I/O advances the top-level format to v29 for META section/record
-version 2 and the mandatory raster-format field; replay epoch 25, canonical
-procedure semantics, document/editor digests, and Cut payload schema 2 remain
-unchanged. v28 and all other noncurrent native versions are rejected.
 
 ### Current recovery metadata and compaction
 
@@ -1486,46 +1436,10 @@ without performing I/O.
 
 Explicit compaction is a separate export. Core first returns a confirmation
 token containing omitted event/procedure counts and document/editor/journal
-digests. Only the exact current token can write a new v33 file whose current
+digests. Only the exact current token can write a new current-version file whose current
 document is Genesis and whose PROC history is empty. The operation never changes
 or adopts the live path, journal, savepoints, dirty state, or IDs. There is no
 automatic squash.
-
-### Historical v30–v32 format transitions
-
-29. Editable common-raster Genesis advances the top-level format to v30 and runtime replay
-epoch 26. `GENS` gains an optional fixed source-plane/asset binding; an RGBA8/16 main-line
-plane is valid, retains exact source pixels and is materialized from `ASST` before digest/replay.
-The empty same-depth color plane is ordered above it. Exact earlier versions are rejected.
-
-30. The standard image-layer model advances the top-level format to v31 and
-runtime replay epoch 27. Every image layer contains exactly one MainLine plane,
-exactly one Color plane, and zero or more Raster planes. Layer kinds, Selection
-planes, VanishingPoint objects, and Adjustment layers are removed from the
-current schema and primitive catalog; their former numeric assignments remain
-retired tombstones. The current selection, named saved-selection masks, and fill
-protection are document-owned rasters outside the image tree. `DocumentArchive`
-advances to schema 7, document metadata to schema 8, and
-`DocumentStateDigest` to schema 12/domain 10. Exact v30/epoch-26 input is rejected
-without migration. Cut payload schema 3 removes its initial-layer-kind field
-while retaining Cut replay epoch 25. `.inkbatch` advances to v5 and removes its
-layer-kind target field. The InkScript catalog and owner manifest advance to v5
-with 73 commands, and the public C ABI advances to 25; their previous exact
-versions are rejected without compatibility shims.
-
-31. Opaque common-raster Genesis advances the top-level format to v32 without
-changing runtime replay epoch 27, payload schemas, the primitive/InkScript
-catalogs, or the then-current C ABI v29. ABI v30 later added only the
-runtime current-document Revert flag and does not change these bytes. An optional initial-raster source may be paired with
-`SolidWhite` only when its exact RGBA8/16 source is fully opaque; a source with
-any non-opaque alpha must retain `Transparent`. In both cases the imported
-pixels remain exact in the editable MainLine plane, and the immutable source
-asset is used only to materialize Genesis rather than as a composited base.
-Exact v31 input is rejected without migration.
-
-### Current v33 format transition
-
-32. Cut management and instruction-raster export are removed. The top-level format advances to v33 and runtime replay epoch to 28. Required `DOCM` advances to schema 9; the angled shooting frame stores only its Canvas visibility, with no instruction-export flag. `DocumentStateDigest` advances to schema 13/domain 11, and `EditShootingFrame` to schema 3/semantics revision 2. The public C ABI advances to 33 and the 73-command InkScript catalog/owner manifest to v6; registry/language/file v2 and DocumentArchive schema 7 remain unchanged. Cut descriptors and every older native/epoch/catalog contract are rejected without migration; ABI clients must rebuild against v33. Existing pixel-composite goldens and performance workload/envelope remain unchanged.
 
 ## Corrupted-input regression corpus
 
@@ -1544,4 +1458,4 @@ replace coverage-guided fuzzing, but keep the accepted corruption corpus and
 allocation-bound paths executable on every normal `cargo test` run. The
 `rust/inkpod-format/fuzz` package provides `native_v33` for the current
 container, directory, CKPT removal/re-encode path, `native_core_v33` for staged Core
-journal/checkpoint/full-replay, retention, and compaction-plan parsing; both call public production entrypoints. Retired Cut magic remains a negative native-input regression.
+journal/checkpoint/full-replay, retention, and compaction-plan parsing; both call public production entrypoints. Their retained target names do not imply v33 reader support. Retired Cut magic remains a negative native-input regression.

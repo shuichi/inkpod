@@ -2,9 +2,9 @@
 
 This document describes the current component, ownership, thread, and state
 boundaries. Product behavior is specified in [`../SPEC.md`](../SPEC.md), and
-current gaps are summarized in [`implementation-status.md`](implementation-status.md).
-Completed migration steps, superseded designs, and past measurements are
-summarized in [`legacy.md`](legacy.md).
+current gaps and representative evidence are recorded in [compatibility.md](compatibility.md).
+This is a technical reference subordinate to SPEC; completed migrations and old
+measurements belong in Git history. Test procedures are in [verification.md](verification.md).
 
 ## Dependency direction
 
@@ -42,10 +42,10 @@ Core supplies owned detached work to its generic executor.
 | Crate           | Responsibility                                                                                                                                                                     |
 | --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `inkpod-image`  | Typed pixel formats, 64 x 64 sparse tiles, `Arc` copy-on-write storage, selection, fill/sampling/palette logic, and deterministic raster/filter/effect operations |
-| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v33 Cell containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
+| `inkpod-format` | Bounded procedure-authoritative `.inkpod` v34 Cell containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v33 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, bounded validated-sidecar-target cache control/telemetry, complete sequence-resident target transfer, render preparation telemetry, and immutable prepared-source snapshot accessors, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v34 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, bounded validated-sidecar-target cache control/telemetry, complete sequence-resident target transfer, render preparation telemetry, and immutable prepared-source snapshot accessors, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -163,7 +163,7 @@ sequence catalog share the immutable tile-map backing. `TileRaster` COW detaches
 the map and then only a touched tile on the first effective edit. A provenance
 mismatch is ordinary ineligibility and uses the unchanged owned import.
 Persistence and InkScript export materialize a temporary canonical dense byte
-stream only when those operations actually request it. These resident caches do not alter the native v33/epoch-28 contract, digests, history or savepoints. The resident-target transfer and render-preparation accessors introduced in ABI v32 remain in v33 without changing canonical state.
+stream only when those operations actually request it. These resident caches do not alter the native v34/epoch-29 contract, digests, history or savepoints. The resident-target and render-preparation accessors expose runtime state only.
 Private test-support counters require
 the managed switch to report zero dense-copy, hash, and full-tile-materialization
 work.
@@ -227,7 +227,7 @@ discarding edits made after the primary open. Discovery/decode failure leaves
 that successful primary open intact.
 
 Jobs expose nonblocking discovery, read, loaded, failure, work, result, and
-installation counters through ABI v32. Loaded images include cache hits;
+installation counters through the C ABI. Loaded images include cache hits;
 internal Batch output rereads do not count as additional input images. Queued
 drop/cancel cannot publish a live candidate. A result is applied only on its
 captured owner after generation/revision validation. Normal save, sequence
@@ -390,7 +390,7 @@ ordering, canonical fixed-point, digest framing, and resource-limit rules live
 in [`file-format.md`](file-format.md).
 
 Every production document mutation now implements this boundary. The original
-value/ID ABI-v3 catalog (`SetMainLineColor`, `ReplacePalette`, bounded
+`_v3` value/ID API catalog (`SetMainLineColor`, `ReplacePalette`, bounded
 `ApplyRasterStroke`, and `ImportRasterAsset`) continues through
 `Core::execute_primitive`; the remaining typed public methods construct a
 `CanonicalInvocation`, execute the same method against a private staged Core,
@@ -426,13 +426,13 @@ cache release, and later history movement reconstructs the cache on demand.
 
 This is deliberately not a generic snapshot- or diff-procedure bridge. Every
 production history entry references its route-specific canonical procedure,
-and there is no supported incomplete-journal state. The v33 writer serializes
+and there is no supported incomplete-journal state. The current writer serializes
 Genesis, retained assets, the complete journal/control-event sequence, editor
 state, savepoints, cursor, branch graph, and ID authorities. Open validates and
 either fully replays that graph or uses a prefix/state/policy-verified optional
 checkpoint in a staged Core before one replacement of the live generation.
 Checkpoint mismatch selects full replay; malformed/hash/bound failure rejects.
-The journal remains authoritative and every non-v33 Cell version is rejected.
+The journal remains authoritative and every noncurrent Cell version is rejected.
 
 History visualization is a read-only derived view of that journal. Core replays
 the complete retained graph through the canonical executor, visits only `Commit`
@@ -448,35 +448,23 @@ document session closes.
 
 ## Immutable Genesis and canonical assets
 
-Each Core document has one immutable Genesis state. Genesis owns a stable
-Document ID, a distinct stable Cell ID from the same document namespace, and a
-typed base surface. `BaseSurface::SolidWhite` is an allocation-free opaque sRGB
-white underlay; it contributes to a flattened canonical composite or export but
-is not an editable layer or plane and never enters a layer-only export or the
-selection mask. `BaseSurface::Asset` instead names one immutable canonical raster
-asset whose dimensions and pixel semantics match the document paper. Replacing
-the earlier temporary Document-ID-as-Cell bridge and persisting the shooting and
-maximum-close frames change canonical document-state bytes. The current document-state
-commitment is schema 13/domain 11, the replay contract is epoch 28, and the native
-format is version 33. Every image layer has one standard topology: exactly one
-MainLine plane, exactly one Color plane, and zero or more Raster planes. Layer kinds
-do not exist. Current selection, ordered named saved-selection masks, and the sparse
-fill-protection mask are document-owned rasters outside the image tree; only their
-materialized tiles allocate. Cut management, its descriptor codec, independent session,
-membership history and export-only shooting-frame flags have been removed.
-The optional angled shooting frame remains a Canvas-only document object; its
-canonical edits, preview and transform rules are retained. Normal output and
-thumbnails exclude it. Native v33/replay epoch 28 use metadata schema 9 and
-document-state schema 13/domain 11. The versioned EditShootingFrame payload is
-schema 3/semantics 2 and contains no instruction-export policy.
-Epoch 18/version 21 added the canonical floating-transform v3 procedure with
-half-open five-point absolute-anchor semantics. Epoch 17/version 20 added the
-canonical output-color guard selection procedure
-over the committed visible straight-alpha composite. The document-owned Color
-chart, canonical whole-chart replacement, and EditorState cursor introduced in
-epoch 16/version 19 retain their existing semantics.
-The numeric audit, prohibited platform-math list, public golden fixture, and
-benchmark gate are specified in [`determinism.md`](determinism.md).
+The native document is defined by immutable Genesis, content-addressed assets,
+and canonical procedures/history controls. Materialized documents, inverse deltas,
+and checkpoints are derived caches. A stable Cell ID is independent of document UUID.
+The current format/replay/digest versions are specified together in
+[SPEC section 20](../SPEC.md#20-形式白透過一般画像入出力) and [file-format.md](file-format.md).
+
+Every image layer has exactly one MainLine plane, exactly one Color plane, and
+zero or more Raster planes. Current selection, stable-ID named masks and sparse
+fill protection are document-owned rasters outside the image tree. Cut management,
+layer kinds, vector/Text/Annotation, vanishing-point and adjustment objects are absent.
+The optional angled shooting frame is a Canvas-only object; normal output and
+thumbnails exclude it. Its schema 3/semantics 2 has no instruction-export policy.
+
+Floating transforms, output-color guard, Color chart, Light Table and raster
+geometry retain their canonical numeric semantics. The numeric authority,
+prohibited platform math, public goldens and benchmark are in
+[determinism.md](determinism.md).
 
 The Core-owned asset registry interns canonical descriptors and logical payload
 bytes under a content-addressed `AssetId`. A raster descriptor fixes pixel format,
@@ -511,10 +499,10 @@ Cache-free verification first builds a detached asset archive from every semanti
 retention root, deep-copies each logical payload, and re-ingests it into an empty
 registry with the expected `AssetId`. Fresh Genesis/journal replay uses only that
 detached registry, so passing verification cannot be an artifact of shared
-`AssetRecord`, payload, or `TileRaster` ownership. Production v33 persists the
+`AssetRecord`, payload, or `TileRaster` ownership. Production persistence writes the
 same rooted graph in GENS/ASST.
 
-The present ABI is v30. `InkpodObjectId` separates Core, snapshot, task, color,
+`InkpodObjectId` separates Core, snapshot, task, color,
 sample, raster, thumbnail, and export runtime objects by type and Core generation;
 IDs are monotonic within one Core and are never accepted across generation or
 after release. Variable input is synchronously copied into bounded Rust-owned
@@ -880,7 +868,7 @@ session/generation value must be supplied when reading them; the UI never
 re-resolves the active document. The read-only C ABI resource query reports
 logical document tile/history, render-cache, CPU-staging, light-table/reference,
 sequence-source, thumbnail-cache, and reserved sequence-composition categories
-without building a snapshot. ABI v32 retains the latter's byte/source/tile counts;
+without building a snapshot. The C ABI exposes the latter's byte/source/tile counts;
 the aggregate render-cache byte/tile counts already include the same charged
 payloads. Shared COW Core clones may report overlapping logical usage; the I/O
 manager's shared reservation counters enforce the application-wide CPU ceiling.
@@ -1309,7 +1297,7 @@ index.
 Selection changes only the inline scrollable `batch_parameter_editor`; they do
 not mutate Core or an immutable graph. Add/duplicate/remove/move change only the
 four-kind draft operation list. Preview, run, and save each validate the draft
-and construct one Rust-owned immutable v4 graph. Load performs the inverse query
+and construct one Rust-owned immutable Batch graph. Load performs the inverse query
 through `inkpod_batch_graph_get_info`, `get_input`, and operation row queries,
 so a loaded set is editable rather than a count-only opaque object.
 
@@ -1545,7 +1533,7 @@ while End and Cancel always invalidate and resample the final state. Core reads
 the same display-document priority as snapshots (active stroke preview, then
 filter preview, then committed document), without publishing a document or
 history change. Secondary palette presentation that is not yet exposed is
-tracked in `implementation-status.md`, while its Core/C ABI models remain owned
+tracked in `compatibility.md`, while its Core/C ABI models remain owned
 here.
 
 ## Thread and snapshot model
@@ -1635,6 +1623,10 @@ pixel units and a 96-DPI target, so Per-Monitor DPI scaling applies to native UI
 not a second Canvas transform. DPI notification alone does not move or resize the
 document. Fit uses current client-device dimensions; manual pan/zoom survives
 viewport resize.
+
+Native UI dimensions use `device_px = MulDiv(reference_px, target_dpi, reference_dpi)`.
+For logical DIP values, `reference_dpi` is 96; measured device pixels such as a
+screenshot use the DPI at capture. Never apply the same DPI scale twice.
 
 Every visible editor-group Canvas and the Subpalette Canvas has permanent
 `WS_HSCROLL | WS_VSCROLL` non-client bars. Their system metrics reduce the Canvas
@@ -1741,7 +1733,7 @@ independent Core/catalog lifetime. Successful catalog replacement renews it;
 staging preserves it, while an independent Core clone gets a new namespace.
 Exhaustion disables source-cache reuse instead of wrapping. The identity is
 neither persisted nor included in semantic snapshot equality, document digests,
-replay, or revision-max. ABI v32's immutable snapshot accessor copies this
+replay, or revision-max. The immutable C ABI snapshot accessor copies this
 provenance without payload reads and without giving the caller a source owner.
 
 Pristine eligibility is established by fresh source activation and checked
@@ -1779,7 +1771,7 @@ no persistent IDs and mutates no live Core. Only the Core owner can adopt a
 completed result after checking catalog owner, source UUID/generation, and
 captured index. Catalog/source replacement cancels or discards old work.
 Foreground selection never waits for unfinished preparation; ordinary snapshot
-composition remains the fallback. ABI v32 exposes the prepared source set in
+composition remains the fallback. The C ABI exposes the prepared source set in
 one immutable snapshot so the renderer can pre-upload the same full catalog
 within its own independent bounds and rebuild it after device loss.
 
@@ -1800,7 +1792,7 @@ invalidates an ordinary map before reuse, including recovery with equal tile
 IDs/revisions. The epoch is an invalidation condition, not part of the source
 bank's lookup key.
 
-These are derived display caches only. Native v33, document replay epoch 28,
+These are derived display caches only. Native v34, document replay epoch 29,
 the canonical revision-max formula below, its payload-access gates, and existing
 benchmark workloads/envelopes are unchanged. Source-hit and upload counters
 describe which work was reused; they do not replace end-to-end Present checks.
@@ -1858,9 +1850,8 @@ is not serialized, and is not changed by a format-version update.
 
 The renderer keeps cache validation separate from document-state commitment,
 borrows changed source tiles without copying, and prepares each dirty-tile
-composition once. The adoption history and original A/B results are summarized
-in [`legacy.md`](legacy.md); the current executable workloads, environment
-envelope, and exceptional audit procedure are in
+composition once. The current executable workloads, environment envelope,
+complete approved samples and exceptional audit procedure are in
 [`core-benchmark-baseline.md`](core-benchmark-baseline.md).
 
 The decision favors byte-independent, fixed-scalar validation and minimal cache
@@ -2001,37 +1992,29 @@ converted into an implicit queued save. Internal Sequence/recovery continuations
 may serialize after same-session work only when they retain their captured
 session/generation and exact reservation token.
 
-The current `.inkpod` v33 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
+The current `.inkpod` v34 Cell container requires `META`, `GENS`, `ASST`, `PROC`,
 and `EDIT`. META section/record schema 2 requires the closed raster-format value:
 PNG, TIFF, TGA, or BMP. Raster import records its actual codec; a new cell uses
 PNG unless the application supplies a different creation default. Changing that
 default does not mutate an existing document, history, or dirty state. Native
 reopen, recovery, compaction, and sequence activation preserve the stored format.
-The v31 tree simplification advanced replay epoch to 27, document archive schema
-to 7, mandatory nested `DOCM` document metadata to schema 8, the document-state
-digest to schema 12/domain 10, and canonical snapshot-composite schema to 5.
-Batch v5 uses operation schema 4, while the InkScript catalog/owner manifest v5
-exposes 73 commands. Normal PNG/TIFF companions retain native 16-bit precision; a 16-bit
-document cannot silently become an 8-bit TGA/BMP companion. Explicit display
-export retains its separate existing conversion contract.
+Normal PNG/TIFF companions retain native 16-bit precision; a 16-bit document
+cannot silently become an 8-bit TGA/BMP companion. Explicit display export has
+its separate conversion contract. Batch operation schema and InkScript catalog
+are defined by their current registries and the SPEC version contract.
 
-Native v32 leaves replay epoch 27 and every payload schema unchanged. It admits
-an initial-raster source together with `BaseSurface::SolidWhite` only when the
-exact imported editable RGBA MainLine is fully opaque. Imports carrying any
-non-opaque alpha retain `BaseSurface::Transparent`; in both cases the immutable
-source asset materializes Genesis pixels and does not participate in composition.
-Lossless raster ingestion means exact canonical decoded dimensions, native 8/16
-bit channel depth, straight alpha, and pixel values. It does not promise
-byte-for-byte retention or regeneration of the encoded source container,
-compression, palette representation, optional metadata, provenance, name, or
-path.
-
-The subsequent user-approved Cut removal advances native to v33/replay epoch 28, DOCM to schema 9, document digest to schema 13/domain 11, ABI to v33 and InkScript catalog/owner to v6. Angled shooting frames retain Canvas geometry/visibility only; Cut descriptors, ownership and export-policy fields are absent.
+An initial-raster source may use `BaseSurface::SolidWhite` only when the imported
+editable RGBA MainLine is fully opaque. Any non-opaque alpha requires
+`BaseSurface::Transparent`. The immutable source asset materializes Genesis
+pixels without itself participating in composition. Lossless raster ingestion
+preserves exact decoded dimensions, native channel depth, straight alpha and
+pixels; it does not promise source-container bytes, compression, palette layout,
+optional metadata, provenance, names or paths.
 
 Pair paths, filesystem identities, and the `Planned`/`Committed`/`None` state are
 runtime authority and are not serialized. The resolver uses existing META field
 21, Genesis/assets, and the ordinary composite contract, so this change does not
-alter native v33, replay epoch 28, or a section/payload schema. Persisting a pair
+alter native v34, replay epoch 29, or a section/payload schema. Persisting a pair
 path, filesystem identity, or source digest later would require the normal
 top-level format-version update.
 
@@ -2061,7 +2044,7 @@ marker. Therefore a crash after both member renames but before that marker rolls
 both members back; recovery recognizes completion only from the exact marker.
 Cleanup removes the prepared journal before the marker, whose full record also
 supports safe orphan-marker cleanup after a crash in that final interval. This
-runtime journal revision does not change native Cell format v33.
+runtime journal revision does not change native Cell format v34.
 
 Installation and rollback do not path-overwrite an existing member after a
 check. A durable rollback marker is published first; Windows then verifies and
@@ -2095,7 +2078,7 @@ remain dirty/recovered. Partial selection revert reconstructs the saved document
 this same current-version reader and commits the selected delta as one new
 canonical undo unit.
 
-Whole-document Revert is the explicit ABI v30 `OPEN_NATIVE` request, retained by ABI v33, carrying both
+Whole-document Revert is the explicit `OPEN_NATIVE` request carrying both
 force-reload and `REVERT_CURRENT`; ordinary forced open is not inferred to be a
 Revert. Preparation resolves the current native pair and captures its logical
 identity. Apply requires the exact live current native path and document UUID,

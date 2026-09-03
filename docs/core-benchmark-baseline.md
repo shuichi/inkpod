@@ -9,17 +9,14 @@ matches an explicitly approved envelope.
 
 Workload, harness, environment envelope, or the canonical cache formula may be
 changed only with recorded reasoning, complete samples and semantic counters,
-and explicit user approval. Replace current values instead of appending dated
-acceptance logs. Historical calibration and milestone results are summarized in
-[`legacy.md`](legacy.md).
+and explicit user approval. Historical calibration narratives belong in Git
+history; complete samples defining an active envelope remain below.
 
-The user-approved Cut removal changes only the exact-current serialization/replay contract: native v33/epoch 28, DOCM 9, document digest 13/domain 11, ABI 33 and InkScript catalog/owner 6. No workload, semantic counter, pixel checksum, harness or timing envelope is changed. Only the schema-dependent document hashes in `checkpoint_open` (both profiles: `5062efd7565e19e4`) and `output_color_guard` (quick: `1b7549d882cd9743`; full: `fd514e08addb4698`) are regenerated for schema 13/domain 11; the same fixtures, exact assertions and quick/full gates remain.
-
-Batch v5 uses native v33/replay epoch 28 and retains the approved
-`batch_preview` workload described below. The benchmark has no sequence input,
-Filter operation, or legacy layer-kind selector. Its native files, exact Color
-Replace rows, semantic counters, checksums, and complete samples are locked
-together with the current standard-layer product contract.
+Exact checksum assertions are executable in [core_workflows.rs](../rust/inkpod-core/benches/core_workflows.rs)
+and [script/performance.rs](../rust/inkpod-core/src/script/performance.rs).
+They must not be changed merely to make a measurement pass. SPEC owns the
+current native/replay/catalog versions; version-dependent expectations must be
+verified separately from workload, pixel, non-byte counter and timing contracts.
 
 ## Commands and profiles
 
@@ -29,7 +26,7 @@ cargo bench --package inkpod-core --bench core_workflows
 cargo test --release --package inkpod-core --lib script::tests::approved_quick_performance_contract -- --ignored --exact --nocapture --test-threads=1
 ```
 
-Both commands use the release benchmark profile and the same nine scenarios.
+The two `cargo bench` commands use the release benchmark profile and the same nine scenarios.
 Quick is the bounded CI profile; full increases inputs for local before/after
 comparison. The checkpoint fixture is written outside its timed open interval
 and removed afterward. Batch creates its native inputs outside the timed
@@ -38,7 +35,7 @@ dry-run, removes them afterward, and asserts that its absent output directory
 remains absent.
 
 The ignored InkScript command is a separate Release process-level quick gate.
-It does not add an eleventh `core_workflows` scenario or change either existing
+It does not add a `core_workflows` scenario or change either existing
 profile. Fixture construction is untimed; the interval begins immediately
 before static compile and ends after plan, success/failure/cancel runs,
 cache-free reopen, checksum construction, and exact counter assertions.
@@ -81,7 +78,7 @@ scenario assertions are:
 | `undo_redo` | every edit is one history entry, Undo reaches the clean savepoint, and Redo restores the exact checksum |
 | `light_table_composite` | every reference contributes to the expected tile grid and checksum |
 | `batch_preview` | one invalid graph is rejected; every unique native input opens, replays, and applies its exact native-depth Color Replace row in preview and dry-run; no output is generated |
-| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 28 / native v33 / numeric v1 contract match |
+| `canonical_replay` | six boundaries replay bit-exactly; final digest and runtime epoch 29 / native v34 / numeric v1 contract match |
 | `checkpoint_open` | policy emits CKPT; verified open restores the journal/document digest and exact Undo/Redo; full crosses one million replay-work units |
 | `output_color_guard` | exact scanned/selected/transparent counts, one canonical commit, revision 2/history 1, exact sparse selection bounds/tile bytes, zero CPU staging bytes, and result digest match |
 
@@ -220,8 +217,8 @@ to Windows build 26200.9168 on the MSI MS-7E26 host with an AMD Ryzen 9
 scheme. A materially different host, target, toolchain, or power mode needs a
 separately approved range.
 
-The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v6 and replay
-epoch 28, 128 `set_plane_properties` steps, four successful 4-by-4 current-v33
+The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v7 and replay
+epoch 29, 128 `set_plane_properties` steps, four successful 4-by-4 current-v34
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
 full Genesis/asset/procedure replay without a checkpoint cache. The runner is
@@ -242,48 +239,11 @@ invocations, 384 Commit and 384 no-op outcomes, installed/failed/cancelled
 and checksum `1e41e17e8bda22e3`. The failure reason must be exactly Save; neither
 negative probe may publish an output.
 
-M21's explicitly approved file/catalog v1-to-v2 update changes the static compile
-digest included in this checksum. The checksum was therefore re-locked from
-`0f84d2c54cfe1e2c` to `4401131d804c8eb7`; source length, workload, harness,
-semantic counters, sample policy, and the 64–107 ms envelope are unchanged.
-
-The user explicitly approved updating only native-byte and checksum expectations
-for v29. Each input is now 6,072 bytes; four planned inputs total 24,288 bytes,
-six runner reads total 36,432 bytes, and four installed outputs total 91,104
-bytes. The old 6,192-byte input expectation already predated GENS/EDIT schema
-changes: unchanged pre-I/O v28 code produces 6,056 bytes. The v29 META field adds
-20 bytes before section alignment, giving a net 16-byte increase for this
-fixture. The checksum includes encoded output hashes and byte counters, so it
-is re-locked to `b65373bdba27b215`. No fixture, execution, timing interval,
-checksum algorithm, non-byte counter, sample policy, or envelope changed.
-
-The user-approved standard-layer rebaseline advances native output to v31,
-replay epoch 27 and catalog v5 without changing the fixture, execution path,
-timed interval, non-byte counters, sample policy or 64–107 ms envelope. Removing
-retired document records reduces each 4-by-4 input from 6,072 to 5,968 bytes:
-planned input is 23,872 bytes, six runner reads are 35,808 bytes and four
-installed outputs are 90,688 bytes. Encoded-output hashes and those byte counters
-change the semantic checksum to `ae0d04681b2f5a63`. A current Release run on
-2026-08-30 reproduced every counter and completed the protected interval in
-94,735,100 ns, within the unchanged envelope.
-
-The opaque-import paper contract advances only the exact-current native and
-procedure format to v32; replay epoch 27, the fixture, semantic counters, timed
-interval, sample policy, and 64–107 ms envelope remain unchanged. The versioned
-encoded-output hashes change the checksum to `1e41e17e8bda22e3`; input, runner-read,
-and installed bytes remain 23,872, 35,808, and 90,688. A current x64 Release run
-on 2026-08-30 completed the protected interval in 88,926,100 ns.
-
-Verification used Windows 11 build 26200, a 4-vCPU/8-GiB Parallels ARM64 VM,
-`aarch64-pc-windows-msvc`, Rust/Cargo 1.97.1, LLVM 22.1.6, static CRT,
-Release profile and the Parallels power scheme. One discarded warm-up took
-360,199,042 ns. Five independent measured processes took 325,186,084;
-331,263,375; 326,240,250; 237,307,875; 557,279,625 ns (median 326,240,250 ns).
-All six processes passed every hard gate and reproduced the current checksum
-and counters above. These ARM64 timings are diagnostic only; they neither
-establish nor pass the approved Ryzen/x64 envelope. Complete local logs are
-`build/io-migration-verification/inkscript-v29-approved-{0..5}.log`, with index
-0 denoting the discarded warm-up.
+The counters and checksum above are the fixed assertions in the checked-in
+Release runner. Passing Debug workspace tests does not execute this ignored
+gate. Current failures are recorded in [compatibility.md](compatibility.md#representative-verification).
+A current-version run must pass independently; encoded-byte or digest
+drift is not authority to update expectations, the workload or its envelope.
 
 The approved M13 reference batch discarded one warm-up process and retained the
 following nine independent Release processes. These samples define the range;
@@ -296,16 +256,8 @@ automatically.
 |---|---:|
 | 85,230,900; 87,304,700; 84,489,500; 86,339,300; 85,838,200; 85,097,100; 85,237,900; 85,372,200; 86,873,700 | 85,372,200 |
 
-The M14 implementation batch on the same environment discarded one warm-up and
-then retained 83,469,900; 84,492,700; 84,018,300; 89,425,600; 83,562,700;
-83,808,200; 84,431,400; 83,860,300; 83,694,900 ns (median 83,860,300 ns).
-Every process reproduced the then-current v1 checksum and counter contract, so no
-independent regression-confirmation batch was needed.
-
-The approved full fixture remains unimplemented until M36. Its workload,
-checksum, samples, and 15.3–25.6 s proposed envelope remain recorded only in
-[`inkscript-performance-proposal.md`](inkscript-performance-proposal.md); they
-are not an active executable gate.
+The full fixture is reserved and is not an executable acceptance gate; see
+[Reserved InkScript full fixture](#reserved-inkscript-full-fixture).
 
 ## Approved output-color-guard envelope
 
@@ -365,9 +317,8 @@ The approved-range evidence uses nanoseconds in run order. Core old/candidate
 comparison used nine alternating-order pairs after discarded warm-ups. The
 native comparison pooled eighteen alternating-order pairs after remeasurement
 of the display-paced wheel scenario. The table retains the complete candidate
-samples that define the active range; the superseded comparison samples and
-adoption narrative are summarized in [`legacy.md`](legacy.md) and preserved in
-Git history.
+samples that define the active range. Superseded comparisons and adoption
+narratives remain in Git history.
 
 | Protected score | Complete accepted samples (ns) | Median |
 |---|---|---:|
@@ -458,3 +409,55 @@ mode, inputs, warm-up, and semantic work. Use order-interleaved samples and
 retain every sample. Any formula, workload, harness, or envelope change needs
 explicit approval; the raw calibration history is not copied back into this
 living contract.
+
+## Reserved InkScript full fixture
+
+This preserves the unimplemented M36 proposal from the former performance plan.
+It is not a current executable gate or permission to resume implementation.
+The full fixture and proposed envelope remain fixed; its old native/catalog-dependent
+bytes and checksum describe the original v27/epoch-24/file-v1/catalog-v1 measurement,
+not current accepted input. Any rebaseline requires an explicit decision with
+reasoning, samples and semantic counters. Do not silently update these values.
+
+The same private pipeline includes static compile, binding, inline asset freeze,
+success, Save failure, cancellation immediately before install linearization, and
+cache-free reopen. Input construction and process startup are untimed. Source ID
+is 913; 4-by-4 input UUIDs begin at `0x1001`, with natural `cell1..cellN` ordering.
+One unique Color binding and one empty-selection assertion precede paired
+`set_plane_properties` names, giving half commits and half no-ops. The inline
+straight-sRGB RGBA8 asset uses xorshift64 seed `0x494e4b5343524950`, shifts 13, 7, 17,
+and little-endian state bytes. Failure and cancellation execute/encode the first
+item, but neither installs output. FNV-1a covers compile/output/state/report/counter
+results; failure reason and remaining counters also have independent assertions.
+
+For steps S, successful items N, asset side A and attempted items R=N+2:
+asset bytes = 4*A*A; binding resolutions = R; statements = (S+1)*R;
+invocations = S*R; commits = no-ops = (S/2)*R; replayed commits = (S/2)*N.
+The catalog has S invocation/work units and dependency edges, with zero output
+IDs, catalog asset bytes or output growth.
+
+| Reserved full field | Original proposed value |
+| --- | --- |
+| Steps / successful items / asset side | 1,024 / 8 / 2,048 |
+| Source bytes / tokens / CST nodes | 22,537,324 / 61,725 / 15,440 |
+| Parameters / bindings / asserts / steps | 0 / 1 / 1 / 1,024 |
+| Dependency edges / catalog invocations / work units | 1,024 / 1,024 / 1,024 |
+| Asset declarations / unique assets | 1 / 1 |
+| Logical / unique / inline-decoded / copied asset bytes | 16,777,216 each |
+| Authorized asset reads | 0 bytes |
+| Input native bytes / runner reads | 49,536 / 61,920 |
+| Attempts / binding resolutions | 10 / 10 |
+| Statements / invocations | 10,250 / 10,240 |
+| Commits / no-ops | 5,120 / 5,120 |
+| Installed / failed / cancelled | 8 / 1 (Save) / 1 (before install) |
+| Installed bytes | 1,127,488 |
+| Cache-free reopens / replayed commits | 8 / 4,096 |
+| Original checksum | `17c636b92b1aebf1` |
+| Proposed full envelope / reference median | 15.3–25.6 s / 20.4550998 s |
+
+The reference environment is the Ryzen/x64 environment of the approved quick
+envelope above. After one unmeasured warm-up, the complete full samples were
+21,118,546,900; 20,455,099,800; 21,988,093,300; 20,432,645,500; 20,310,961,100 ns.
+The proposed 75–125% band, diagnostic lower edge and independent five-process
+upper-edge remeasurement policy remain unchanged. The original compound candidate
+measured 19,976.5163 ms; exploratory one-axis measurements remain in Git history.

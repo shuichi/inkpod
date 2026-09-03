@@ -1,29 +1,15 @@
 # Cross-architecture determinism contract
 
-The current runtime replay contract is procedure format 33, replay epoch 28,
-canonical numeric version 1, and the digest of the closed 75-entry primitive
-catalog. The separate public InkScript catalog/owner manifest is v6 with 73
-commands. Production `.inkpod` is exact-current v33; an optional verified
-checkpoint preserves this contract and never replaces the authoritative journal.
+The current runtime uses procedure format 34, replay epoch 29, canonical numeric
+version 1 and the digest of the closed primitive catalog. The public InkScript
+catalog/owner manifest is v7 with 74 commands. Exact version, schema and retired
+code assignments are defined in [SPEC](../SPEC.md) and [file-format.md](file-format.md).
+An optional verified checkpoint never replaces the authoritative Genesis/assets/journal.
 
-Epoch 27 and format 31 closed the standard image-tree model. Format 32 changes
-only the native Genesis validity rule: a fully opaque imported RGBA MainLine may
-use a SolidWhite underlay, while an import with any non-opaque alpha remains Transparent.
-The primitive catalog and replay results are unchanged. Every layer has
-exactly one MainLine plane, exactly one Color plane, and zero or more Raster
-planes; plane conversion preserves that role and changes only pixel format.
-Current selection, ordered named saved-selection masks, and sparse fill
-protection are document-owned rasters outside the image tree. Layer kinds,
-Selection planes, vanishing-point objects, adjustment layers, and their former
-procedures are absent; retired primitive codes remain rejected tombstones.
-`.inkbatch` v5/operation schema 4 and its private `ApplyBatchOperations/canonical-v3` target Color
-or Raster plane roles without a layer-kind selector. Cut descriptors and instruction export are removed. Format 33/epoch 28 uses DOCM schema 9, document digest schema 13/domain 11 and EditShootingFrame schema 3/semantics 2 with no export-policy field. Every older top-level/replay contract and every Cut descriptor is rejected without migration. Snapshot-composite goldens and numeric semantics are unchanged.
-
-The optional angled shooting frame retains its fixed-point CORDIC geometry and
-independent document ownership. Floating transforms, output-color guard, Color
-chart, Light Table, raster geometry, and the other surviving primitives retain
-their established fixed-point semantics; their historical introduction record
-is kept in [`file-format.md`](file-format.md) and [`legacy.md`](legacy.md).
+The standard image tree, document-owned selection and masks, Canvas-only shooting
+frame and private Batch procedure all use the same canonical execution contract.
+Retired document features and every noncurrent native/replay version are rejected;
+no migration reader or alternative replay executor is available.
 
 ## Canonical numeric authority
 
@@ -68,7 +54,7 @@ The primitive catalog digest covers entries in ascending stable-ID order:
 primitive ID, schema version, length-framed canonical name, BLAKE3 argument-
 schema digest, semantics revision, work-formula ID, and replay-policy byte.
 Tests lock its digest
-together with format version 33 and replay epoch 28. A replay-semantic change that updates
+together with format version 34 and replay epoch 29. A replay-semantic change that updates
 the catalog or any replay golden without advancing both version and epoch therefore
 fails the public contract review rather than silently accepting a new result.
 

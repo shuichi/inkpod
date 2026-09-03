@@ -109,9 +109,8 @@ workspace の pane、zone、tab、preset も `layer-plane`、`right`、`right-ta
 `animation.validatedSidecarCacheMiB` の追加に伴い通常設定を 5 へ更新した。
 `.inkshortcuts` preset は引き続き version 3 である。旧 version は
 移行または decode せず、下記の識別・削除規則に従う。文書の
-`.inkpod` version と replay epoch はこの runtime cache 設定では変わらない。公開 C ABI は
-cache setter と統計 record を v31 で追加し、resident target／全 catalog GPU 準備の固定幅 API を
-v32 で追加した。
+`.inkpod` version と replay epoch はこの runtime cache 設定では変わらない。公開 C ABI の cache setter・統計・resident target・render preparation 契約は
+[ffi.md](ffi.md) に記載する。
 `animation.sequenceThumbnailWidthDip` は 32～96 DIP の整数で、既定値は 64 DIP
 である。Sequence pane の表示倍率と単独 Bottom dock の実測固定高だけに作用し、
 文書、Core thumbnail、cache key、history、保存形式を変更しない。

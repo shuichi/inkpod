@@ -53,6 +53,10 @@ UI/Input スレッド
 
 ## ABI と構造体
 
+Rust 側の公開 record は `#[repr(C)]` と固定幅整数で宣言し、内部 domain model と分離する。
+高頻度入力は bounded batch/span/snapshot 単位で渡し、sample や pixel ごとの FFI 往復にしない。
+確保した側が対応する release API で解放し、panic／C++ exception を ABI 境界で捕捉する。
+
 数値は固定幅 C 型を使う。Rust の `Vec`、`String`、スライス、列挙型のメモリ配置、トレイトオブジェクト、
 参照と、C++ の STL、参照、例外は ABI を越えない。文字列は UTF-8 ポインターとバイト数、配列は
 ポインター、要素数、バイト単位のストライドで表す。
@@ -78,25 +82,29 @@ Core を作らず互換性エラーとして扱う。
 
 現行ライブラリは ABI v34 だけを受理し、`InkpodCoreConfig::abi_version` が完全一致しなければ
 `INKPOD_STATUS_INCOMPATIBLE_ABI` を返す。関数名や型名の `_v3` は、値／ID API 群が導入された世代を
-示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v32 の呼び出し側は、
-現行の v33 ヘッダーへ更新して再ビルドする。
+示す接尾辞であり、ABI v3 の呼び出し側との実行時互換性を意味しない。ABI v1-v33 の呼び出し側は、
+現行の v34 ヘッダーへ更新して再ビルドする。
 
-ABI v29 は、最後に通常保存または exact recovery で表現した runtime-only document／EditorState revision baseline より journal／Redo branch／editor generation が新しい実セル切替を、clean savepoint でも fresh source recovery 必須とする issue-time request flag を追加した。ABI v30 は `INKPOD_IO_REVERT_CURRENT` を追加した。この flag は `INKPOD_IO_OPEN_NATIVE` と `INKPOD_IO_FORCE_RELOAD` の組合せでだけ有効であり、Core apply は発行対象と同じ current native path／document UUID を要求して runtime sequence catalog、全 live view の stable ID／論理 state と次の view ID を保持し、旧 revision の render cache を無効化する。ABI v31 はこれらを保持し、`inkpod_io_manager_set_validated_target_cache_bytes` と validated-target cache の上限／使用量／件数／hit／miss／eviction counter を `InkpodIoCacheInfo` 末尾へ追加した。ABI v32 は完全な inactive sequence target の COW resident transfer、resident fast-path query/switch、全 catalog render preparation、snapshot prepared-source span を追加する。
-ABI v34 は Cut handle／records／functions、Cut 判別・指示画像 export の I/O flags、および shooting-frame の include flag を削除する。通常SequenceとCanvas上の撮影frame編集は保持する。
+実セル切替では、最後に保存・exact recovery で表現した runtime baseline より journal／Redo branch／
+editor generation が新しければ、clean savepoint でも fresh source recovery を要求する。
+`INKPOD_IO_REVERT_CURRENT` は `INKPOD_IO_OPEN_NATIVE` と `INKPOD_IO_FORCE_RELOAD` の組合せでだけ有効。
+発行対象の native path／UUID を検査し、runtime sequence と全 live view の ID／論理 state を保持する。
+検証済み target cache、inactive sequence target の COW resident transfer、render preparation の
+所有権・上限・release は下記の各 API 契約に従う。Cut records と指示画像 export flags は存在しない。
 `InkpodResourceUsage` は 136 bytes、`InkpodIoCacheInfo` は 120 bytes の現行 layout を保持する。
 新規の `InkpodIoSequenceResidentInfo` は 72 bytes、`InkpodSequenceRenderPreparationInfo` は 24 bytes、`InkpodSnapshotSequenceSourceView` は 64 bytes である。旧サイズの構造体を渡してはならない。native v34、document replay epoch 29 と ABI v34 は完全一致が必要である。
 現行 native payload は `DocumentArchive` schema 7、必須 `DOCM` schema 9、document digest schema 13/domain 11、
 snapshot-composite schema 5であり、Batchはgraph v5/operation schema 4、
-InkScriptはcatalog/owner manifest v6の73 commandsである。canonical `revision-max` 式と既存 benchmark の
+InkScriptはcatalog/owner manifest v7の74 commandsである。canonical `revision-max` 式と既存 benchmark の
 workload/envelope は変更しない。Batch v5 multi-target API、共有 I/O manager、path-only job、進捗 polling、
 recovery metadata、非同期 Batch・連番切り替え・保存 API を保持する。既存の `_v3` 値／ID 専用プリミティブ制御 API、永続化 API、InkScript
 source/compiler/fragment APIを保持し、
 sequence source identity、Rust-owned二セルpair preview、その bounded candidate照会、
 読込済みBatch graphのoperation照会とimmutable run-copy作成、角度付き撮影frameのedit／preview／snapshot、saved-selection mask の保存／適用／列挙／改名／削除、standalone Subpalette complete-cache API、
-Batch contact-sheet preview APIも保持する。ABI v14 で
-`InkpodHistoryItem` から表示用UTF-8名を除き、固定幅の `InkpodHistoryEntryKind` を返す。
+Batch contact-sheet preview APIも保持する。
+`InkpodHistoryItem` は表示用UTF-8名ではなく固定幅の `InkpodHistoryEntryKind` を返す。
 Coreは言語や `UiStringId` を保持せず、frontendだけがこの意味種別を表示catalogへ写像する。
-ABI v2 で公開名から実装時のマイルストーン番号を除いたタスク API は、現行 v33 でも引き続き
+タスク API は
 `InkpodTask` / `InkpodTaskInfo` / `INKPOD_TASK_*` / `inkpod_task_*`、共有ラスタ入力は
 `InkpodRasterSourceInput` を使用する。v1 のマイルストーン名は公開別名として残していない。
 
@@ -108,8 +116,8 @@ Rust 所有の正規化済みバイト列へコピーされ、4 MiB 以下なら
 正規アセットの保持は Core 内部で行われ、`_v3` 付き実行時オブジェクト ID と、永続的で内容アドレス方式の
 `AssetId` は別の名前空間に属する。
 
-ABI v18 ではvectorおよびText／Annotationのenum値、record、edit、snapshot、clipboard、diagnostic exportを
-公開境界から削除した。旧enum値、旧primitive ID、旧record size、ABI v17 configは明示的に拒否する。
+vectorおよびText／Annotationのenum値、record、edit、snapshot、clipboard、diagnostic exportは
+公開境界に存在しない。旧enum値、旧primitive ID、旧record size、非現行ABI configは拒否する。
 
 ## 共有ファイル I/O（ABI v34）
 
@@ -384,7 +392,7 @@ open-session set、scopeへ束縛されたone-shot tokenである。RunTask crea
 ある間のadvanceは`INKPOD_STATUS_QUEUE_FULL`を返す。query／cancelはreleaseと外部同期すれば任意threadからatomically呼べるが、
 advance／event take／owner transfer／releaseは作成Coreのowner threadとgenerationへ固定される。
 
-run itemはstaged Coreでdecode／cache-free replay／canonical execution／current-v32 encodeを完了し、temporary fileをwrite／
+run itemはstaged Coreでdecode／cache-free replay／canonical execution／current-version encodeを完了し、temporary fileをwrite／
 flush／closeしてidentityを再検証した後だけatomic installする。cancel、stale plan／confirmation／authority／session／input／
 destination、resource、encode、save、install failureは進行中itemをinstallせず、入力Coreのdocument/editor revision、history、
 dirty／savepoint、asset、ID high-watermarkを変更しない。既に完了した別itemはrun policyに従ってreportへ残る。
@@ -442,7 +450,7 @@ releaseは外部同期する。
 コピーされる。NULL、短いレコード、パニックでは通常の ABI ステータス契約に従い、出力を部分更新しない。
 スレッド違反が成立するのは Core 所有スレッド専用のリプレイ契約照会だけであり、スナップショットの
 ダイジェスト照会は、外部同期された任意の読み取りスレッドから呼び出せる。これらは検証値を公開するだけで、
-製品の保存／オープン API は同じ v32 のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
+製品の保存／オープン API は現行のリプレイ／カタログ契約を使い、現行でないネイティブ形式の
 バージョンをすべて拒否する。
 
 現行 ABI v34 は、Core 所有スレッド専用の永続化操作を三つ提供する。`inkpod_core_get_persistence_info` は、
@@ -454,7 +462,7 @@ releaseは外部同期する。
 ジャーナルの正確なダイジェストを返す。UI は履歴件数を表示して確認を得た後、そのレコードを変更せずに
 `inkpod_core_write_compacted_copy` へ渡す。書き込み時に確認トークンが古ければ `INVALID_STATE`、
 トークンのフラグまたは予約領域が 0 でなければ `UNSUPPORTED` になる。成功時は、現在状態を新しい Genesis
-とする別の v32 ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
+とする別の現行形式ファイルを書き出すが、作業中のパス、リビジョン、未保存状態、保存点、ID、履歴は変更しない。
 `CoreHost` は三つの操作すべてを Core エンジンキュー経由で実行する。自動的な履歴圧縮は行わず、`CKPT` は
 履歴やアセット保持の正本ではない。Windows では `ファイル > 履歴を破棄してコピー...` として公開し、
 最初に失われるイベント数とプロシージャ数を表示する。出力先には開いているセッションが所有しないパスだけを
@@ -1374,10 +1382,10 @@ Core はセッションを無効化するため、フロントエンドはスト
 | ストローク終了、プレビュー適用、浮動状態の確定                 | 実変更時に 1 回進む  | 未保存                            | 高々 1 単位                       |
 | 直接の文書編集                                                | 実変更時に 1 回進む  | 未保存                            | 原則 1 単位                       |
 | Undo／Redo／履歴位置の移動                                    | 結果状態へ進む       | 保存点との位置で再計算            | カーソルを移動し項目は増やさない  |
-| 現行 v32 の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
+| 現行形式の通常保存                                           | 不変                 | 置換成功時に文書／EditorState とも保存済み | 不変                    |
 | 自動保存                                                      | 不変                 | 不変                              | 不変                              |
 | 新規作成／インポート                                          | 新しい文書情報が正本 | 戻り情報が正本                    | 新しい Genesis／履歴              |
-| v32 のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
+| 現行形式のオープン／復旧                                          | 実行時リビジョンを付け直す | 戻り情報が正本               | ファイルの全ジャーナル／履歴を復元 |
 
 意味上の変更がない場合の厳密な出力やリビジョンは、各関数の Doxygen 契約に従う。フロントエンドはファイル時刻ではなく、
 Core が返す文書フラグと保存点に基づいて未保存状態を表示する。
@@ -1527,7 +1535,7 @@ document、EditorState、canonical procedure、`.inkpod` section のいずれに
 
 ## 保存、自動保存、復旧
 
-通常保存では、v32 の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
+通常保存では、現行形式の必須セクション `META` / `GENS` / `ASST` / `PROC` / `EDIT`、保持対象の不透明な任意
 セクション、チェックポイントの作成条件を満たす場合だけ任意の `CKPT` を構築する。保存後に設定予定の
 文書／EditorState 保存点を含むコンテナは、同じディレクトリの一時ファイルへ複数回に分けて書き込む。
 フラッシュ、同期、クローズを終えてから置換する。成功後だけ通常保存パスと両保存点を Core へ公開するため、
@@ -1536,7 +1544,7 @@ EditorState だけが
 どちらの保存点も変更しない。
 
 自動保存とエクスポートは、出力を原子的に書いても通常保存パス、文書／EditorState 保存点、未保存状態を
-変えない。通常の v32 オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
+変えない。通常の現行形式オープンでは、Genesis、アセット、プロシージャジャーナル、カーソル／分岐、すべての
 ID 発行状態、EditorState、両保存点を、段階的に構築した Core で検証・復元してから、現在の Core 状態を
 一回だけ置換する。`InkpodCore` の `_v3` 付きオブジェクトレジストリの世代自体は、オープンで更新されない。
 

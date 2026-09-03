@@ -1,5 +1,5 @@
 //! Public-API audit regressions and the subsequently approved line-edit contract.
-//! The 2026-09-03 audit remains in docs/line-selection-audit.md. Its five genuine
+//! The original 2026-09-03 audit is retained in Git history. Its five genuine
 //! failures retain their assertions; old 4-neighbor/rejection/leak observations
 //! are replaced by the explicitly approved new contracts, never ignored.
 

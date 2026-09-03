@@ -1,8 +1,8 @@
 # inkpod 機能・挙動仕様
 
-この文書は、inkpod が維持する利用者向け機能、挙動契約、互換性の境界、要件 ID、すなわち「何を作るか」を定める恒久仕様である。技術境界、品質基準、作業規律、完了済み工程の進捗、過去の検証ログ、作業再開用プロンプトは含めない。
+この文書は、inkpod が維持する利用者向け機能、データ・状態・性能の不変条件、互換性の境界、要件 ID を定める恒久仕様である。個別の実装・検証手順、作業規律、完了済み工程の進捗、過去の検証ログ、作業再開用プロンプトは含めない。
 
-開発作業では、リポジトリ直下の `AGENTS.md` を作業規律と品質基準、本文書を機能と挙動の正本、`docs/architecture.md` を現在の構造、`docs/compatibility.md` を要件ごとの対応状況、`docs/implementation-status.md` を現在状態・既知差分・直近検証の要約として扱う。
+開発作業では、リポジトリ直下の `AGENTS.md` を作業規律と品質基準、本文書を機能と挙動の正本、`docs/architecture.md` を現在の構造、`docs/compatibility.md` を要件ごとの現在状態・既知差分・代表検証の正本として扱う。
 
 ## 目的
 
@@ -18,7 +18,7 @@ inkpod は次の構成を維持する。
 旧 PaintMan の外見やアイコンを複製することは目的ではありません。次の利用者価値を再現することが目的です。
 
 1. 主線を保護したまま彩色できる
-2. 2 値、階調、ベクターの彩色データをレイヤー/プレーンとして扱える
+2. 2 値、階調、RGBA 8/16 bit の彩色データをレイヤー/プレーンとして扱える
 3. 小さな線切れや色トレースを考慮して、高速かつ安全にフィルできる
 4. 基準フレームで異なる用紙サイズを整列し、前後セルをライトテーブル表示できる
 5. 選択、レイヤー、履歴、変形、フィルタ、調整を非破壊または Undo 可能に扱える
@@ -577,10 +577,10 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 
 ### 20. 形式、白透過、一般画像入出力
 
-- exact-current 契約は `.inkpod` top-level format v34、runtime replay epoch 29、C ABI v34、`DocumentArchive` schema 7、必須 `DOCM` schema 9、`DocumentStateDigest` schema 13/domain 11、snapshot-composite schema 5、`.inkbatch` v5／operation schema 4、InkScript registry schema／language／file v2、74-command production catalog／owner manifest v7 とする。native v33以前、epoch 28以前、`.inkbatch` v4以前、catalog／owner manifest v6以前、および廃止した Cut descriptor・指示画像書き出しの契約は migration や shim を設けず拒否する。旧ABIの呼び出し元は現行headerでの再buildを必須とする。ABI v33 は Cut handle／records／functions、Cut 判別と指示画像の I/O flags、撮影 frame の指示 export flag を削除する。frame の入力・永続化・canonical procedure から指示 export flag を除去するため、`EditShootingFrame` schema は3、semantics revisionは2へ進める。通常Sequence、pair authority、resident bank、render preparationは引き続きruntime-onlyとする。今回の更新は native format freeze 宣言ではない。 ABI v34は線補正request・task APIと2種類のraster line toolを追加する。`ApplyLineCorrection` schema 2／semantics 1、`ApplyDustRemoval` schema 3／semantics 3、`ApplySelection` semantics 4とし、背景判定・成分全体判定・inclusive gap・探索前仮想境界・線幅modeをcanonical replayへ固定する。
+- exact-current 契約は `.inkpod` top-level format v34、runtime replay epoch 29、C ABI v34、`DocumentArchive` schema 7、必須 `DOCM` schema 9、`DocumentStateDigest` schema 13/domain 11、snapshot-composite schema 5、`.inkbatch` v5／operation schema 4、InkScript registry schema／language／file v2、74-command production catalog／owner manifest v7 とする。native v33以前、epoch 28以前、`.inkbatch` v4以前、catalog／owner manifest v6以前、および廃止した Cut descriptor・指示画像書き出しの契約は migration や shim を設けず拒否する。旧ABIの呼び出し元は現行headerでの再buildを必須とする。Cut handle／records／functions、Cut 判別と指示画像の I/O flags、撮影 frame の指示 export flag は存在しない。`EditShootingFrame` schema は3、semantics revisionは2とし、入力・永続化・canonical procedure に指示 export flag を含めない。通常Sequence、pair authority、resident bank、render preparationは引き続きruntime-onlyとする。native format は未フリーズとする。線補正request・task APIと2種類のraster line toolを提供する。`ApplyLineCorrection` schema 2／semantics 1、`ApplyDustRemoval` schema 3／semantics 3、`ApplySelection` semantics 4とし、背景判定・成分全体判定・inclusive gap・探索前仮想境界・線幅modeをcanonical replayへ固定する。
 - native `.inkpod` は、保存時点の可変 raster snapshot を意味上の正本にしない。正本は immutable な `Genesis`、content-addressed な `Assets`、Core が検証・正規化して実変更を確定した `Procedures` と history control event、history の現在位置と high-watermark を持つ `META`、文書単位の `EditorState` とする。materialized document、inverse delta、COW snapshot、render/checkpoint cache は派生物であり、これらだけで文書を成立させない。
 - frontend request は target/revision/ID と上限を検証し、座標、色、option、可変長入力、transaction 内の output ID を正規化してから一つの `CanonicalProcedure` として確定する。procedure は monotonic ID、primitive ID/schema、replay epoch、base/committed `StateId`、固定幅引数、stable input/output ID、immutable `AssetId` または bounded inline payload、pre/post document-state digest を持ち、raw pointer、外部 path、native enum layout、frontend command ID、一時 object ID を含めない。
-- `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。
+- `Genesis` は document UUID、paper、DPI、sRGB、frame、margin、初期 stable-ID topology、immutable base surface を完全記述する。UUID とは別に stable `DocumentId` と distinct な `CellId` を同じ document の ID namespace に保持する。白紙の base surface は全面 tile を割り当てない opaque white の `SolidWhite` underlay とし、flat canonical composite/export には参加するが、個別 layer/plane export や selection mask へ暗黙に混入させない。
 - import、clipboard、Light Table 等の外部入力は ingestion 時に Rust が canonical pixel payload へ変換し、immutable `AssetId` を発行する。procedure は外部 path、codec の再実行、caller buffer の lifetime を参照しない。元 encoded bytes や provenance は replay に影響しない任意 metadata としてのみ保持できる。
 - 編集用 raster open の「無損失」は、supported codec が decode した canonical pixel payload の寸法、native 8/16-bit depth、straight alpha と全 channel 値を変更せず immutable Genesis source asset として保持し、`.inkpod` の `GENS`／`ASST` から cache-free replayできることを意味する。元 container の圧縮、packet/chunk、palette 表現、任意 metadata、provenance、file 名/path、encoded byte 列の byte-for-byte 保存または再生成は意味しない。これらを保持する場合も replay に影響しない任意 metadata とする。
 - 永続 journal は閉じた型 `Commit`、`HistoryMove`、`BranchCut` だけを持つ。実変更を確定した document transaction、実際に移動した Undo/Redo/history jump、history cursor が active branch の tail 以外にある状態からの新規 commit による branch cut だけを順序どおり記録し、query、invalid、failure、cancel、stale、overflow、no-op、stroke/preview の途中更新は記録しない。stroke end、preview apply、floating commit は成功時にそれぞれ一つの canonical procedure とする。
@@ -608,6 +608,18 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 - 本文書が数値や内部表現を一意に定めない場合は、安全性、頑健性、効率、決定性を優先したnative仕様を定義し、式、rounding、fixture、testを記録する。
 - 永続化schemaに影響する決定は、前節のフォーマットフリーズ前version規則に従う。
 
+## データと実行の不変条件
+
+- raster の寸法・stride・index は固定幅整数で overflow と境界を検査する。Binary、Grayscale、RGBA 8/16 bit、selection mask は型付き `PixelFormat` で区別し、straight alpha と premultiplied display data を混同しない。sRGB の元 channel 値を表示変換で失わない。
+- stable ID、document/view/render/preview revision、history state は意味ごとの newtype とし、所属 namespace、zero、lifetime、increment/overflow を型ごとに定義する。raw 固定幅整数との変換は公開 Rust/C ABI/file DTO の境界へ集約し、内部で別種の ID を暗黙変換しない。C ABI layout を Rust newtype の表現へ依存させない。
+- document、view logical、device 座標と point/size/rect/offset/zoom を意味ごとの型で区別する。変換、flip、rounding、half-open pixel boundary を一か所に集約し、非有限値、極端な zoom/pan、最後の valid pixel と範囲外を検証する。Core の Canvas 変換へ OS DPI を適用しない。
+- 全 production document mutation は型付き request を一つの Rust primitive へ正規化し、live commit、Undo/Redo、replay で同じ executor を使う。可変長入力は bounded data-plane から Rust 所有へ取り込み、確定時に immutable asset または bounded inline payload とする。
+- 同期 edit の transaction は開始時 document/base revision、作業状態、commit revision を保持し、作業状態だけを変更する。stale base と overflow を検査した一回の明示 commit で、document、`StateId`、revision、history、journal、dirty、persistent ID high-watermark、cache invalidation を同時公開する。`Drop` では commit せず、長寿命 preview/stroke/floating selection は固有の staging owner を持つ。
+- fill は再帰を使わず scanline または bounded queue で selection、tile boundary、訪問数を検査する。color distance、alpha、rounding は固定し、gap close は仮想境界または別 transaction、overflow abort は all-or-nothing とする。
+- Rust は immutable render snapshot を生成し、raster tile、overlay、revision、dirty rect、cache invalidation を渡す。Core の可変参照や GPU resource を露出せず、renderer は snapshot の release まで独立して読み取れる。
+- decoder は allocation、展開後 size、寸法・個数・文字列長を制限し、path traversal、圧縮爆弾相当、重複 ID、循環参照、不正 UTF、checksum 不一致を拒否する。未知の必須 feature は拒否し、許された任意 metadata は可能な範囲で round-trip する。
+- 保存は同一 volume の temporary file を完成・flush・close してから置換し、元 file を先に truncate しない。native/raster pair の回復・公開境界と同時に通常 savepoint を確定する。詳細な bytes と回復手順は `docs/file-format.md` に従う。
+
 ## 横断的な状態遷移契約
 
 - 同じ初期状態と入力列は、thread 数、tile 順、hash iteration 順にかかわらず同じ result class と意味上の結果を返す。
@@ -634,7 +646,7 @@ UI／ABIを production contract とする。M23で批准済みcatalogを使うRu
 ## 仕様と追跡
 
 - 本文書を機能、利用者向け挙動、要件 ID の正本とし、`AGENTS.md` を作業規律、技術境界、品質基準の正本とする。
-- 実装済み範囲、test、既知差分は `docs/compatibility.md`、現在状態と直近の代表的検証は `docs/implementation-status.md`、現在の所有権・thread・data flow は `docs/architecture.md` で管理する。
+- 実装済み範囲、test、既知差分、代表検証は `docs/compatibility.md` に一本化する。所有権・thread・data flow は `docs/architecture.md`、検証手順は `docs/verification.md` に置き、専門資料の入口を `docs/README.md` とする。
 - 完了工程や過去の検証ログは Git 履歴を参照し、恒久仕様へ時系列記録を追加しない。
 - 仕様と既存 test だけでは安全に決められない製品挙動は、実装前に選択肢と影響を示してユーザー判断を求める。
 
