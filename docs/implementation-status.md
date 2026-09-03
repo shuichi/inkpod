@@ -123,6 +123,26 @@ its compact historical record is retained in [`legacy.md`](legacy.md).
 
 ## Latest representative verification
 
+### Current release: 0.3.1 (`PKG-001`, 2026-09-03)
+
+GitHub prerelease `v0.3.1` points to `41c0367be2b5bad34e4371e537041a5fcdad6abd`.
+The published portable ZIPs were clean-built with `windows-x64-release`
+(application version `0.3.1.141`) and `windows-arm-release` (`0.3.1.142`). Both
+architectures pass static-CRT/dependency, embedded-version, four-file ZIP and
+unsigned-MSIX payload validation; the extracted x64 portable startup also passes.
+The complete native x64 CTest suite passes 49/49 in 109.67 seconds, including
+RendererHost (7.46 seconds), sequence performance (6.07 seconds), and English/
+Japanese product smoke (39.86/42.24 seconds).
+
+Before the application-version-only commit, the same production sources at
+`9177334` passed `cargo fmt --check`, workspace/all-target/all-feature Clippy with
+warnings denied, all 801 workspace tests (one existing Release-only test ignored),
+the unchanged Core quick benchmark, and Core rustdoc with warnings denied.
+Local logs are under `build/release-validation-0.3.1/`. ARM64 native execution,
+the optional administrator MSIX install/uninstall test, and the physical
+accessibility/DPI/IME interaction rows were not repeated for this release.
+The existing feature gaps and performance acceptance limits below remain.
+
 ### Native client colors and visible-test revalidation (`WIN-001`, `PERF-001`, 2026-09-03)
 
 The experimental partial client-area dark mode was withdrawn on user request.
