@@ -769,12 +769,12 @@
   <section class="hero" id="top" aria-labelledby="page-title">
     <p class="eyebrow">Native document container / current contract</p>
     <h1 id="page-title"><span class="dot">.</span>inkpod<br>ファイルフォーマット</h1>
-    <p class="lead">現在の文書を保存するだけでなく、その文書を成立させた初期状態・不変アセット・確定操作・履歴分岐・編集状態までを、検証可能な形で保持するネイティブ形式です。</p>
+    <p class="lead">編集結果の画素だけでなく、元の文書、確定した編集操作、履歴分岐、編集状態を保持し、ファイルを開く際に操作を再適用して文書を再構築するネイティブ形式です。</p>
 
     <div class="hero-grid">
       <div class="verdict">
-        <strong>形式上の性質：非破壊的な手続き正本</strong>
-        <p>現行状態の可変ラスターだけを正本にせず、再構築に必要な意味データと履歴を保存します。通常保存・読込はともに、失敗やキャンセルで既存ファイルや使用中の文書を途中状態へ置き換えません。</p>
+        <strong>形式上の性質：操作履歴ベースの非破壊編集</strong>
+        <p>元の文書と確定した編集操作を保存し、それらを再適用して現在の状態を再構築します。Windowsの通常保存はこのネイティブ文書と同じstemのラスター相手を一つの論理ペアとして扱い、失敗やキャンセルで途中状態を保存成功として公開しません。</p>
       </div>
       <dl class="spec-strip">
         <div><dt>FORMAT</dt><dd>v34</dd></div>
@@ -791,7 +791,7 @@
     <aside class="sidebar" aria-label="目次">
       <p class="sidebar-title">CONTENTS</p>
       <nav>
-        <a href="#principle"><span>01</span>設計原則</a>
+        <a href="#principle"><span>01</span>編集モデル</a>
         <a href="#sections"><span>02</span>セクション</a>
         <a href="#reconstruction"><span>03</span>復元手順</a>
         <a href="#history"><span>04</span>履歴モデル</a>
@@ -809,11 +809,12 @@
 
     <main id="main">
       <section class="doc-section" id="principle">
-        <span class="section-kicker">01 / PRINCIPLE</span>
-        <h2>手続き正本モデル</h2>
-        <p class="intro">`.inkpod` は procedure-authoritative（手続き正本）です。編集後の画素配列だけでなく、文書の起点と確定した操作列を保存し、読込時に同じ規則で文書を再構築します。</p>
+        <span class="section-kicker">01 / EDITING MODEL</span>
+        <h2>操作履歴ベースの非破壊編集モデル</h2>
+        <p class="intro"><code>.inkpod</code> は、<strong>operation-based non-destructive editing model（操作履歴ベースの非破壊編集モデル）</strong> を採用しています。編集結果の画素データだけを保存するのではなく、元の文書と確定した編集操作を保存し、ファイルを開く際にそれらを再適用して文書の状態を再構築します。これにより、元データを保持したまま編集内容を再現できます。</p>
+        <p>現行の <code>DocumentStateDigest</code> はschema 13／domain 11、canonical snapshot-compositeはschema 5です。</p>
 
-        <div class="authority-map" role="img" aria-label="GENS、ASST、PROC、META、EDITを検証して文書と履歴を復元し、CKPTは任意の高速化にだけ使う構造">
+        <div class="authority-map" role="img" aria-label="元の文書を表すGENSとASST、確定した編集操作を表すPROC、履歴と編集状態を表すMETAとEDITから文書を再構築し、CKPTは任意の高速化にだけ使う構造">
           <div class="section-stack">
             <div class="data-node"><span class="fourcc">GENS</span><small>不変の初期文書とベース面</small></div>
             <div class="data-node"><span class="fourcc">ASST</span><small>内容で識別される不変データ</small></div>
@@ -837,7 +838,7 @@
 
         <div class="callout warning">
           <strong>「非破壊」の定義と範囲</strong>
-          <p>非破壊とは、文書の意味状態、保持対象の履歴、編集再開状態、既存保存先、使用中のCore状態を、保存・読込の失敗途中で変更しない性質を指します。旧versionの読込互換性や、表示専用cache・window配置の永続化はこの定義に含みません。</p>
+          <p>非破壊とは、元の文書を現在の画素だけで置き換えず、確定した編集操作を独立した履歴として保持し、再適用によって編集内容を再現できることを指します。保存・読込の途中で失敗しても、既存保存先や使用中のCore状態を部分変更しないこともこの境界に含みます。旧versionの読込互換性や、表示専用cache・window配置の永続化は含みません。</p>
         </div>
       </section>
 
@@ -884,7 +885,7 @@
         </div>
 
         <div class="callout">
-          <strong>CKPT は正本ではありません</strong>
+          <strong>CKPT は復元を速めるためのキャッシュです</strong>
           <p>epoch・journal prefix・state・policy counter がすべて一致したときだけ使われます。意味上の不一致は全 replay へフォールバックし、壊れた framing・範囲・hash はファイル全体の拒否になります。</p>
         </div>
       </section>
@@ -1451,34 +1452,49 @@
 
       <section class="doc-section" id="atomicity">
         <span class="section-kicker">09 / ATOMICITY</span>
-        <h2>Atomic saveとstaged open</h2>
-        <p class="intro">非破壊性は container の中身だけでなく、I/O の commit 境界にも適用されます。</p>
+        <h2>Pair saveとstaged open</h2>
+        <p class="intro">低水準のnative writerは一つの `.inkpod` をatomic replacementします。Windowsの通常Save／Save Asは、そのnative文書と同じstemのPNG／TIFF／TGA／BMPを一つの論理pair transactionとして保存します。</p>
+
+        <div class="callout">
+          <strong>同じstemの相手を検証してから開く</strong>
+          <p>ラスターを開くと同じdirectoryの `.inkpod` 候補を探索し、存在すればv34をstaged replayしたうえで、寸法、native depth、straight alpha、全pixel、表現可能なDPI、記録されたラスター形式を比較します。一致すれば<code>Committed</code>、nativeがなければcleanなGenesisと<code>Planned</code>を作ります。不正・旧版・不一致は新規文書へ無言でfallbackしません。nativeを直接開いてラスター相手が欠けている場合はrepair-neededな<code>Committed</code>として開き、次の保存で相手を再生成できます。</p>
+        </div>
+
+        <div class="callout warning">
+          <strong>通常ラスターは表示補助を含めず、精度を黙って落としません</strong>
+          <p>通常companionは文書の合成画像であり、Light Table、guide、selection overlayを含みません。新規Cellの既定はPNGで、環境設定のPNG／TIFF／TGA／BMPは以後の新規Cellだけに適用されます。RGBA16の通常companionはPNG／TIFFに限り、TGA／BMPを選んだ16-bit pairは事前にprecision errorとして拒否します。</p>
+        </div>
 
         <div class="compare">
           <article class="compare-panel good">
-            <h3>通常保存</h3>
+            <h3>通常のpair保存</h3>
             <ol class="clean-list">
-              <li>section layout と digest を先に確定</li>
-              <li>同じ directory に排他的 temporary file を作成</li>
-              <li>1 MiB ごとに cancellation を確認しながら stream 書込</li>
-              <li>flush → <code>sync_all</code> → close</li>
-              <li>同一 volume で destination を replace</li>
-              <li>成功後にだけ path と document/editor savepoint を公開</li>
+              <li>一つのimmutable snapshotからnative section／digestと通常compositeを確定</li>
+              <li>両出力を同じdirectoryの排他的temporary fileへ書き、flush → sync → close</li>
+              <li>両destinationのidentity、stamp、同stem alias、上書き条件を再検査</li>
+              <li>checksummed pair journal v2とbackupを用意し、native、rasterの順で設置</li>
+              <li>両replacement proofと最終alias scan後にcommitted markerを公開</li>
+              <li>成功後にだけ<code>Committed</code> authority、path、document/editor savepointを公開</li>
             </ol>
           </article>
           <article class="compare-panel neutral">
             <h3>失敗・キャンセル</h3>
             <ul class="clean-list">
-              <li>既存 destination を変更しない</li>
-              <li>この保存用の temporary file だけを除去</li>
-              <li>path と savepoint を進めない</li>
-              <li>Core の文書・revision・dirty・history を変更しない</li>
+              <li>installation前なら既存の両destinationを変更しない</li>
+              <li>installation中の失敗はjournalとbackupから両memberの復元を試みる</li>
+              <li>解消できないexternal conflictやcleanupは成功扱いせず復旧証拠を保持</li>
+              <li>authority、path、savepoint、Coreのrevision／dirty／historyを進めない</li>
             </ul>
           </article>
         </div>
 
-        <h3>recovery の分離</h3>
-        <p>recovery save も同じ atomic replacement を使いますが、通常 savepoint や通常 path を更新しません。recovery open は dirty・pathless として開くため、その後の通常保存が元ファイルを暗黙に上書きすることはありません。</p>
+        <div class="callout warning">
+          <strong>二つのdirectory entryを同時には置換できません</strong>
+          <p>filesystem-levelで二ファイルを一命令でatomic replaceする保証はありません。inkpodはdurable journal、backup、ordered lock、各段階のidentity再検査で中間状態を復旧可能にし、片方だけの完了を利用者へ成功として公開しません。</p>
+        </div>
+
+        <h3>recovery／export／Batch の分離</h3>
+        <p>autosave、recovery、明示compaction、Batchのnative出力はnative一ファイルの既存目的を保ち、通常pairを暗黙に作りません。recovery saveは通常savepointや通常pathを更新せず、standalone recovery openはdirty・pathlessです。単独ラスターは明示Exportであり、Save Asの保存先にはなりません。</p>
       </section>
 
       <section class="doc-section" id="scope">
@@ -1508,6 +1524,7 @@
               <li>zoom、pan、view flip、monitor、OS DPI、antialiasing</li>
               <li>session-localな<code>DocumentRevision</code>（open時に1へrebase）</li>
               <li>外部sourceのpath、ファイル名、timestamp、encoded codec bytes</li>
+              <li>runtimeの<code>Planned</code>／<code>Committed</code>／<code>None</code> authority、pair path、filesystem identity／stamp</li>
               <li>source UUID/revision/DPIなどreplayに不要なprovenance</li>
             </ul>
           </article>
@@ -1591,7 +1608,8 @@
           <div class="check-item"><span class="check-mark">✓</span><div><strong>履歴 authority の round-trip</strong><p>journal record、cursor、active/non-active branch、Undo/Redo、両 savepoint、すべての next-ID authority が一致すること。</p></div></div>
           <div class="check-item"><span class="check-mark">✓</span><div><strong>checkpoint 非依存</strong><p>CKPT あり、CKPT 削除、意味上の mismatch から full replay の三経路が同じ結果になること。壊れた CKPT は拒否されること。</p></div></div>
           <div class="check-item"><span class="check-mark">✓</span><div><strong>非アクティブ branch の asset 保持</strong><p>現在状態から見えない branch／redo tail の asset も再オープン後に replay できること。</p></div></div>
-          <div class="check-item"><span class="check-mark">✓</span><div><strong>atomic save</strong><p>encode、write、flush、cancel、replace の失敗時に既存 bytes、path、savepoint、dirty、history が変化しないこと。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>native atomic save</strong><p>一ファイルnative writerのencode、write、flush、cancel、replace失敗時に既存bytes、path、savepoint、dirty、historyが変化しないこと。</p></div></div>
+          <div class="check-item"><span class="check-mark">✓</span><div><strong>normal pair save／reopen</strong><p>nativeと通常raster compositeの両方が完成した場合だけsavepointとauthorityを公開し、resolver reopen、Revert／Redo、Genesis、journal、inactive-branch asset、companion pixelが一致すること。</p></div></div>
           <div class="check-item"><span class="check-mark">✓</span><div><strong>staged open</strong><p>破損・過大・旧版ファイルの open 失敗後も、使用中の Core 文書と通常ファイルが完全に不変であること。</p></div></div>
           <div class="check-item"><span class="check-mark">✓</span><div><strong>opaque extension の round-trip</strong><p>未知の optional/opaque-preserve section が Core 経由の再保存後も同一 payload を保つこと。</p></div></div>
           <div class="check-item"><span class="check-mark">✓</span><div><strong>compaction の隔離</strong><p>stale token を拒否し、成功時も別 copy だけが新 Genesis となり、live authority を変更しないこと。</p></div></div>
@@ -1618,7 +1636,7 @@
   </div>
 
   <footer>
-    <p>対象契約: <span class="mono">.inkpod v34 / runtime replay epoch 29 / archive 7 / DOCM 9</span> — 本文は現在の形式だけを説明します。</p>
+    <p>対象契約: <span class="mono">.inkpod v34 / runtime replay epoch 29 / archive 7 / DOCM 9</span> — 2026-09-04現在。本文は現在の形式だけを説明します。</p>
   </footer>
 
   <script>

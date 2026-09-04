@@ -528,7 +528,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         </a>
         <a class="btn ghost" href="#features"><span data-i18n="hero.cta2">機能を見る</span></a>
       </div>
-      <p class="note" data-i18n="hero.note">ポータブル ZIP · インストール不要 · 追加ランタイム不要</p>
+      <p class="note" data-i18n="hero.note">ポータブル ZIP · 日本語／英語 UI · 追加ランタイム不要</p>
 
       <div class="hero-visual reveal">
         <div class="app-window">
@@ -620,7 +620,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
         <div class="card reveal" data-d="60">
           <div class="ico c-red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg></div>
           <h3 data-i18n="grid.6.t">バッチ処理</h3>
-          <p data-i18n="grid.6.d">色置換、連続フィル、線幅修正などを多量の連番セルへ一括適用。dry-run と原子的な出力で安全に。</p>
+          <p data-i18n="grid.6.d">色置換、彩色プレーンへ送る、マスキング、消去を連番セルへ一括適用。実行前検証と一件ごとの原子的な出力で安全に。</p>
         </div>
         <div class="card reveal" data-d="120">
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg></div>
@@ -797,8 +797,8 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <div class="ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg></div>
           <div>
             <h3 data-i18n="tech.3.t">完成した絵だけでなく、そこへ至る過程も残す</h3>
-            <p data-i18n="tech.3.d">.inkpod ファイルには、画像だけでなく、編集の過程を再現するための履歴もジャーナルとして保存されます。過去の作業やテクニックを振り返りながら、新しい表現へ発展させることができます。Undo／Redo は実用上ほぼ無制限。ファイルを開き直したあとも、以前の編集地点まで戻ったり、やり直したりできます。</p>
-            <span class="tech-chip">.inkpod journal · persistent Undo / Redo</span>
+            <p data-i18n="tech.3.d">通常保存は、編集履歴を保つ .inkpod と同じstemのPNG／TIFF／TGA／BMPを一組で管理します。.inkpod のジャーナルはファイルを開き直したあともUndo／Redoと分岐履歴を復元し、ラスター相手は一般ツールで確認できる合成画像を保ちます。</p>
+            <span class="tech-chip">native + raster pair · persistent Undo / Redo</span>
           </div>
         </div>
         <div class="card reveal" data-d="240">
@@ -820,7 +820,7 @@ footer{border-top:1px solid var(--border);padding:44px 0 56px;margin-top:40px}
           <span class="fmt">TGA</span>
           <span class="fmt">BMP</span>
         </div>
-        <div class="fn" data-i18n="formats.note">8/16 bit、アルファチャンネル、DPI メタデータに対応</div>
+        <div class="fn" data-i18n="formats.note">.inkpod v34 / replay epoch 29 · 8/16 bit、アルファ、DPIに対応</div>
       </div>
     </div>
   </section>
@@ -902,7 +902,7 @@ const I18N = {
     "hero.sub": "inkpod は、アニメーション彩色のための非破壊ラスター・ペイントエンジン。GPU アクセラレーション対応の Rust Core を、Windows 11 ネイティブアプリとして。",
     "hero.cta1": "ダウンロード",
     "hero.cta2": "機能を見る",
-    "hero.note": "ポータブル ZIP · インストール不要 · 追加ランタイム不要",
+    "hero.note": "ポータブル ZIP · 日本語／英語 UI · 追加ランタイム不要",
     "hero.win.title": "inkpod — 無題セル 1*",
     "ph.screenshot": "スクリーンショット（準備中）",
     "stats.1.v": "8 / 16 bit",
@@ -933,7 +933,7 @@ const I18N = {
     "grid.5.t": "フィルター",
     "grid.5.d": "色調カーブ、レベル補正、色相・彩度、カラーバランス。プレビュー後に一回のUndo単位として適用。",
     "grid.6.t": "バッチ処理",
-    "grid.6.d": "色置換、連続フィル、フィルターなどを多量の連番セルへ一括適用。dry-run と原子的な出力で安全に。",
+    "grid.6.d": "色置換、彩色プレーンへ送る、マスキング、消去を連番セルへ一括適用。実行前検証と一件ごとの原子的な出力で安全に。",
     "grid.7.t": "履歴 &amp; 復元",
     "grid.7.d": "元に戻す／やり直し、複数段階ジャンプ、自動保存とクラッシュ復元。分岐した履歴も失われません。",
     "grid.8.t": "カラーチャート",
@@ -973,11 +973,11 @@ const I18N = {
     "tech.2.t": "ゼロからつくったから、驚くほど速い",
     "tech.2.d": "inkpod は、現代の 64 ビット OS が持つ性能を最大限に引き出すため、彩色アプリとしてゼロから設計・開発されています。Windows 版では Win32、Direct3D 11、Direct2D という、長年にわたり維持されてきた OS 標準技術を採用。将来の macOS 版でも、Apple 公式の SwiftUI を中心としたネイティブ技術を使用する予定です。",
     "tech.3.t": "完成した絵だけでなく、そこへ至る過程も残す",
-    "tech.3.d": ".inkpod ファイルには、画像だけでなく、編集の過程を再現するための履歴もジャーナルとして保存されます。過去の作業やテクニックを振り返りながら、新しい表現へ発展させることができます。Undo／Redo は実用上ほぼ無制限。ファイルを開き直したあとも、以前の編集地点まで戻ったり、やり直したりできます。",
+    "tech.3.d": "通常保存は、編集履歴を保つ .inkpod と同じstemのPNG／TIFF／TGA／BMPを一組で管理します。.inkpod のジャーナルはファイルを開き直したあともUndo／Redoと分岐履歴を復元し、ラスター相手は一般ツールで確認できる合成画像を保ちます。",
     "tech.4.t": "スパースタイル &amp; キャッシュ",
     "tech.4.d": "大画像はタイル単位で遅延割当・copy-on-write。変更されたタイルだけを再合成し、パン／ズームはキャッシュを再利用します。",
     "formats.label": "対応フォーマット",
-    "formats.note": "8/16 bit、アルファチャンネル、DPI メタデータに対応",
+    "formats.note": ".inkpod v34 / replay epoch 29 · 8/16 bit、アルファ、DPIに対応",
     "dl.eyebrow": "ダウンロード",
     "dl.title": "今すぐ、塗りはじめよう。",
     "dl.sub": "ZIP を展開して inkpod.exe を起動するだけ。インストーラーも、追加ランタイムも不要です。",
@@ -1005,7 +1005,7 @@ const I18N = {
     "hero.sub": "inkpod is a non-destructive raster paint engine built for animation coloring — a GPU-accelerated Rust core shipped as a native Windows 11 app.",
     "hero.cta1": "Download",
     "hero.cta2": "Explore features",
-    "hero.note": "Portable ZIP · no installer · no extra runtimes",
+    "hero.note": "Portable ZIP · Japanese/English UI · no extra runtimes",
     "hero.win.title": "inkpod — Untitled Cell 1*",
     "ph.screenshot": "Screenshot coming soon",
     "stats.1.v": "8 / 16 bit",
@@ -1036,7 +1036,7 @@ const I18N = {
     "grid.5.t": "Filters",
     "grid.5.d": "Tone curves, levels, hue/saturation and color balance, previewed first and committed as one undoable edit.",
     "grid.6.t": "Batch processing",
-    "grid.6.d": "Apply color replacement, continuous fill, filters and more across whole sequences — with dry-runs and atomic output.",
+    "grid.6.d": "Apply color replacement, move-to-paint-plane, masking and erase across sequences, with preflight validation and atomic per-item output.",
     "grid.7.t": "History &amp; recovery",
     "grid.7.d": "Undo/redo, multi-step jumps, autosave and crash recovery. Even divergent history branches are preserved.",
     "grid.8.t": "Color charts",
@@ -1076,11 +1076,11 @@ const I18N = {
     "tech.2.t": "Built from scratch. Built for speed.",
     "tech.2.d": "inkpod was designed from zero as a coloring app that makes full use of modern 64-bit operating systems. On Windows it relies on long-maintained native technologies: Win32, Direct3D 11, and Direct2D. A future macOS version is planned around Apple's own SwiftUI and native platform technologies.",
     "tech.3.t": "The finished image—and every step behind it",
-    "tech.3.d": ".inkpod files preserve not only the image, but the journal needed to reconstruct its editing history. Revisit earlier work and techniques as you develop new ideas. Undo and redo are practically unlimited—and remain available even after you close and reopen the file.",
+    "tech.3.d": "A normal save manages two same-stem files together: an .inkpod document with the editing journal and a PNG, TIFF, TGA or BMP composite for ordinary image tools. Reopening restores undo, redo and divergent history branches from the native document.",
     "tech.4.t": "Sparse tiles &amp; caching",
     "tech.4.d": "Large images use lazily-allocated, copy-on-write tiles. Only changed tiles recompose; pan and zoom reuse the cache.",
     "formats.label": "Supported formats",
-    "formats.note": "8/16 bit, alpha channel and DPI metadata",
+    "formats.note": ".inkpod v34 / replay epoch 29 · 8/16 bit, alpha and DPI",
     "dl.eyebrow": "Download",
     "dl.title": "Start painting today.",
     "dl.sub": "Unzip and run inkpod.exe. No installer, no extra runtimes.",

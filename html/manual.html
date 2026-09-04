@@ -427,17 +427,17 @@
 
     <main id="main-content" tabindex="-1">
       <article>
-        <div class="hero search-unit" data-search="manual help guide windows 11 japanese offline">
+        <div class="hero search-unit" data-search="manual help guide windows 11 animation coloring history sequence">
           <div class="hero-lockup">
             <span class="app-icon app-icon-hero" aria-hidden="true"></span>
             <div>
-              <p class="eyebrow">はじめて使う方へ</p>
-              <h2>線を守り、色を重ね、動きを確かめる。</h2>
+              <p class="eyebrow">inkpod USER GUIDE</p>
+              <h2>一枚のセルから、連番の動きまで。</h2>
             </div>
           </div>
-          <p class="lead">inkpodは、アニメーションの作画・彩色をセル、レイヤー、プレーンに分けて扱うWindowsアプリです。この説明書は、現在のWindows版で実際に利用できる操作を、制作の流れに沿って案内します。</p>
+          <p class="lead">inkpodは、主線と彩色を分けたセル制作、操作履歴ベースの非破壊編集、前後セルの参照、モーションチェック、バッチ処理を一つのワークスペースにまとめます。このマニュアルでは、現行Windows版の機能を制作の流れとコマンド別に案内します。</p>
           <div class="meta-strip" aria-label="マニュアル情報">
-            <span>Windows 11</span><span>日本語UI</span><span>オフライン対応</span><span>2026年8月12日の実装に基づく</span>
+            <span>Windows 11</span><span>日本語／英語UI</span><span>v0.3.1・ABI v34</span><span>2026年9月4日の実装に基づく</span>
           </div>
         </div>
 
@@ -450,7 +450,7 @@
         <section class="chapter" id="about" aria-labelledby="about-heading">
           <h2 id="about-heading">1. inkpodについて</h2>
           <div class="search-unit" data-search="概要 purpose animation paint coloring">
-            <p>inkpodは、主線と彩色を分けたアニメーション制作、前後セルの参照、連番確認、繰り返し処理を一つの作業環境で行うためのアプリです。画像を単に一枚へ平坦化せず、用途ごとの情報を保持したまま編集できることが中心です。</p>
+            <p>inkpodは、主線と彩色を分けたセル制作から、前後セルの参照、連番確認、繰り返し処理までを一つの作業環境で扱うアプリです。元の文書と確定した編集操作を保持し、開き直した後も操作履歴、Undo／Redo、分岐した履歴を再現できることが編集モデルの中心です。</p>
           </div>
           <div class="card-grid">
             <div class="card search-unit" data-search="main line protect 主線保護">
@@ -462,13 +462,13 @@
               <p>ライトテーブル、シーケンス、参照ビュー、モーションチェックで、前後セルとの位置・色・動きを確認できます。</p>
             </div>
             <div class="card search-unit" data-search="undo preview batch atomic">
-              <h3>試してから確定する</h3>
-              <p>描画や編集はUndo単位で記録され、フィルターなどのプレビューは確定前にキャンセルできます。バッチはdry-runで出力前に対象を検査できます。</p>
+              <h3>履歴を残して進める</h3>
+              <p>確定した描画や編集は操作履歴として記録され、ファイルを開き直した後もUndo／Redoできます。フィルターは確定前にプレビューでき、バッチは工程一覧と開始前検証で対象と出力を確認できます。</p>
             </div>
           </div>
           <div class="callout warning search-unit" data-search="current limitations 現行版 制限">
             <strong>現行版での制限</strong>
-            <span>表示言語は日本語です。AutoHideの端ボタンは画面上で操作できますが、現行版では <kbd>F6</kbd>、<kbd>Tab</kbd>、<kbd>Shift</kbd>+<kbd>Tab</kbd> だけでは到達できない場合があります。バッチ出力は現在 `.inkpod` です。詳しくは<a href="#current-limitations">トラブルシューティング</a>を参照してください。</span>
+            <span>表示言語は日本語／英語から選べます。AutoHideの端ボタンは画面上で操作できますが、現行版では <kbd>F6</kbd>、<kbd>Tab</kbd>、<kbd>Shift</kbd>+<kbd>Tab</kbd> だけでは到達できない場合があります。バッチで作成できる処理は色置換、彩色プレーンへ送る、マスキング、消去の4種類です。詳しくは<a href="#current-limitations">トラブルシューティング</a>を参照してください。</span>
           </div>
         </section>
 
@@ -476,7 +476,7 @@
           <h2 id="getting-started-heading">2. はじめに</h2>
           <div class="search-unit" data-search="対応環境 requirements Windows 11 x64 arm64">
             <h3 id="environment">対応環境</h3>
-            <p>Windows 11向けのデスクトップアプリです。画面はWindowsの表示倍率とハイコントラスト設定に追従する設計です。通常の検証はx64環境を中心に行われています。ARM64版パッケージも構築されていますが、現行の記録ではARM64実機上の一部操作検証は未完了です。</p>
+            <p>Windows 11向けのデスクトップアプリです。画面はWindowsの表示倍率とハイコントラスト設定に追従する設計です。UIは日本語と英語に対応し、<span class="menu-path">編集<span class="sep">›</span>環境設定...<span class="sep">›</span>一般</span>でシステム設定／日本語／Englishを選べます。変更は次回起動から全ワークスペースへ適用されます。通常の検証はx64環境を中心に行われています。ARM64版パッケージも構築されていますが、現行の記録ではARM64実機上の一部操作検証は未完了です。</p>
           </div>
           <div class="search-unit" data-search="launch exit 起動 終了 open with msix">
             <h3 id="launch-exit">起動と終了</h3>
@@ -509,12 +509,12 @@
               <li><a href="#pane-layer">レイヤー／プレーン</a>で目的のレイヤーを選び、その中の「主線」または「彩色」プレーンを選びます。彩色する場合は「彩色」が編集可能であることを確認します。</li>
               <li>描画色は<a href="#pane-color">カラー</a>で指定します。主線色と彩色用描画色は別表示です。</li>
               <li>ツールパレットで「鉛筆」「ブラシ」「フィル」などを選び、Canvasで操作します。ストロークはペンを下ろしてから離すまでが一回のUndo単位です。</li>
-              <li><span class="menu-path">ファイル<span class="sep">›</span>名前を付けて保存...</span>で `.inkpod` として保存します。以後は <kbd>Ctrl</kbd>+<kbd>S</kbd> で同じ場所へ保存できます。</li>
+              <li><span class="menu-path">ファイル<span class="sep">›</span>名前を付けて保存...</span>で保存先を選びます。通常保存は編集履歴を持つ `.inkpod` と、同じ名前のPNG／TIFF／TGA／BMPを一つの論理ペアとして作成します。新規セルの初期値はPNGで、環境設定の既定ラスター形式を変えると以後の新規セルへ反映されます。以後は <kbd>Ctrl</kbd>+<kbd>S</kbd> で同じペアを保存できます。</li>
             </ol>
           </div>
           <div class="search-unit" data-search="open file Ctrl O raster png tiff tga bmp">
             <h3 id="quick-open">ファイルを開く</h3>
-            <p><span class="menu-path">ファイル<span class="sep">›</span>開く...</span>（<kbd>Ctrl</kbd>+<kbd>O</kbd>）で `.inkpod` または対応するPNG、TIFF、TGA、BMPを選びます。同じファイルがすでに開いている場合、別文書を重複作成せず既存文書を選択します。別の表示を並べたい場合は<a href="#views-groups">新しいビュー</a>を使います。</p>
+            <p><span class="menu-path">ファイル<span class="sep">›</span>開く...</span>（<kbd>Ctrl</kbd>+<kbd>O</kbd>）で `.inkpod` または対応するPNG、TIFF、TGA、BMPを選びます。同じ場所・同じ名前のネイティブ／ラスター相手があれば内容を検証してペアとして開き、欠落や不一致は無言で上書きしません。同じファイルがすでに開いている場合、別文書を重複作成せず既存文書を選択します。別の表示を並べたい場合は<a href="#views-groups">新しいビュー</a>を使います。</p>
           </div>
           <div class="callout tip search-unit" data-search="save recovery difference autosave">
             <strong>保存とRecovery保存は別です</strong>
@@ -602,11 +602,11 @@
           <h2 id="menus-heading">6. メニューリファレンス</h2>
           <div class="callout search-unit" data-search="menu reference common rules shortcut cancel undo disabled">
             <strong>全メニュー共通の読み方</strong>
-            <span>「...」が付く項目は設定または確認画面を開きます。編集プレビューは「OK／実行」で一回のUndo単位として確定し、「キャンセル」で開始前へ戻ります。文書や選択、適合するレイヤー／プレーンがないときは項目が無効になります。すべての末端項目には設定可能なショートカットがあり、メニューには現在の割り当てが表示されます。以下では標準的な既定キーを個別に示し、その他は「設定可」とします。</span>
+            <span>「...」が付く項目は設定または確認画面を開きます。編集プレビューは「OK／実行」で一回のUndo単位として確定し、「キャンセル」で開始前へ戻ります。文書や選択、適合するレイヤー／プレーンがないときは項目が無効になります。すべての末端項目はショートカットエディターに表示され、割り当てがある項目だけメニューに現在のキーが表示されます。以下では組み込みの既定キーを個別に示し、inkpod固有の多くの操作は初期状態で未割り当てです。</span>
           </div>
           <div class="callout warning search-unit" data-search="destructive overwrite caution save delete merge">
             <strong>上書きや削除を伴う操作</strong>
-            <span>「削除」「クリア」「復帰」「統合」「鏡像」「回転」「明示上書き」などは結果をよく確認してください。文書編集は原則Undoできますが、通常保存、ファイル出力、Recovery管理、ワークスペース設定、バッチで確定済みの外部ファイルは通常のUndo対象ではありません。</span>
+            <span>「削除」「クリア」「復帰」「統合」「鏡像」「回転」などは結果をよく確認してください。文書編集は原則Undoできますが、通常保存、ファイル出力、Recovery管理、ワークスペース設定、バッチで確定済みの外部ファイルは通常のUndo対象ではありません。</span>
           </div>
 
           <details class="reference search-unit" id="menu-file" open data-search="ファイル file new open save recovery import export recent">
@@ -615,12 +615,12 @@
               <li class="search-unit"><div class="command-name">ファイル › 新規セル <kbd>Ctrl</kbd>+<kbd>N</kbd></div><div class="command-desc">新しい無題セルを作り、現在のグループへタブとして開きます。文書を作れる状態なら実行でき、新しい文書は未保存です。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 開く... <kbd>Ctrl</kbd>+<kbd>O</kbd></div><div class="command-desc">`.inkpod` または対応ラスター画像を選びます。同じ実体のファイルが開いていれば既存文書を選択します。ダイアログのキャンセルでは変化しません。</div></li>
               <li class="search-unit" data-search="1 (なし) 2 3 4 5 6 7 8"><div class="command-name">ファイル › 最近使ったファイル › 1 (なし)〜8 (なし)</div><div class="command-desc">直近の最大8件を開く可変スロットです。履歴が空なら「(なし)」となり無効です。表示中のパスを開く点は「開く...」と同じです。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › 保存 <kbd>Ctrl</kbd>+<kbd>S</kbd></div><div class="command-desc">現在の保存先へ安全に保存し、成功時だけ通常保存の基準を進めます。未保存なら保存先を選びます。変更なしは何も変えません。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › 名前を付けて保存... <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></div><div class="command-desc">新しい `.inkpod` 保存先を選び、成功後に文書名、最近使ったファイル、Recovery情報を更新します。別の開いている文書と保存先が衝突する場合は確認なしに統合しません。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › 履歴を破棄してコピー... <span class="tag caution">注意</span></div><div class="command-desc">現在状態を新しいGenesisとする別ファイルへ書き出し、過去の手続き履歴を含めない小型のコピーを作ります。元文書とその履歴は変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 保存 <kbd>Ctrl</kbd>+<kbd>S</kbd></div><div class="command-desc">現在の `.inkpod` と同じstemのラスター相手を一つの論理ペアとして安全に保存し、両方の完了後だけ通常保存の基準を進めます。ラスターから初めて開いた未編集セルや、相手が欠落したcleanなセルでも必要なペアを作成／修復します。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 名前を付けて保存... <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></div><div class="command-desc">新しい `.inkpod` と同じstemのラスター相手を一組として作成し、成功後に文書名、最近使ったファイル、Recovery情報を更新します。平坦なラスターだけを保存先にする操作は「ラスターを書き出し...」です。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › 履歴を破棄してコピー... <span class="tag caution">注意</span></div><div class="command-desc">現在状態を新しいGenesisとする別ファイルへ書き出し、過去の操作履歴を含めない小型のコピーを作ります。元文書とその履歴は変更しません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 復帰 <span class="tag caution">注意</span></div><div class="command-desc">文書全体を最後の通常保存時点へ戻します。未保存変更とその後の履歴を失うため確認して使います。Recovery保存は復帰点ではありません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › レイヤーを部分的に復帰 <span class="tag undo">Undo可</span></div><div class="command-desc">最後の通常保存内容から、選択中レイヤー／プレーンの選択範囲だけを戻します。保存済み状態、編集対象、選択範囲が必要です。</div></li>
-              <li class="search-unit"><div class="command-name">ファイル › ラスタ－を書き出し...</div><div class="command-desc">現在の表示内容を対応ラスター形式へ書き出します。レイヤー／プレーン等の固有情報は画像形式では平坦化され得るため、編集用原本は `.inkpod` でも保存してください。</div></li>
+              <li class="search-unit"><div class="command-name">ファイル › ラスタ－を書き出し...</div><div class="command-desc">現在の表示内容を対応ラスター形式へ単独で書き出します。通常保存のペア、保存先、savepointは変更しません。レイヤー／プレーン等の固有情報は画像形式では平坦化されるため、編集用原本には通常の保存を使ってください。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを保存</div><div class="command-desc">障害復旧用の別保存を直ちに作ります。通常保存先、通常の保存基準、未保存表示は変えません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › Recoveryを開く...</div><div class="command-desc">列挙されたRecovery候補を選んで「復元セル」として開きます。元ファイルを無言で上書きしません。</div></li>
               <li class="search-unit"><div class="command-name">ファイル › 起動時に前回の文書を復元</div><div class="command-desc">通常終了時の文書一覧を次回起動時に戻す設定を切り替えます。既定はオフで、障害復旧用Recoveryとは別です。<span class="tag view">設定</span></div></li>
@@ -644,8 +644,11 @@
               <li class="search-unit"><div class="command-name">編集 › フローティング選択 › 移動・拡大縮小・回転...</div><div class="command-desc">貼り付け直後などの浮動内容をX/Y、幅／高さ、縦横比、基準点、角度で調整します。まだ確定されません。</div></li>
               <li class="search-unit"><div class="command-name">編集 › フローティング選択 › 確定 <span class="tag undo">Undo可</span></div><div class="command-desc">浮動内容を一回の履歴単位として編集対象へ確定します。フローティング選択がある場合だけ有効です。</div></li>
               <li class="search-unit"><div class="command-name">編集 › フローティング選択 › キャンセル</div><div class="command-desc">浮動内容を破棄し、貼り付け／変形開始前の文書へ完全に戻します。履歴は増えません。</div></li>
-              <li class="search-unit"><div class="command-name">編集 › 設定 › ショートカット編集...</div><div class="command-desc">検索可能なコマンド一覧から、最大4ストロークのキー列を割り当てます。完全一致は割当を交換し、途中まで同じになる競合は受け付けません。</div></li>
-              <li class="search-unit"><div class="command-name">編集 › 設定 › ショートカットを初期化</div><div class="command-desc">変更した割り当てを既定値へ戻します。文書内容には影響しません。<span class="tag view">設定</span></div></li>
+              <li class="search-unit"><div class="command-name">編集 › 線修正 › ゴミ取り...</div><div class="command-desc">指定した局所範囲の小点、小穴、異色小領域を修正します。確定した変更は一回のUndoで戻せます。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 線修正 › 線つなぎ</div><div class="command-desc">局所範囲で向かい合うラスター線端を接続します。設定gap以下の空白だけを対象にします。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 線修正 › 線幅修正</div><div class="command-desc">描画済みのラスター線を局所的に太く／細くするか、指定した均一幅へ変換します。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › キーボードショートカット <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>S</kbd></div><div class="command-desc">環境設定の「キーボードショートカット」ページを直接開きます。主／副の最大4ストローク、context、実行方法、論理／物理キーを編集し、競合を解除または交換してから適用します。</div></li>
+              <li class="search-unit"><div class="command-name">編集 › 環境設定... <kbd>Ctrl</kbd>+<kbd>,</kbd></div><div class="command-desc">一般とキーボードショートカットの二つのページで、表示言語、保存と復元、新規セルの既定ラスター形式、ワークスペース、アニメーション、色、ショートカットを設定します。表示言語の変更は次回起動から、既定ラスター形式は以後の新規セルから反映されます。<span class="tag view">設定</span></div></li>
             </ul></div>
           </details>
 
@@ -726,12 +729,12 @@
             <div class="details-body"><ul class="command-list">
               <li class="search-unit"><div class="command-name">選択 › すべて選択 <kbd>Ctrl</kbd>+<kbd>A</kbd></div><div class="command-desc">文書全体を選択マスクにします。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 選択解除</div><div class="command-desc">現在の選択マスクを空にします。画像内容は消しません。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 長方形 <kbd>R</kbd></div><div class="command-desc">ドラッグした長方形を、現在の作成モードで選択へ反映します。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 楕円 <kbd>O</kbd></div><div class="command-desc">ドラッグした楕円を選択します。<kbd>Shift</kbd>による形状制約を利用できます。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 投げ縄 <kbd>L</kbd></div><div class="command-desc">自由に囲んだ領域を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 長方形</div><div class="command-desc">ドラッグした長方形を、現在の作成モードで選択へ反映します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 楕円</div><div class="command-desc">ドラッグした楕円を選択します。<kbd>Shift</kbd>による形状制約を利用できます。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 投げ縄</div><div class="command-desc">自由に囲んだ領域を選択します。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 選択ツール › 折れ線</div><div class="command-desc">クリックで頂点を追加して多角形選択を作ります。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 選択ツール › トレース</div><div class="command-desc">ブラシ状の軌跡を選択マスクへ描きます。</div></li>
-              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 色の杖 <kbd>W</kbd></div><div class="command-desc">クリック位置と許容差内でつながった同系色領域を選択します。</div></li>
+              <li class="search-unit"><div class="command-name">選択 › 選択ツール › 色の杖</div><div class="command-desc">クリック位置と許容差内でつながった同系色領域を選択します。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 作成モード › 新規</div><div class="command-desc">次の選択操作で既存選択を置き換えます。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 作成モード › 追加</div><div class="command-desc">次の領域を既存選択へ加えます。基本修飾キーは<kbd>Shift</kbd>です。</div></li>
               <li class="search-unit"><div class="command-name">選択 › 作成モード › 削除</div><div class="command-desc">次の領域を既存選択から引きます。基本修飾キーは<kbd>Alt</kbd>です。</div></li>
@@ -773,24 +776,22 @@
           <details class="reference search-unit" id="menu-tools" open data-search="ツール tool pencil brush eraser fill eyedropper raster geometry gradient airbrush blur stamp dust alpha">
             <summary>ツール</summary>
             <div class="details-body"><ul class="command-list">
-              <li class="search-unit"><div class="command-name">ツール › 鉛筆 <kbd>P</kbd></div><div class="command-desc">ラスターへ硬い線を描きます。開始色と同じならストローク全体を消去にする自動消去を使えます。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › ブラシ <kbd>B</kbd></div><div class="command-desc">丸／角、太さ、筆圧、平滑化などを使う描画ツールです。適合する編集可能プレーンが必要です。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 消しゴム <kbd>E</kbd></div><div class="command-desc">ツールオプションで明示された「主線／彩色」対象を消します。ツールを選んだだけでは対象を自動変更しません。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › フィル <kbd>F</kbd></div><div class="command-desc">クリック位置と許容差内で連結する領域を塗ります。成功時は実際に塗ったプレーンが選択され、0ピクセル、失敗、キャンセルでは対象選択を変えません。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 閉領域フィル <kbd>Shift</kbd>+<kbd>F</kbd></div><div class="command-desc">指定範囲に含まれる複数の閉領域を一度に塗ります。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 塗りのばし <kbd>X</kbd></div><div class="command-desc">既存色をドラッグ方向の狭い未着色領域へ広げます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 鉛筆</div><div class="command-desc">ラスターへ硬い線を描きます。開始色と同じならストローク全体を消去にする自動消去を使えます。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › ブラシ</div><div class="command-desc">丸／角、太さ、筆圧、平滑化などを使う描画ツールです。適合する編集可能プレーンが必要です。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 消しゴム</div><div class="command-desc">ツールオプションで明示された「主線／彩色」対象を消します。ツールを選んだだけでは対象を自動変更しません。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › フィル</div><div class="command-desc">クリック位置と許容差内で連結する領域を塗ります。成功時は実際に塗ったプレーンが選択され、0ピクセル、失敗、キャンセルでは対象選択を変えません。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 閉領域フィル</div><div class="command-desc">指定範囲に含まれる複数の閉領域を一度に塗ります。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › 塗りのばし</div><div class="command-desc">既存色をドラッグ方向の狭い未着色領域へ広げます。</div></li>
               <li class="search-unit"><div class="command-name">ツール › フィル設定...</div><div class="command-desc">操作、許容差、隙間、のばし距離、含み塗り、最大6対象色、あふれ中断、離れた同色、透明だけ、選択制限、ライトテーブル境界／色を設定します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › スポイト <kbd>I</kbd></div><div class="command-desc">指定した参照元から色を採取し、直前の色付きツールの描画色へ設定します。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › スポイト</div><div class="command-desc">指定した参照元から色を採取し、直前の色付きツールの描画色へ設定します。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 直線</div><div class="command-desc">開始点から終点へドラッグし、離したときに現在色と線幅でラスター直線を確定します。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 曲線</div><div class="command-desc">始終点と制御点からラスター曲線を作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 長方形</div><div class="command-desc">ドラッグ範囲へラスター輪郭の長方形を作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 楕円</div><div class="command-desc">ドラッグ範囲へラスター輪郭の楕円を作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 多角形</div><div class="command-desc">ドラッグ範囲へラスター輪郭の多角形を作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › Raster Geometry › 折れ線</div><div class="command-desc">入力点列をラスター折れ線として確定します。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 線つなぎ...</div><div class="command-desc">なぞった帯などの局所範囲で、向かい合うラスター線端を接続します。設定gap以下の空白を対象とし、確定後は一回のUndoで戻せます。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › 線幅修正...</div><div class="command-desc">描画済みのラスター線を局所的に太く／細くするか、指定した均一幅へ変換します。増減量は片側の画素数、均一幅は線の全幅です。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › グラデーション... <kbd>G</kbd></div><div class="command-desc">線形／放射、3色以上の停止点、各アルファ、合成方法等を設定して適用します。選択なしでは対象プレーン全体です。</div></li>
-              <li class="search-unit"><div class="command-name">ツール › エアブラシ... <kbd>A</kbd></div><div class="command-desc">太さ、硬さ、間隔、フェード、筆圧を設定した噴霧描画を行います。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › グラデーション...</div><div class="command-desc">線形／放射、3色以上の停止点、各アルファ、合成方法等を設定して適用します。選択なしでは対象プレーン全体です。</div></li>
+              <li class="search-unit"><div class="command-name">ツール › エアブラシ...</div><div class="command-desc">太さ、硬さ、間隔、フェード、筆圧を設定した噴霧描画を行います。</div></li>
               <li class="search-unit"><div class="command-name">ツール › 境界色エアブラシ...</div><div class="command-desc">指定した複数色の境界部分だけへ設定幅のグラデーションを作ります。</div></li>
               <li class="search-unit"><div class="command-name">ツール › ぼかしツール...</div><div class="command-desc">ペン／長方形／折れ線／投げ縄範囲で局所的にぼかします。</div></li>
               <li class="search-unit"><div class="command-name">ツール › スタンプ...</div><div class="command-desc">採取した元位置から一定オフセットで画像を複製して描きます。</div></li>
@@ -814,7 +815,7 @@
               <li class="search-unit"><div class="command-name">色 › カラーパレット › クリア <span class="tag caution">注意</span></div><div class="command-desc">現在のパレット内容を消去します。必要なら先に保存してください。</div></li>
               <li class="search-unit"><div class="command-name">色 › カラーパレット › 保存...</div><div class="command-desc">パレットをネイティブデータとしてファイルへ保存します。</div></li>
               <li class="search-unit"><div class="command-name">色 › カラーパレット › 読み込み...</div><div class="command-desc">保存済みパレットを読み込みます。失敗時は現在の有効データを維持します。</div></li>
-              <li class="search-unit"><div class="command-name">色 › カラーパレット › 次の10色グループ <kbd>Tab</kbd></div><div class="command-desc">高頻度10色の次グループへ切り替えます。文字／数値入力中は通常のTab移動が優先されます。</div></li>
+              <li class="search-unit"><div class="command-name">色 › カラーパレット › 次の10色グループ</div><div class="command-desc">高頻度10色の次グループへ切り替えます。</div></li>
               <li class="search-unit"><div class="command-name">色 › カラーチャート › セルから作成...</div><div class="command-desc">セルの一意色を抽出してチャート候補を作ります。色数上限、量子化、プレビューを確認して確定します。</div></li>
               <li class="search-unit"><div class="command-name">色 › カラーチャート › 名前・番号を検索...</div><div class="command-desc">チャートの色名または番号から候補を検索します。</div></li>
               <li class="search-unit"><div class="command-name">色 › カラーチャート › 次候補</div><div class="command-desc">現在の検索に一致する次の色へ移動します。</div></li>
@@ -832,7 +833,7 @@
             </ul></div>
           </details>
 
-          <details class="reference search-unit" id="menu-production" open data-search="制作 production light table sequence subpalette motion batch FPS dry-run preview output">
+          <details class="reference search-unit" id="menu-production" open data-search="制作 production light table sequence subpalette motion batch FPS validation preview output">
             <summary>制作</summary>
             <div class="details-body"><ul class="command-list">
               <li class="search-unit"><div class="command-name">制作 › ライトテーブルセット › 新規...</div><div class="command-desc">現在の文書へ新しい参照セットを作ります。名前を指定し、キャンセルでは作成しません。</div></li>
@@ -860,60 +861,39 @@
               <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › 選択セルをサブパレット登録</div><div class="command-desc">シーケンスで選択中のセルを参照ビューへ登録します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › 連番・サブパレット › サブパレット色サンプル...</div><div class="command-desc">サブパレット／参照ビューの表示セルから色を採取します。参照セルへ描画しません。</div></li>
               <li class="search-unit"><div class="command-name">制作 › モーションチェック › 開始・設定...</div><div class="command-desc">再生範囲、倍率、背景／余白色、開始時停止、選択のみ、ライトテーブルを含めるか等を設定して再生を開始します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 一時停止/再開</div><div class="command-desc">再生中の一時停止と再開を切り替えます。<kbd>Space</kbd>も使用できます。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › 一時停止/再開</div><div class="command-desc">再生中の一時停止と再開を切り替えます。</div></li>
               <li class="search-unit"><div class="command-name">制作 › モーションチェック › 前のフレーム</div><div class="command-desc">再生位置を一フレーム前へ送ります。</div></li>
               <li class="search-unit"><div class="command-name">制作 › モーションチェック › 次のフレーム</div><div class="command-desc">再生位置を一フレーム後へ送ります。</div></li>
               <li class="search-unit"><div class="command-name">制作 › モーションチェック › 先頭フレーム</div><div class="command-desc">指定再生範囲の先頭へ移動します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › モーションチェック › 末尾フレーム</div><div class="command-desc">指定再生範囲の末尾へ移動します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 30 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>3</kbd></div><div class="command-desc">再生速度を30フレーム毎秒にします。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 25 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>2</kbd></div><div class="command-desc">再生速度を25フレーム毎秒にします。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 24 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>4</kbd></div><div class="command-desc">再生速度を24フレーム毎秒にします。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 12 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>1</kbd></div><div class="command-desc">再生速度を12フレーム毎秒にします。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 10 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>0</kbd></div><div class="command-desc">再生速度を10フレーム毎秒にします。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › モーションチェック › FPS › 8 FPS <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>8</kbd></div><div class="command-desc">再生速度を8フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › フレームレート (FPS) › 30 FPS</div><div class="command-desc">再生速度を30フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › フレームレート (FPS) › 25 FPS</div><div class="command-desc">再生速度を25フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › フレームレート (FPS) › 24 FPS</div><div class="command-desc">再生速度を24フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › フレームレート (FPS) › 12 FPS</div><div class="command-desc">再生速度を12フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › フレームレート (FPS) › 10 FPS</div><div class="command-desc">再生速度を10フレーム毎秒にします。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › モーションチェック › フレームレート (FPS) › 8 FPS</div><div class="command-desc">再生速度を8フレーム毎秒にします。</div></li>
               <li class="search-unit"><div class="command-name">制作 › モーションチェック › 停止</div><div class="command-desc">モーションチェックを終了します。<kbd>Esc</kbd>も使用できます。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 入力ファイル...</div><div class="command-desc">処理対象のファイルを入力一覧へ追加します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 入力フォルダー...</div><div class="command-desc">フォルダー内の対応ファイルを自然順で入力候補にします。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 現在の連番</div><div class="command-desc">現在文書のシーケンスをバッチ入力に設定します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › セル番号範囲...</div><div class="command-desc">入力連番のうち処理する番号範囲を指定します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 色置換</div><div class="command-desc">旧色／新色の複数組を置換する処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 連続フィル</div><div class="command-desc">複数の文書座標と色を使い、各フレームへ通常フィルを行う処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 色分解</div><div class="command-desc">指定色をマスク化し、置換、主線／彩色プレーン、別出力へ送る処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › レイヤー表示</div><div class="command-desc">安定した対象指定によりレイヤー表示を変更する処理を追加します。対象なしの扱いを確認します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 線幅</div><div class="command-desc">加算／減算／倍率／一定幅の線幅処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 境界色エアブラシ</div><div class="command-desc">複数色の境界へ指定幅の効果を加える処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › ゴミ取り</div><div class="command-desc">小点／小穴／異色小領域を除去する一括処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 鏡像</div><div class="command-desc">各入力の実データを水平／垂直反転する処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 90度回転</div><div class="command-desc">各入力を左／右へ90度回転する処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 画像サイズ・解像度</div><div class="command-desc">画像寸法、DPI、再サンプルを変更する処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › ラスター変換</div><div class="command-desc">ラスター形式／色深度を変換する処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › シャープ（弱）</div><div class="command-desc">弱いシャープ固定プリセットを処理列へ追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › シャープ（強）</div><div class="command-desc">強いシャープ固定プリセットを追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › ぼかし（弱）</div><div class="command-desc">弱いぼかし固定プリセットを追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › ぼかし（強）</div><div class="command-desc">強いぼかし固定プリセットを追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › ガウスぼかし...</div><div class="command-desc">設定可能なガウスぼかしを追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 階調反転</div><div class="command-desc">階調反転を処理列へ追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 自動コントラスト</div><div class="command-desc">自動コントラストを処理列へ追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 明るさ・コントラスト...</div><div class="command-desc">明るさ／コントラスト設定を持つ処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › トーンカーブ...</div><div class="command-desc">トーンカーブ設定を持つ処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › レベル補正...</div><div class="command-desc">レベル補正設定を持つ処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › 色相・彩度・明度...</div><div class="command-desc">HSV調整処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › カラーバランス...</div><div class="command-desc">カラーバランス調整処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › フィルタ › アンシャープマスク...</div><div class="command-desc">アンシャープマスク設定を持つ処理を追加します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 選択項目を編集...</div><div class="command-desc">処理列で選択した項目の対象レイヤー、パラメーター、有効状態等を編集します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 彩色プレーンへ送る</div><div class="command-desc">指定色に一致する対象ピクセルを同じレイヤーの彩色プレーンへ移す処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › マスキング</div><div class="command-desc">指定色に一致する座標から塗り保護マスクを作る処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 項目を追加 › 消去</div><div class="command-desc">指定色に一致する対象ピクセルを、その形式の空値へ置き換える処理を追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 複製</div><div class="command-desc">選択した処理と設定を複製します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 色置換 old/new を入替</div><div class="command-desc">選択した色置換処理の旧色と新色をまとめて交換します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 二セル比較から色置換行を抽出...</div><div class="command-desc">同寸法・同形式の二セルを比較し、差分の旧色／新色候補を件数と範囲付きで抽出します。一対多の候補は利用者が解決するまで実行できません。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 選択項目を削除</div><div class="command-desc">選択処理をバッチ列から外します。入力ファイルは変えません。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 上へ</div><div class="command-desc">選択処理を一段前へ移し、実行順を変更します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 下へ</div><div class="command-desc">選択処理を一段後へ移します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 複製保存（既定）</div><div class="command-desc">元入力を残し、複製した出力へ結果を保存します。既定の上書き方針です。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 新規保存</div><div class="command-desc">指定した新規名／場所へ保存します。既存出力との衝突を設定で確認します。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 明示上書き <span class="tag caution">注意</span></div><div class="command-desc">明示的に既存対象へ上書きします。dry-runとプレビューで対象を確認してから選んでください。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › フォルダー・命名・待機...</div><div class="command-desc">出力フォルダー、セルフォルダー、形式、基本名、開始番号、増減方向、ファイル間待機を設定します。現行版の実出力形式は `.inkpod` です。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › フォルダー</div><div class="command-desc">各結果を指定フォルダーへ `.inkpod`、PNG、TIFF、TGA、BMPのいずれかで出力します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 発行時のアクティブ文書</div><div class="command-desc">ジョブ開始時に固定した文書へ、結果全体を一回のUndo単位として適用します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › 新規タブとして追加</div><div class="command-desc">各結果を保存先のない未保存文書として新しいタブへ追加します。</div></li>
+              <li class="search-unit"><div class="command-name">制作 › バッチ › 出力 › フォルダー・命名・待機...</div><div class="command-desc">出力フォルダー、形式、`{stem}`／`{index:N}`による名前、ファイル間待機を設定します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 失敗時 › 記録して続行</div><div class="command-desc">失敗を記録し、次の入力へ進みます。失敗した一件の部分出力は確定しません。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 失敗時 › 記録して停止</div><div class="command-desc">最初の失敗を記録して残りの処理を停止します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › プレビュー</div><div class="command-desc">選択対象に対する処理結果を保存前に表示します。確定出力は書きません。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › dry-run</div><div class="command-desc">入力、処理列、対象、出力名、衝突、失敗条件を検証します。一切ファイルを書きません。</div></li>
-              <li class="search-unit"><div class="command-name">制作 › バッチ › 現在セルを実行</div><div class="command-desc">現在セルだけへ処理列を適用し、設定した方針で原子的に出力します。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › 全実行</div><div class="command-desc">入力一覧全体を自然順で処理します。対象レイヤーが未指定などの検証エラーがあれば開始しません。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › キャンセル</div><div class="command-desc">進行中のバッチを中止します。処理途中の一件は確定せず、すでに完了した別ファイルは残ります。</div></li>
               <li class="search-unit"><div class="command-name">制作 › バッチ › セットを保存...</div><div class="command-desc">処理列、入力／出力設定等を `.inkbatch` セットとして保存します。</div></li>
@@ -924,41 +904,35 @@
           <details class="reference search-unit" id="menu-window" open data-search="ウィンドウ window view tab split group pane workspace preset autohide pin follow active">
             <summary>ウィンドウ</summary>
             <div class="details-body"><ul class="command-list">
-              <li class="search-unit"><div class="command-name">ウィンドウ › 新しいビュー</div><div class="command-desc">現在文書の追加ビューを現在グループに作ります。画像、レイヤー、履歴、保存先は共有し、倍率やパン等は独立します。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ビューを閉じる <kbd>Ctrl</kbd>+<kbd>F4</kbd></div><div class="command-desc">現在ビューだけを閉じます。別ビューが残る限り文書は閉じず、保存確認もしません。最後のビューなら文書を閉じる確認へ進みます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 文書を閉じる</div><div class="command-desc">別グループ／ウィンドウを含む現在文書の全ビューを閉じます。未保存なら文書につき一度だけ確認し、キャンセルまたは保存失敗では一つも閉じません。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 次のタブ <kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div class="command-desc">現在グループの次の文書タブを選びます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 前のタブ <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div class="command-desc">現在グループの前の文書タブを選びます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › タブを左へ移動 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd></div><div class="command-desc">現在タブを同じグループ内で一つ左へ並べ替えます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › タブを右へ移動 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageDown</kbd></div><div class="command-desc">現在タブを同じグループ内で一つ右へ並べ替えます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 右へ分割 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Right</kbd></div><div class="command-desc">エディターを左右2グループにし、右側グループを作ります。すでに2グループなら無効です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 下へ分割 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Down</kbd></div><div class="command-desc">エディターを上下2グループにし、下側グループを作ります。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 別グループへ移動 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>M</kbd></div><div class="command-desc">現在ビューをもう一方のグループへ移します。2グループが必要です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 別グループに新しいビュー <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>N</kbd></div><div class="command-desc">同じ文書の追加ビューをもう一方のグループに作ります。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 次のエディターグループ <kbd>Ctrl</kbd>+<kbd>F6</kbd></div><div class="command-desc">フォーカスするエディターグループを切り替えます。逆順は<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>F6</kbd>です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › グループを閉じる <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>W</kbd></div><div class="command-desc">現在グループを閉じ、ビューを残るグループへ集約します。最後の一グループは閉じません。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 新しいウィンドウ <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="command-desc">独立したメニュー、ペイン配置、エディターを持つ新しい作業ウィンドウを同じアプリ内に作ります。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ビューを次のウィンドウへ移動</div><div class="command-desc">現在ビューを次の既存ウィンドウへ移します。移動先がないと無効です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 次のウィンドウに複製ビュー</div><div class="command-desc">同じ文書の追加ビューを次の既存ウィンドウへ作ります。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ビューを新しいウィンドウへ移動</div><div class="command-desc">新しい作業ウィンドウを作り、現在ビューをそこへ移します。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › 新しいウィンドウに複製ビュー</div><div class="command-desc">新しい作業ウィンドウへ同じ文書の追加ビューを作ります。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ツールパレット</div><div class="command-desc">ツールパレットの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>T</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ツールオプション</div><div class="command-desc">ツールオプションの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>O</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › カラー</div><div class="command-desc">カラーペインの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>C</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › カラーを文書に固定／追従</div><div class="command-desc">カラーの対象を現在文書へ固定するか、アクティブ文書へ追従するか切り替えます。固定文書が閉じると追従へ戻ります。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › レイヤー／プレーン</div><div class="command-desc">レイヤー／プレーンペインの表示／非表示を切り替えます。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>L</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 表示</div><div class="command-desc">ロケーターペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>K</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 文書に固定／追従</div><div class="command-desc">ロケーターの対象文書を固定／アクティブ追従で切り替えます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 固定編集モード</div><div class="command-desc">ロケーター内の固定位置を編集基準として使うモードを切り替えます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター › 端で自動スクロール</div><div class="command-desc">ロケーター操作が端へ到達したときの自動スクロールを切り替えます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › シーケンス › 表示</div><div class="command-desc">シーケンスペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>F</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › シーケンス › 文書に固定／追従</div><div class="command-desc">シーケンス一覧の対象を一つの文書へ固定するか、アクティブ文書へ追従します。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ライトテーブル › 表示</div><div class="command-desc">ライトテーブルペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>H</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ライトテーブル › 文書に固定／追従</div><div class="command-desc">ライトテーブル設定の対象文書を固定／追従で切り替えます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › サブパレット／参照ビュー › 表示</div><div class="command-desc">読み取り専用参照ビューを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>P</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › サブパレット／参照ビュー › 文書に固定／追従</div><div class="command-desc">参照ビューの対象を固定／追従で切り替えます。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › バッチ › 表示</div><div class="command-desc">バッチペインを表示／非表示にします。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>B</kbd> です。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › バッチ › 文書に固定／追従</div><div class="command-desc">バッチの対象文書を固定／追従で切り替えます。実行中は発行時のジョブ対象を保ち、別タブへ勝手に移しません。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ツールパレット</div><div class="command-desc">ツールパレットの表示／非表示を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ツールオプション</div><div class="command-desc">ツールオプションflyoutの表示／非表示を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › カラー</div><div class="command-desc">カラーペインの表示／非表示を切り替えます。文書固定／追従はペイン内の対象コントロールから変更します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › レイヤー／プレーン</div><div class="command-desc">レイヤー／プレーンペインの表示／非表示を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ロケーター</div><div class="command-desc">ロケーターペインの表示／非表示を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › シーケンス</div><div class="command-desc">シーケンスペインの表示／非表示を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ライトテーブル</div><div class="command-desc">ライトテーブルペインの表示／非表示を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › サブパレット／参照ビュー</div><div class="command-desc">読み取り専用参照ビューの表示／非表示を切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › バッチ</div><div class="command-desc">バッチペインの表示／非表示を切り替えます。文書固定／追従はペイン内で変更し、実行中は発行時の対象を維持します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューとタブ › 新しいビュー</div><div class="command-desc">現在文書の追加ビューを現在グループに作ります。画像、レイヤー、履歴、保存先は共有し、倍率やパン等は独立します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューとタブ › ビューを閉じる <kbd>Ctrl</kbd>+<kbd>W</kbd>／<kbd>Ctrl</kbd>+<kbd>F4</kbd></div><div class="command-desc">現在ビューだけを閉じます。別ビューが残る限り文書は閉じず、保存確認もしません。最後のビューなら文書を閉じる確認へ進みます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューとタブ › 文書を閉じる</div><div class="command-desc">別グループ／ウィンドウを含む現在文書の全ビューを閉じます。未保存なら文書につき一度だけ確認し、キャンセルまたは保存失敗では一つも閉じません。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューとタブ › 次のタブ <kbd>Ctrl</kbd>+<kbd>PageDown</kbd>／<kbd>Ctrl</kbd>+<kbd>Tab</kbd></div><div class="command-desc">現在グループの次の文書タブを選びます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューとタブ › 前のタブ <kbd>Ctrl</kbd>+<kbd>PageUp</kbd>／<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></div><div class="command-desc">現在グループの前の文書タブを選びます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューとタブ › タブを左へ移動 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd></div><div class="command-desc">現在タブを同じグループ内で一つ左へ並べ替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ビューとタブ › タブを右へ移動 <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageDown</kbd></div><div class="command-desc">現在タブを同じグループ内で一つ右へ並べ替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › 右へ分割 <kbd>Ctrl</kbd>+<kbd>\</kbd></div><div class="command-desc">エディターを左右2グループにし、右側グループを作ります。すでに2グループなら無効です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › 下へ分割</div><div class="command-desc">エディターを上下2グループにし、下側グループを作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › 別グループへ移動 <kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Right</kbd></div><div class="command-desc">現在ビューをもう一方のグループへ移します。2グループが必要です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › 別グループに新しいビュー</div><div class="command-desc">同じ文書の追加ビューをもう一方のグループに作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › 次のエディターグループ <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>Right</kbd></div><div class="command-desc">フォーカスするエディターグループを切り替えます。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › グループ 1 にフォーカス <kbd>Ctrl</kbd>+<kbd>1</kbd></div><div class="command-desc">第1エディターグループへフォーカスを移します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › グループ 2 にフォーカス <kbd>Ctrl</kbd>+<kbd>2</kbd></div><div class="command-desc">第2エディターグループへフォーカスを移します。第2グループがない場合は無効です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › エディターグループ › グループを閉じる <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>W</kbd></div><div class="command-desc">現在グループを閉じ、ビューを残るグループへ集約します。最後の一グループは閉じません。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ウィンドウ › 新しいウィンドウ <kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></div><div class="command-desc">独立したメニュー、ペイン配置、エディターを持つ新しい作業ウィンドウを同じアプリ内に作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ウィンドウ › ビューを次のウィンドウへ移動</div><div class="command-desc">現在ビューを次の既存ウィンドウへ移します。移動先がないと無効です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ウィンドウ › 次のウィンドウに複製ビュー</div><div class="command-desc">同じ文書の追加ビューを次の既存ウィンドウへ作ります。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ウィンドウ › ビューを新しいウィンドウへ移動</div><div class="command-desc">新しい作業ウィンドウを作り、現在ビューをそこへ移します。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ウィンドウ › 新しいウィンドウに複製ビュー <kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>O</kbd></div><div class="command-desc">新しい作業ウィンドウへ同じ文書の追加ビューを作ります。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › 彩色</div><div class="command-desc">上部ツールオプション、左ツール、中央Canvas、右カラー／レイヤーを中心とする標準彩色配置へ切り替えます。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › 線整理</div><div class="command-desc">線の確認・修正に向く組み込み配置へ切り替えます。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › プリセット › 参照・チェック</div><div class="command-desc">ライトテーブル、シーケンス、参照などの確認を重視する配置へ切り替えます。</div></li>
@@ -967,7 +941,7 @@
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › ワークスペースを保存</div><div class="command-desc">現在のウィンドウ、分割、ドック、ペイン配置を現在名へ保存します。文書パスや画像内容は含めません。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 名前を付けて保存...</div><div class="command-desc">現在配置を新しいワークスペース名で保存します。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 保存したワークスペースを復元</div><div class="command-desc">選択中ワークスペースを最後に保存した配置へ戻します。</div></li>
-              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 既定に戻す</div><div class="command-desc">標準の彩色配置へ戻します。文書内容は変えません。既定キー列は <kbd>Q</kbd>, <kbd>N</kbd>, <kbd>R</kbd> です。</div></li>
+              <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 既定に戻す</div><div class="command-desc">標準の彩色配置へ戻します。文書内容は変えません。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › ロケーター</div><div class="command-desc">ロケーターを画面端のAutoHideボタンへ格納／復元します。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › シーケンス／プレビュー</div><div class="command-desc">シーケンス／プレビューをAutoHideへ格納／復元します。</div></li>
               <li class="search-unit"><div class="command-name">ウィンドウ › ワークスペース › 補助ペインを自動格納 › ライトテーブル</div><div class="command-desc">ライトテーブルをAutoHideへ格納／復元します。</div></li>
@@ -984,7 +958,7 @@
               <li class="search-unit"><div class="command-name">ヘルプ › Inkpodファイルフォーマット</div><div class="command-desc">現行のnative file formatに関する技術解説をオフラインで表示します。</div></li>
               <li class="search-unit"><div class="command-name">ヘルプ › 謝辞</div><div class="command-desc">Inkpodが使用するproduction外部ライブラリ、その用途、version、license、および完全な第三者通知の参照先をオフラインで表示します。</div></li>
               <li class="search-unit"><div class="command-name">ヘルプ › Inkpodウェブページ</div><div class="command-desc">Inkpodの公式ウェブページを既定ブラウザーで開きます。この項目にはネットワーク接続が必要です。</div></li>
-              <li class="search-unit"><div class="command-name">ヘルプ › Inkpodについて...</div><div class="command-desc">製品名、説明、バージョン、ビルド番号、著作権情報を表示します。画面は英語タイトル／説明を含みますが、現行の日本語UIで意図された表示です。</div></li>
+              <li class="search-unit"><div class="command-name">ヘルプ › Inkpodについて...</div><div class="command-desc">製品名、説明、バージョン、ビルド番号、著作権情報を現在のUI言語で表示します。</div></li>
             </ul></div>
           </details>
         </section>
@@ -1036,9 +1010,9 @@
               <p>参照セルを読み取り専用で表示します。前へ、次へ、現在セル、全体、等倍、現在色を登録、前セルを自動参照、Canvasスクロール同期を操作できます。クリックは色採取で、描画入力を文書へ送りません。</p>
               <p>アクティブ追従／文書固定に対応します。</p>
             </div>
-            <div class="card search-unit" id="pane-batch" data-search="バッチ batch input operations output preview dry-run run current all cancel save set job target">
+            <div class="card search-unit" id="pane-batch" data-search="バッチ batch input operations output preview validation run all cancel save set job target">
               <h3>バッチ</h3>
-              <p>対象表示とジョブ状態、入力一覧、順序付き処理、処理種類、追加／削除／上下／編集、出力概要、プレビュー、dry-run、現在セル、全実行、中止、セット保存／読込を配置します。実行中はジョブ対象を固定します。</p>
+              <p>対象表示とジョブ状態、入力・処理・出力を一列に並べた工程一覧、処理の追加／複製／削除／上下移動、選択項目の設定、検証表示、プレビュー、全実行、中止、セット保存／読込を配置します。実行中は発行時のジョブ対象を固定します。</p>
               <p><span class="menu-path">ウィンドウ › バッチ</span></p>
             </div>
             <div class="card search-unit" id="pane-canvas" data-search="Canvas キャンバス pointer pen mouse touch zoom pan flip drawing">
@@ -1071,15 +1045,15 @@
             <div class="table-scroll"><table class="compare">
               <thead><tr><th>ツール</th><th>主な用途</th><th>主な設定・条件</th></tr></thead>
               <tbody>
-                <tr><td>鉛筆</td><td>硬い主線／彩色線</td><td>ラスター用の固定太さ。<kbd>P</kbd></td></tr>
-                <tr><td>ブラシ</td><td>筆圧を使う描画</td><td>丸／角、太さ、筆圧、平滑化、同色領域制限。<kbd>B</kbd></td></tr>
-                <tr><td>消しゴム</td><td>ラスターの消去</td><td>太さ、筆圧、主線／彩色対象。<kbd>E</kbd></td></tr>
-                <tr><td>塗りつぶし</td><td>つながった領域を塗る</td><td>許容差、隙間、含み塗り、あふれ中断、LT境界／色。<kbd>F</kbd></td></tr>
-                <tr><td>閉領域塗り</td><td>囲んだ範囲の複数領域を塗る</td><td>透明だけ、選択制限、含み塗り。<kbd>Shift</kbd>+<kbd>F</kbd></td></tr>
-                <tr><td>塗り延ばし</td><td>既存色を未着色部へ広げる</td><td>距離、強さ、囲み範囲。<kbd>X</kbd></td></tr>
-                <tr><td>スポイト</td><td>Canvas／参照から色を採る</td><td>最上位、選択プレーン、合成、ライトテーブル。<kbd>I</kbd></td></tr>
-                <tr><td>グラデーション</td><td>線形／放射の多色階調</td><td>3色以上、アルファ、合成／上書き、ディザー。<kbd>G</kbd></td></tr>
-                <tr><td>エアブラシ</td><td>噴霧状の描画</td><td>太さ、硬さ、間隔、フェード、筆圧、連続噴霧。<kbd>A</kbd></td></tr>
+                <tr><td>鉛筆</td><td>硬い主線／彩色線</td><td>ラスター用の固定太さ。</td></tr>
+                <tr><td>ブラシ</td><td>筆圧を使う描画</td><td>丸／角、太さ、筆圧、平滑化、同色領域制限。</td></tr>
+                <tr><td>消しゴム</td><td>ラスターの消去</td><td>太さ、筆圧、主線／彩色対象。</td></tr>
+                <tr><td>塗りつぶし</td><td>つながった領域を塗る</td><td>許容差、隙間、含み塗り、あふれ中断、LT境界／色。</td></tr>
+                <tr><td>閉領域塗り</td><td>囲んだ範囲の複数領域を塗る</td><td>透明だけ、選択制限、含み塗り。</td></tr>
+                <tr><td>塗り延ばし</td><td>既存色を未着色部へ広げる</td><td>距離、強さ、囲み範囲。</td></tr>
+                <tr><td>スポイト</td><td>Canvas／参照から色を採る</td><td>最上位、選択プレーン、合成、ライトテーブル。</td></tr>
+                <tr><td>グラデーション</td><td>線形／放射の多色階調</td><td>3色以上、アルファ、合成／上書き、ディザー。</td></tr>
+                <tr><td>エアブラシ</td><td>噴霧状の描画</td><td>太さ、硬さ、間隔、フェード、筆圧、連続噴霧。</td></tr>
                 <tr><td>境界ブラシ</td><td>色境界だけへ階調効果</td><td>境界色群と幅</td></tr>
                 <tr><td>ぼかし</td><td>局所ぼかし</td><td>範囲形状、太さ、ぼかし量、筆圧</td></tr>
                 <tr><td>スタンプ</td><td>別位置から画像を複製</td><td>元位置、形、硬さ、間隔、筆圧</td></tr>
@@ -1119,7 +1093,7 @@
           </div>
           <div class="search-unit" data-search="palette pages groups 1 2 3 4 5 6 7 8 9 0 Tab save load">
             <h3 id="palette-use">カラーパレット</h3>
-            <p>色をクリックして描画色へ設定し、現在色の登録、選択色の削除、クリア、保存、読み込みができます。高頻度10色は文字入力中でないとき<kbd>1</kbd>〜<kbd>0</kbd>で選び、<kbd>Tab</kbd>で次の10色グループへ移動します。</p>
+            <p>色をクリックして描画色へ設定し、現在色の登録、選択色の削除、クリア、保存、読み込み、次の10色グループへの移動ができます。必要な操作はショートカットエディターから個別に割り当てられます。</p>
           </div>
           <div class="search-unit" data-search="color chart name number page lock cut copy paste quantization">
             <h3 id="chart-use">カラーチャート</h3>
@@ -1185,7 +1159,7 @@
           </div>
           <div class="search-unit" data-search="motion check playback FPS Space Escape first last frame">
             <h3 id="motion-workflow">モーションチェック</h3>
-            <p>「開始・設定...」で範囲、倍率、背景／余白色、開始時停止、選択のみ、ライトテーブルを含めるかを指定します。再生中は前後、先頭／末尾、30／25／24／12／10／8 FPSを切り替えられます。<kbd>Space</kbd>は一時停止／再開、<kbd>Esc</kbd>は停止です。</p>
+            <p>「開始・設定...」で範囲、倍率、背景／余白色、開始時停止、選択のみ、ライトテーブルを含めるかを指定します。再生中は前後、先頭／末尾、30／25／24／12／10／8 FPSを切り替えられます。<kbd>Esc</kbd>で停止できます。</p>
           </div>
         </section>
 
@@ -1210,24 +1184,24 @@
 
         <section class="chapter" id="batch" aria-labelledby="batch-heading">
           <h2 id="batch-heading">13. バッチ処理</h2>
-          <div class="search-unit" data-search="batch workflow dry run preview execution cancel overwrite failure atomic">
+          <div class="search-unit" data-search="batch workflow validation preview execution cancel failure atomic">
             <h3 id="batch-workflow">安全な実行手順</h3>
             <ol class="steps">
               <li>入力ファイル、入力フォルダー、または現在の連番を選び、必要ならセル番号範囲を指定します。</li>
-              <li>処理を順番に追加し、各処理の対象レイヤーと値を編集します。上へ／下へで順序を確認します。</li>
-              <li>出力方針はまず「複製保存（既定）」を使い、フォルダー・命名・待機を設定します。現行版の実出力は `.inkpod` です。</li>
-              <li><strong>dry-run</strong>で入力、対象、出力名、衝突、エラーを検査します。dry-runは一切書き込みません。</li>
-              <li><strong>プレビュー</strong>で結果を目視します。連続フィルでは、同じ文書座標が全フレームで目的領域にあるか確認します。</li>
-              <li>「現在セルを実行」または「全実行」を開始します。進捗はペインとステータスに表示されます。</li>
+              <li>色置換、彩色プレーンへ送る、マスキング、消去を順番に追加し、Color／Rasterプレーンの対象と値を編集します。上へ／下へで順序を確認します。</li>
+              <li>出力先はフォルダー、発行時のアクティブ文書、新規タブから選びます。フォルダーでは `.inkpod`、PNG、TIFF、TGA、BMPと命名規則を指定できます。マスキングは保護マスクを保持できない一般ラスターへは出力できません。</li>
+              <li>工程一覧の検証表示で入力、対象、出力名、衝突、エラーを解決します。「プレビュー」と「全実行」も開始前に同じ検証を行います。</li>
+              <li><strong>プレビュー</strong>で結果を目視します。プレビューは確定出力を書きません。</li>
+              <li>「全実行」を開始します。進捗はペインとステータスに表示され、処理途中の一件は部分確定されません。</li>
             </ol>
           </div>
           <div class="table-scroll search-unit" data-search="batch output duplicate new overwrite failure continue stop cancel">
             <table class="compare">
               <thead><tr><th>設定</th><th>意味</th><th>注意</th></tr></thead>
               <tbody>
-                <tr><td>複製保存（既定）</td><td>元を残して結果を複製</td><td>最初の確認に推奨</td></tr>
-                <tr><td>新規保存</td><td>新しい名前／場所へ出力</td><td>命名衝突をdry-runで確認</td></tr>
-                <tr><td>明示上書き</td><td>既存対象を置換</td><td>プレビュー後にだけ選ぶ</td></tr>
+                <tr><td>フォルダー</td><td>指定形式で新しい名前／場所へ出力</td><td>命名衝突を実行前の検証で確認</td></tr>
+                <tr><td>アクティブ文書</td><td>開始時に固定した文書へ一回のUndo単位で適用</td><td>保存先とsavepointは進めない</td></tr>
+                <tr><td>新規タブ</td><td>結果をpathless・未保存の新しい文書として開く</td><td>タブ上限を実行前に確認</td></tr>
                 <tr><td>記録して続行</td><td>失敗を記録し次へ</td><td>失敗した一件は部分確定しない</td></tr>
                 <tr><td>記録して停止</td><td>最初の失敗で停止</td><td>それ以前に完了した別出力は残る</td></tr>
                 <tr><td>キャンセル</td><td>実行中ジョブを中止</td><td>処理途中の一件は確定しない</td></tr>
@@ -1246,7 +1220,7 @@
             <table class="compare">
               <thead><tr><th>操作</th><th>目的</th><th>通常保存の基準／未保存状態</th><th>Undo</th></tr></thead>
               <tbody>
-                <tr><td>保存／名前を付けて保存</td><td>編集可能な原本を `.inkpod` として保存</td><td>成功時だけ基準を現在へ進める</td><td>保存自体はUndoしない。編集履歴は保持</td></tr>
+                <tr><td>保存／名前を付けて保存</td><td>編集可能な `.inkpod` と同じstemの通常ラスターを一つの論理ペアとして保存</td><td>両方の成功時だけ基準を現在へ進める</td><td>保存自体はUndoしない。編集履歴は保持</td></tr>
                 <tr><td>Recoveryを保存</td><td>障害復旧用の別データ</td><td>進めない。未保存表示も消さない</td><td>対象外</td></tr>
                 <tr><td>Recoveryを開く</td><td>復旧候補を「復元セル」として開く</td><td>元ファイルを上書きしない</td><td>新しく開いた文書で編集可能</td></tr>
                 <tr><td>ラスタ－を書き出し</td><td>他アプリ向けの平坦な画像</td><td>進めない</td><td>外部出力はUndoしない</td></tr>
@@ -1256,7 +1230,7 @@
           </div>
           <div class="search-unit" data-search="atomic safe save temporary replace failure original file">
             <h3 id="safe-save">保存の安全性</h3>
-            <p>保存は同じ保存場所に一時ファイルを完成させてから元ファイルを置き換えます。失敗しても先に元を空にしません。保存失敗時は未保存状態、保存先、最近使ったファイルを成功扱いに更新しません。通常の保存／読み込みは現行版では処理完了まで操作を待つため、大きな文書では少し時間がかかることがあります。</p>
+            <p>通常保存は `.inkpod` とラスター相手の両方を同じ保存場所の一時ファイルへ完成・flushしてから、復旧記録とbackupを使って順番に設置します。二つのファイルをfilesystem上で同時に置き換えることはできませんが、片方だけの設置を保存成功として表示せず、失敗時は復元を試みます。未解決の外部変更や同じstemの別名候補がある場合は競合として停止し、未保存状態、保存先、最近使ったファイルを成功扱いに更新しません。</p>
           </div>
           <div class="search-unit" data-search="savepoint undo redo dirty star tab">
             <h3 id="savepoint-history">通常保存の基準とUndo／Redo</h3>
@@ -1265,8 +1239,8 @@
           <div class="search-unit" data-search="supported formats inkpod v34 PNG TIFF TGA BMP 8 16 alpha DPI inkbatch v5 cell">
             <h3 id="file-formats">対応形式</h3>
             <ul>
-              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン34、リプレイエポック29）。標準レイヤー／プレーン、撮影フレーム、現在の選択と名前付き保存マスク、保存基準、履歴、パレット、ライトテーブル、色深度を保持します。</li>
-              <li><strong>一般ラスター:</strong> PNG、TIFF、TGA、BMP。各形式が表現できる8／16 bit、アルファ、寸法、DPIを扱います。形式で表せないレイヤー構造等は平坦化されます。</li>
+              <li><strong>セル編集用:</strong> `.inkpod`（現在の形式バージョン34、リプレイエポック29）。標準レイヤー／プレーン、撮影フレーム、現在の選択と名前付き保存マスク、保存基準、履歴、パレット、ライトテーブル、色深度を保持します。通常保存では同じstemの一般ラスターとペアになります。新規セルの既定相手はPNGで、環境設定からPNG／TIFF／TGA／BMPを選べます。</li>
+              <li><strong>一般ラスター:</strong> PNG、TIFF、TGA、BMP。各形式が表現できる8／16 bit、アルファ、寸法、DPIを扱います。形式で表せないレイヤー構造等は平坦化され、通常ペアの合成画像にはライトテーブル、ガイド、選択オーバーレイを含めません。RGBA16の通常相手はPNG／TIFFだけで、TGA／BMPへ暗黙に8 bit化しません。</li>
               <li><strong>バッチセット:</strong> `.inkbatch`（現在の形式バージョン5）。現行版だけを読み書きします。</li>
             </ul>
             <p>JPEGなど、ここに記載のない拡張子は対応形式として扱わないでください。アプリ固有形式は正式な形式凍結前のため、古い形式バージョンは移行せず明示的に拒否します。</p>
@@ -1281,8 +1255,8 @@
           <h2 id="keyboard-heading">15. キーボード操作とショートカット</h2>
           <div class="search-unit" data-search="shortcut editor configurable prefix sequence status bar">
             <h3 id="shortcut-system">ショートカットの仕組み</h3>
-            <p>すべてのメニュー末端項目には、1〜4ストロークの重複しないショートカットがあります。現在の割り当てはメニューに表示されます。頻繁なツールは単独キー、その他は <kbd>Q</kbd> から始まる分類済みキー列が中心です。複数キーの途中ではステータスバーに入力待ちが表示されます。</p>
-            <p><span class="menu-path">編集 › 設定 › ショートカット編集...</span>で変更できます。完全一致は元コマンドと交換し、ある割り当てが別の割り当ての途中と同じになる競合は拒否します。「ショートカットを初期化」で既定へ戻せます。</p>
+            <p>組み込みプリセットはWindows／Visual Studio Codeで意味が確立した共通操作だけにキーを割り当てる、疎な構成です。描画、フィル、選択、パレット、モーション、ペイン、ワークスペースなどinkpod固有のコマンドは初期状態で未割り当てですが、全コマンドをエディターから設定できます。複数キーの途中ではステータスバーに入力待ちが表示されます。</p>
+            <p><span class="menu-path">編集 › キーボードショートカット</span>で、主／副それぞれ未設定または最大4ストロークを割り当てます。重なるcontextの完全一致は競合として表示され、相手の解除または割り当ての交換で解決します。別コマンドの途中と同じになるprefix競合は受け付けません。Resetは選択したコマンドまたはプロファイルを明示的に既定へ戻します。</p>
           </div>
           <div class="table-scroll search-unit" data-search="default keyboard shortcuts Ctrl Alt Shift">
             <table class="compare">
@@ -1290,16 +1264,17 @@
               <tbody>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>N</kbd></td><td>新規セル</td><td><kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>開く</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>保存</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>S</kbd></td><td>名前を付けて保存</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す</td><td><kbd>Ctrl</kbd>+<kbd>Y</kbd></td><td>やり直し</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Z</kbd></td><td>元に戻す</td><td><kbd>Ctrl</kbd>+<kbd>Y</kbd>／<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Z</kbd></td><td>やり直し</td></tr>
                 <tr><td><kbd>Ctrl</kbd>+<kbd>X</kbd>/<kbd>C</kbd>/<kbd>V</kbd></td><td>カット／コピー／貼り付け</td><td><kbd>Ctrl</kbd>+<kbd>A</kbd></td><td>すべて選択</td></tr>
-                <tr><td><kbd>P</kbd>/<kbd>B</kbd>/<kbd>E</kbd></td><td>鉛筆／ブラシ／消しゴム</td><td><kbd>F</kbd>/<kbd>Shift</kbd>+<kbd>F</kbd></td><td>フィル／閉領域フィル</td></tr>
-                <tr><td><kbd>X</kbd>/<kbd>I</kbd></td><td>塗りのばし／スポイト</td><td><kbd>G</kbd>/<kbd>A</kbd></td><td>グラデーション／エアブラシ</td></tr>
-                <tr><td><kbd>R</kbd>/<kbd>O</kbd>/<kbd>L</kbd>/<kbd>W</kbd></td><td>長方形／楕円／投げ縄／色の杖選択</td><td><kbd>1</kbd>〜<kbd>0</kbd></td><td>パレットの高頻度10色</td></tr>
-                <tr><td><kbd>Tab</kbd></td><td>次の10色グループ（入力欄以外）</td><td><kbd>Alt</kbd>+<kbd>F4</kbd></td><td>アプリ終了</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>Tab</kbd></td><td>次のタブ</td><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>前のタブ</td></tr>
-                <tr><td><kbd>Ctrl</kbd>+<kbd>F4</kbd></td><td>ビューを閉じる</td><td><kbd>Ctrl</kbd>+<kbd>F6</kbd></td><td>次のエディターグループ</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>=</kbd>／<kbd>Ctrl</kbd>+<kbd>-</kbd></td><td>拡大／縮小</td><td><kbd>Ctrl</kbd>+<kbd>,</kbd></td><td>環境設定</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>S</kbd></td><td>キーボードショートカット</td><td><kbd>F1</kbd></td><td>ヘルプ</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>PageDown</kbd>／<kbd>Ctrl</kbd>+<kbd>Tab</kbd></td><td>次のタブ</td><td><kbd>Ctrl</kbd>+<kbd>PageUp</kbd>／<kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>Tab</kbd></td><td>前のタブ</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>PageUp</kbd>/<kbd>PageDown</kbd></td><td>タブを左／右へ移動</td><td><kbd>Ctrl</kbd>+<kbd>W</kbd>／<kbd>Ctrl</kbd>+<kbd>F4</kbd></td><td>ビューを閉じる</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>\</kbd></td><td>右へ分割</td><td><kbd>Ctrl</kbd>+<kbd>Alt</kbd>+<kbd>Right</kbd></td><td>別グループへ移動</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>1</kbd>／<kbd>Ctrl</kbd>+<kbd>2</kbd></td><td>グループ1／2へフォーカス</td><td><kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>Right</kbd></td><td>次のエディターグループ</td></tr>
+                <tr><td><kbd>Ctrl</kbd>+<kbd>Shift</kbd>+<kbd>N</kbd></td><td>新しいウィンドウ</td><td><kbd>Ctrl</kbd>+<kbd>K</kbd>, <kbd>Ctrl</kbd>+<kbd>O</kbd></td><td>新ウィンドウへビューを複製</td></tr>
                 <tr><td><kbd>F6</kbd>/<kbd>Shift</kbd>+<kbd>F6</kbd></td><td colspan="3">メニュー、ドックペイン、エディター、ステータスを順／逆順に巡回</td></tr>
-                <tr><td><kbd>Space</kbd></td><td>モーション一時停止／再開</td><td><kbd>Esc</kbd></td><td>再生、ドラッグ、プレビュー等のキャンセル</td></tr>
+                <tr><td><kbd>Alt</kbd>+<kbd>F4</kbd></td><td>アプリ終了</td><td><kbd>Esc</kbd></td><td>再生、ドラッグ、プレビュー等のキャンセル</td></tr>
               </tbody>
             </table>
           </div>
@@ -1332,9 +1307,9 @@
               <h3>プレビューして明るさを変える</h3>
               <ol><li>変更するプレーンと、必要なら選択範囲を決める。</li><li>「フィルタ › 明るさ・コントラスト...」を選ぶ。</li><li>プレビューで確認してOK。</li><li>元へ戻す場合はUndoする。</li></ol>
             </div>
-            <div class="card search-unit" data-search="recipe safe batch dry run duplicate save">
+            <div class="card search-unit" data-search="recipe safe batch validation folder preview">
               <h3>複数セルを安全に一括処理する</h3>
-              <ol><li>入力と処理列を設定。</li><li>出力を「複製保存（既定）」にする。</li><li>dry-runで衝突を検査。</li><li>プレビュー後に全実行。</li></ol>
+              <ol><li>入力と処理列を設定。</li><li>出力先をフォルダーにし、形式と命名規則を設定。</li><li>工程一覧の検証表示で衝突を解決。</li><li>プレビュー後に全実行。</li></ol>
             </div>
             <div class="card search-unit" data-search="recipe sequence natural order open save">
               <h3>連番セルを確認する</h3>
@@ -1365,7 +1340,7 @@
           </div>
           <div class="search-unit" data-search="save failed read only external change disk original dirty">
             <h3>保存できない</h3>
-            <p>読み取り専用、外部変更、保存先権限、空き容量、同じ保存先を使う別文書を確認します。失敗後も元ファイルと未保存状態は維持されます。別名保存を試す場合は、別の開いている文書と保存先が重ならない場所を選びます。</p>
+            <p>読み取り専用、外部変更、保存先権限、空き容量、同じ保存先を使う別文書を確認します。通常保存では `.inkpod` と同じstemのラスター相手の両方が対象です。大文字小文字違いの `.inkpod`、TIFFの `.tif`／`.tiff` など、同じ相手になり得る候補が複数ある場所は曖昧なため拒否されます。失敗後も元の両ファイルと未保存状態は維持されます。</p>
           </div>
           <div class="search-unit" data-search="recovery missing not same save startup restore">
             <h3>Recoveryを保存したのに通常保存済みにならない</h3>
@@ -1383,17 +1358,18 @@
             <h3>撮影フレームのハンドルが見えない</h3>
             <p>撮影フレームが文書に存在するか、「撮影フレームをハンドル編集」を選んでいるかを確認します。フレームがCanvas表示範囲外にある場合は全体表示に戻して位置を確認してください。</p>
           </div>
-          <div class="search-unit" data-search="batch no output dry-run preview current inkpod overwrite">
+          <div class="search-unit" data-search="batch no output validation preview all inkpod folder">
             <h3>バッチが開始しない／期待した形式で出ない</h3>
-            <p>入力、処理列、必要な対象レイヤー、出力設定をdry-runで確認します。dry-runとプレビューは出力しません。「現在セルを実行」または「全実行」が必要です。現行版のバッチ出力は `.inkpod` です。</p>
+            <p>入力、4種類の対応処理、必要なColor／Raster対象、出力先と形式を工程一覧の検証表示とプレビューで確認します。プレビューは確定出力を書かないため、「全実行」が必要です。フォルダー出力は `.inkpod`、PNG、TIFF、TGA、BMPに対応しますが、マスキングを含む処理列は保護マスクを保持できない一般ラスター形式を拒否します。</p>
           </div>
-          <div class="callout warning search-unit" id="current-limitations" data-search="current limitations known differences 日本語 AutoHide ARM64 batch sequence">
+          <div class="callout warning search-unit" id="current-limitations" data-search="current limitations known differences language AutoHide ARM64 batch sequence">
             <strong>現行版での制限</strong>
             <ul>
-              <li>UIリソースは日本語のみです。英語表示へ切り替える設定はありません。</li>
+              <li>UIは日本語／英語に対応します。言語変更は環境設定へ保存され、次回起動から反映されます。</li>
+              <li>アプリのメニューやダイアログは二言語対応ですが、埋め込みのオフラインヘルプ本文は現行版では日本語のみです。</li>
               <li>AutoHide端ボタンは支援技術から名前を取得できますが、<kbd>F6</kbd>／<kbd>Tab</kbd>だけでは到達できない場合があります。</li>
               <li>シーケンスペイン内にはセル切替時自動保存／端点循環の専用コントロールはありません。各設定はメニューから変更します。</li>
-              <li>バッチの実出力は `.inkpod` です。</li>
+              <li>バッチで作成できる処理は色置換、彩色プレーンへ送る、マスキング、消去です。フィルターや連続フィルはバッチ処理列からは利用できません。</li>
               <li>ARM64パッケージは構築されていますが、現行記録では一部のARM64実機操作は未確認です。</li>
             </ul>
           </div>
@@ -1408,7 +1384,7 @@
                 <tr><td>active／アクティブ</td><td>現在、操作の対象になっている状態。active layerとactive planeは別です。</td></tr>
                 <tr><td>AutoHide／自動格納</td><td>補助ペインを画面端の名前付きボタンへ畳む表示状態。</td></tr>
                 <tr><td>Canvas</td><td>文書画像を表示し、ペン・マウス・タッチで編集する中央領域。</td></tr>
-                <tr><td>dry-run</td><td>バッチの入力、対象、出力、衝突を検査するだけで、一切書き込まない実行。</td></tr>
+                <tr><td>実行前検証</td><td>バッチの入力、対象、出力、衝突を確定前に検査する処理。製品UIには独立したdry-runコマンドはありません。</td></tr>
                 <tr><td>Recovery</td><td>障害から作業を復元するための別保存。通常保存の代わりではありません。</td></tr>
                 <tr><td>savepoint／通常保存の基準</td><td>最後に通常保存が成功した履歴位置。未保存判定の基準になります。</td></tr>
                 <tr><td>セル</td><td>一枚の作画・彩色文書。</td></tr>
