@@ -240,6 +240,12 @@ add_test(
             -P "${CMAKE_SOURCE_DIR}/tests/verify_acknowledgements.cmake")
 
 add_test(
+    NAME inkpod_third_party_notices
+    COMMAND "${CMAKE_COMMAND}"
+            "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
+            -P "${CMAKE_SOURCE_DIR}/tests/verify_third_party_notices.cmake")
+
+add_test(
     NAME inkpod_windows_frontend_boundaries
     COMMAND "${CMAKE_COMMAND}"
             "-DINKPOD_SOURCE_DIR=${CMAKE_SOURCE_DIR}"
@@ -1182,7 +1188,7 @@ if(WIN32)
                 -Executable "$<TARGET_FILE:inkpod>"
                 -Readme "${INKPOD_PORTABLE_README}"
                 -License "${CMAKE_SOURCE_DIR}/LICENSE"
-                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.txt"
                 -Version "${PROJECT_VERSION}"
                 -Architecture "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}"
                 -OutputPath "${INKPOD_PORTABLE_ZIP_PATH}"
@@ -1191,7 +1197,7 @@ if(WIN32)
             "${CMAKE_SOURCE_DIR}/scripts/package-windows-portable.ps1"
             "${INKPOD_PORTABLE_README}"
             "${CMAKE_SOURCE_DIR}/LICENSE"
-            "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+            "${CMAKE_SOURCE_DIR}/docs/third-party-notices.txt"
         COMMENT "Assembling inkpod portable ZIP"
         VERBATIM)
     add_custom_target(inkpod_portable_zip ALL DEPENDS "${INKPOD_PORTABLE_ZIP_PATH}")
@@ -1206,14 +1212,14 @@ if(WIN32)
                 -Manifest "${INKPOD_PACKAGE_MANIFEST}"
                 -AssetsDirectory "${CMAKE_SOURCE_DIR}/apps/windows/package/Assets"
                 -License "${CMAKE_SOURCE_DIR}/LICENSE"
-                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.txt"
                 -OutputPath "${INKPOD_MSIX_PATH}"
         DEPENDS
             "${INKPOD_STATIC_CRT_STAMP}"
             "${CMAKE_SOURCE_DIR}/tests/build_msix.ps1"
             "${INKPOD_PACKAGE_MANIFEST}"
             "${CMAKE_SOURCE_DIR}/LICENSE"
-            "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+            "${CMAKE_SOURCE_DIR}/docs/third-party-notices.txt"
             ${INKPOD_MSIX_ASSETS}
         COMMENT "Assembling unsigned inkpod MSIX"
         VERBATIM)
@@ -1242,7 +1248,7 @@ if(WIN32)
                 -Executable "$<TARGET_FILE:inkpod>"
                 -Readme "${INKPOD_PORTABLE_README}"
                 -License "${CMAKE_SOURCE_DIR}/LICENSE"
-                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.md"
+                -ThirdPartyNotices "${CMAKE_SOURCE_DIR}/docs/third-party-notices.txt"
                 -ExpectedVersion "${PROJECT_VERSION}"
                 -ExpectedArchitecture "${INKPOD_MSIX_PROCESSOR_ARCHITECTURE}"
                 ${INKPOD_PORTABLE_TEST_ARGUMENTS})

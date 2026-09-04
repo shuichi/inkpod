@@ -634,7 +634,7 @@ try {
             -Executable $x64Executable `
             -Readme (Get-RepositoryPath 'apps/windows/package/README.portable.txt') `
             -License (Get-RepositoryPath 'LICENSE') `
-            -ThirdPartyNotices (Get-RepositoryPath 'docs/third-party-notices.md') `
+            -ThirdPartyNotices (Get-RepositoryPath 'docs/third-party-notices.txt') `
             -ExpectedVersion $Version `
             -ExpectedArchitecture x64 `
             -RunPortableSmoke
@@ -643,7 +643,7 @@ try {
             -Executable $armExecutable `
             -Readme (Get-RepositoryPath 'apps/windows/package/README.portable.txt') `
             -License (Get-RepositoryPath 'LICENSE') `
-            -ThirdPartyNotices (Get-RepositoryPath 'docs/third-party-notices.md') `
+            -ThirdPartyNotices (Get-RepositoryPath 'docs/third-party-notices.txt') `
             -ExpectedVersion $Version `
             -ExpectedArchitecture arm64
 

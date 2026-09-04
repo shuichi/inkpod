@@ -312,7 +312,7 @@ foreach(CORE_BOUNDARY_FILE IN LISTS CORE_BOUNDARY_FILES)
     endif()
 endforeach()
 
-file(READ "${INKPOD_SOURCE_DIR}/docs/third-party-notices.md" THIRD_PARTY_TEXT)
+file(READ "${INKPOD_SOURCE_DIR}/docs/third-party-notices.txt" THIRD_PARTY_TEXT)
 foreach(NOTICE_MARKER IN ITEMS
         "Fluent UI System Icons"
         "84e8a2ae0e55b3cbe176b5cc33154fe82ef363cc"

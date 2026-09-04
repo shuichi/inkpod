@@ -34,7 +34,7 @@
   `main.cpp` は起動 mode と runner に限定する。private Windows 宣言を公開 C ABI へ出さない。
 - Rust は stable / edition 2024、Windows は MSVC C++20、CMake を build の入口とする。
   Rust staticlib は `inkpod-ffi` だけ。全構成で C/C++ `/MT` と Rust `+crt-static` を揃える。
-- 依存は最小限とし、追加時は配布ライセンスと `docs/third-party-notices.md` を更新する。
+- 依存は最小限とし、追加時は配布ライセンスと `docs/third-party-notices.txt` を更新する。
   build に個人の絶対 path、手動 copy、shell profile 依存を持ち込まない。
 
 ## 変更と判断

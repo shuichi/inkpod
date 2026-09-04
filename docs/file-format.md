@@ -821,7 +821,7 @@ content.
 
 The approved Rust implementation is the official `blake3` crate pinned as
 exact version `=1.8.5` with default features disabled and only `std` enabled, as
-recorded in `third-party-notices.md`; its portable/SIMD backend choice does not
+recorded in `third-party-notices.txt`; its portable/SIMD backend choice does not
 change digest output. The Core production dependency computes the
 hierarchical schema-12 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render

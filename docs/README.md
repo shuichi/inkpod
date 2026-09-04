@@ -20,7 +20,7 @@
 | InkScript command signature | [inkscript-command-reference.md](inkscript-command-reference.md): catalog からの生成物。手編集しない |
 | Windows release の実機確認 | [windows-release-checklist.md](windows-release-checklist.md): 再現可能な実機検証手順 |
 | 配布物の生成 | [windows-packaging.md](windows-packaging.md): package の生成・検証・公開手順 |
-| 配布ライセンス | [third-party-notices.md](third-party-notices.md): 必須の第三者通知 |
+| 配布ライセンス | [third-party-notices.txt](third-party-notices.txt): 必須の第三者通知 |
 | API HTML 生成 | [api/README.md](api/README.md): Doxygen の生成手順 |
 
 ## 更新規則
