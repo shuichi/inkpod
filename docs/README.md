@@ -16,6 +16,7 @@
 | Rust/C ABI/Windows route | [primitive-route-inventory.md](primitive-route-inventory.md): テストが直接検証する機械可読 inventory |
 | Windows command ownership | [windows-command-inventory.md](windows-command-inventory.md): command/state の入口と担当 |
 | Windows 設定保存 | [windows-application-data.md](windows-application-data.md): 設定・shortcut・workspace の現行格納契約 |
+| InkScript の言語・runtime・公開 gate | [INKSCRIPT.md](../INKSCRIPT.md): 現行契約と未解除の公開・cutover 条件。16–18 節の停止・確認・prompt は当該 milestone workflow の明示的な再開時だけ適用 |
 | InkScript の対応関係 | [inkscript-traceability.md](inkscript-traceability.md): 要件、registry、owner、証拠の対応 |
 | InkScript command signature | [inkscript-command-reference.md](inkscript-command-reference.md): catalog からの生成物。手編集しない |
 | Windows release の実機確認 | [windows-release-checklist.md](windows-release-checklist.md): 再現可能な実機検証手順 |
@@ -28,6 +29,7 @@
 - 一つの情報は一つの正本へ置き、他文書からはリンクする。SPEC に実装ログを、AGENTS に詳細仕様を追加しない。
 - 完了した計画・調査プロンプト・古い実行記録は削除し、必要な経緯は Git 履歴から確認する。
   現在も有効な制約・判断理由・未解決事項・承認済み性能基準は削除前に正本へ移す。
+  InkScript の milestone 記録は未解除の workflow と受入条件を判別するため保持し、現在状態の正本にはしない。
 - 挙動の食い違いは現行 SPEC と実装・テストを照合し、整理だけを理由に仕様や合否基準を変えない。
 - 文書の削除・移動時はリンク、code comment、テストと生成 script からの参照を確認する。
 - `implementation-status.md` と `inkscript-performance-proposal.md` は既存リンク用の移転案内だけを残す。

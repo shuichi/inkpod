@@ -823,7 +823,7 @@ The approved Rust implementation is the official `blake3` crate pinned as
 exact version `=1.8.5` with default features disabled and only `std` enabled, as
 recorded in `third-party-notices.txt`; its portable/SIMD backend choice does not
 change digest output. The Core production dependency computes the
-hierarchical schema-12 `DocumentStateDigest` for canonical execution and
+hierarchical schema-13 `DocumentStateDigest` for canonical execution and
 fresh-Core replay. Its runtime commitment cache is separate from render
 caching: snapshot validation uses only the documented revision-max scalar and
 never these digests. The same pinned implementation computes the v34 section,
@@ -838,7 +838,7 @@ replay epoch 29 before staged Core publication:
 | Offset | Size | Field |
 |---:|---:|---|
 | 0 | 8 | magic bytes `49 4E 4B 50 4F 44 00 00` |
-| 8 | 4 | top-level format version = 32 |
+| 8 | 4 | top-level format version = 34 |
 | 12 | 4 | outer container-layout epoch = 9 |
 | 16 | 4 | header size = 128 |
 | 20 | 4 | required flags = 0 |

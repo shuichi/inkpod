@@ -8,11 +8,16 @@
 journal-replayable な canonical procedure と等価な文書変更を、別文書へ安全に
 再束縛して実行できることを目的とする。
 
-機能要件の最上位の正本は引き続き `SPEC.md` とする。最初のマイルストーン M00 で、
-`SPEC.md` に `SCRIPT-*` 要件、この文書への規範参照、`.inkbatch` cutover 前後の状態を
-追加する。M00 が完了するまでは production parser、executor、ABI、UI の実装へ進んでは
-ならない。この文書と `SPEC.md` が競合する場合は、ユーザーの最新指示、`AGENTS.md`、
-`SPEC.md`、この文書の順で解決する。
+機能要件の正本は [SPEC.md](SPEC.md)、作業規律の正本は [AGENTS.md](AGENTS.md) とする。
+本書の現行 language/runtime 契約と、未解除の product 公開・cutover gate は規範である。
+競合はユーザーの最新指示、`AGENTS.md`、`SPEC.md`、この文書の順で解決する。
+
+16–18 節の一 milestone ごとの停止・利用者確認・再開 prompt は、ユーザーが当該 milestone
+workflow の再開を明示した場合だけ適用する。本書を参照・レビュー・更新すること自体は、
+再開指示、利用者確認、承認を意味しない。M34 の cutover、性能基準、版数変更の承認条件と
+未解除の公開 gate は、この適用範囲の区別によって解除されない。現在の要件別状態・既知差分・
+代表検証は [docs/compatibility.md](docs/compatibility.md) を正本とし、17 節の記録は当該
+workflow の実装・受入履歴として読む。
 
 machine-readable schemaは段階を分ける。M00でregistry schema v1とlanguage v1を規範化し、M07で承認された
 exact-current `schemas/inkscript/registry-schema-v2.json`がcatalog-owned typeを追加してregistry schema v1を
@@ -26,7 +31,7 @@ M23で全単射、実装、equivalence evidenceを検証して当時の
 その後のBatch契約更新でcatalog／owner manifest v4へ進み、layer／plane再ベースラインでは
 `convert_layer`、adjustment-layer 2 command、selection-layer 2 command、vanishing-point commandを退役させ、
 document-owned saved-selection-mask 4 commandを追加した73 commandを
-`schemas/inkscript/catalog-v5.json`とowner manifest v5へfreezeした。カット管理・指示画像export廃止に伴い、撮影frameのinclude fieldを削除し、現行catalog／ownerはv6、EditShootingFrame schema 3／semantics 2へ進む。退役primitive IDはtombstoneとして再利用しない。
+`schemas/inkscript/catalog-v5.json`とowner manifest v5へfreezeした。カット管理・指示画像export廃止に伴い、撮影frameのinclude fieldを削除し、catalog／ownerはv6、EditShootingFrame schema 3／semantics 2へ進んだ。現行は線補正を追加した`schemas/inkscript/catalog-v7.json`とowner manifest v7の74 commandである。退役primitive IDはtombstoneとして再利用しない。
 pre-ratification draftは残さない。production Rust APIはexact-currentのclosed catalogだけを受理し、C ABI、Windows、
 product file routeは後続milestoneまで公開しない。
 `docs/inkscript-command-reference.md`はlanguage/catalog registryから生成する派生物であり、手編集しない。
@@ -36,7 +41,7 @@ product file routeは後続milestoneまで公開しない。
 
 現在のexact-current値は次のとおりとする。
 
-| 項目                                |                                       初期値 |
+| 項目                                |                                       現在値 |
 | ----------------------------------- | -------------------------------------------: |
 | InkScript file format version       |                                            2 |
 | InkScript procedure catalog version | 7（線補正追加、74 command） |
@@ -60,7 +65,7 @@ exact-current version だけを受理する。grammar、serialized field、selec
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
 catalog v2 draftはM23までproduction catalog contractではなく、owner milestone内で変更できたがproductから受理
-しなかった。M23で批准した`catalog-v2.json`も履歴としてin-place変更せず、現行は`catalog-v6.json`だけを受理する。
+しなかった。M23で批准した`catalog-v2.json`も履歴としてin-place変更せず、現行は`catalog-v7.json`だけを受理する。
 新entryやsignature変更ではcatalog versionを更新し、旧version拒否test、example、registry、生成referenceを同時更新する。
 
 ## 2. 目的と非目的
@@ -828,7 +833,7 @@ M23で全entry、実装、owner、equivalence evidenceの全単射を検証し�
 `catalog-v2.json`へfreezeした。M27B後の再ベースラインでvector 8 commandとannotation 1 commandを削除し、残る
 75 entryを`catalog-v3.json`へfreezeした。Batch契約更新のv4を経て、layer／plane再ベースラインでは
 6 commandを退役、saved-selection-mask 4 commandを追加し、73 entryを`catalog-v5.json`へfreezeした。
-現行は撮影frameのinclude fieldを除去したcatalog v6である。catalog v6はRust compile／bind／staged-run contractとしてproduction公開するが、
+撮影frameのinclude fieldを除去したcatalog v6を経て、現行は線補正を追加した74 entryのcatalog v7である。catalog v7はRust compile／bind／staged-run contractとしてproduction公開するが、
 file、clipboard、FFI、Windows product commandからの到達は各後続owner milestoneまで許可しない。
 
 registryは最低限、次を定義する。
@@ -1547,9 +1552,16 @@ production sourceから旧reader/APIを除去しても、compatibilityの履歴�
 
 ## 16. マイルストーン運用規則
 
+本節から18節までの実装順序、一 milestone ごとの停止、利用者確認、prompt 例は、ユーザーが
+当該 milestone workflow を明示的に再開したときだけ適用する。通常の実装・レビュー・保守は
+[AGENTS.md](AGENTS.md) に従い、本書の参照だけでこの workflow を開始しない。現行の
+language/runtime 契約、未解除の product 公開・cutover gate、性能基準・版数変更の承認条件は
+引き続き守る。workflow の再開だけを、これらの gate の承認や解除として扱わない。
+
 ### 16.1 状態遷移
 
-各headingのmarkerが実装と利用者受入の正本である。
+各headingのmarkerは当該 milestone workflow の実装と利用者受入の記録であり、現在の
+要件別状態・既知差分・代表検証の正本は [docs/compatibility.md](docs/compatibility.md) とする。
 
 - `[ ]`: 未実装
 - `[~]`: scope、完了条件、自動検証まで完了し、利用者確認または明示承認待ち

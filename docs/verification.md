@@ -6,7 +6,21 @@
 
 ## 自動検証と完了条件
 
-変更範囲に応じて少なくとも次を実行する。
+最初に変更が影響する契約と受入条件を特定し、下表で検証範囲を決める。複数の種別に
+該当する場合は必要な検証を合わせる。局所テストで原因と期待値を確定した後、共有境界への
+影響を検証する。範囲選択を理由に、該当する公開契約、可視経路、性能 gate を省略しない。
+
+| 変更種別 | 必要な検証 |
+| --- | --- |
+| 文書のみ | 変更した文書を入力にする生成物・契約テスト、リンク・要件 ID・参照整合、`git diff --check`。本文の整理だけで実行コードに影響しない場合は全 build を要求しない |
+| Rust の実装・公開契約 | format、lint、対象の public API 契約テストと workspace test。公開 API・rustdoc の変更では warning を拒否する API 文書生成も行う |
+| C ABI・共有境界 | Rust 検証に加え、C11/C++20 header、export/route 整合、所有権・寿命・失敗・thread 契約、Windows adapter の build/test |
+| Windows UI・renderer・入力 | 対象構成の configure/build/test、影響する native smoke と可視経路。layout は下記 resize 契約、物理入力・accessibility は該当する実機項目も確認する |
+| 保存形式・replay semantics | 対象形式の現行 round-trip、旧版拒否、malformed/cancel/failure atomicity、Undo/Redo・save/reopen・cache-free replay と関連境界の検証 |
+| Core・画像処理・cache の性能に影響する変更 | 対象 workload の既存 benchmark と意味 counter。最適化は同一条件の before/after、承認済み envelope と canonical `revision-max` gate を維持する |
+| build・依存・配布 | 対象 architecture/configuration の configure/build/test、CRT・ライセンス・package 検査。変更なしの再 build を保証する契約に影響する場合はその検査も行う |
+
+基本コマンドは次のとおり。上表で該当するものを使い、対象機能の追加検証と組み合わせる。
 
 ```text
 cargo fmt --check
@@ -19,7 +33,14 @@ cmake --build --preset windows-x64-debug
 ctest --preset windows-x64-debug --output-on-failure
 ```
 
-実際の preset 名を使い、rustdoc は実行 shell に応じて `RUSTDOCFLAGS=-D warnings` 相当を設定する。非 Windows 環境でも Rust 検証を完了し、Win32 は Windows CI で検証する。実行できなかった検証を隠さない。
+実際の preset 名を使い、rustdoc は実行 shell に応じて `RUSTDOCFLAGS=-D warnings` 相当を設定する。
+非 Windows 環境でも該当する Rust 検証を完了する。Windows CI は build と CI 対象の検証を担うが、
+`local-only` を除外するため、英日可視 smoke と sequence performance の成功を代替しない。
+実行できなかった Windows／実機項目は未検証として残す。
+
+選んだ検証がすべて成功し、変更した契約の反例・境界・失敗経路を確認し、未解決の失敗が
+なければ検証を終了する。追加変更、失敗、未解決の懸念がない同一検証を繰り返さない。
+必要な検証を実行できない場合は、実施済み範囲と不足する証拠を報告し、検証済みと扱わない。
 
 必要なテストは次を含む。
 
@@ -39,7 +60,7 @@ ctest --preset windows-x64-debug --output-on-failure
 - UI から Core まで動く縦切り、または明示された Core-only scope になっている
 - success、no-op、invalid、cancel、Undo/Redo、必要な save/reopen をテストしている
 - ABI ownership、lifetime、thread 規則を文書化している
-- `docs/compatibility.md` の requirement、状態、test、既知差分を更新している
+- 状態・既知差分・代表検証が変わった場合だけ、`docs/compatibility.md` の該当する requirement の行へ反映している
 
 互換状態は `Not started`、`In progress`、`Experimental`、`Verified`、`Blocked` のいずれかとする。test がない機能を `Verified` にしない。
 
@@ -75,6 +96,9 @@ OS entropy、test 実行順、private field bridge に依存させない。局�
 
 同じ executor 同士の比較だけで pixel の正しさを主張せず、小さい明示的な期待画像・mask を持つ。
 Core の成功だけで Windows の到達性・画素結果・物理入力まで保証したと書かない。
+証拠は CI、自動 native 非表示、可視経路、実機に区別する。非表示 smoke は geometry と
+update region を、可視 smoke は画素と Present を、実機確認は実際の入力・DPI・支援技術を
+それぞれ観測した範囲で記録する。一つの成功から未実行の構成や経路へ一般化しない。
 Windows の実機検証と記録様式は [windows-release-checklist.md](windows-release-checklist.md) を使う。
 
 同じ入力・構成の失敗と単独再実行の成功を区別し、原因未特定の間欠失敗を解決済みにしない。

@@ -5,6 +5,11 @@ This reference connects [SPEC requirements](../SPEC.md), the separate normative
 evidence. It is not a milestone prompt. Current signatures come from
 [catalog-v7.json](../schemas/inkscript/catalog-v7.json); the generated presentation is
 [inkscript-command-reference.md](inkscript-command-reference.md).
+The language contract's scope rules distinguish normative runtime/publication gates
+from the opt-in milestone workflow. Reading this reference does not resume that
+workflow or approve a gate. [compatibility.md](compatibility.md) owns current
+requirement status, known differences and representative verification; milestone
+markers record implementation and acceptance within that workflow.
 
 ## Current contract
 
