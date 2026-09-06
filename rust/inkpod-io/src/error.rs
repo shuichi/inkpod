@@ -13,6 +13,7 @@ pub enum IoError {
     Shutdown,
     WorkerPanicked,
     ConfirmationRequired,
+    UnsupportedAtomicPublication,
 }
 
 pub type IoResult<T> = Result<T, IoError>;
@@ -31,6 +32,9 @@ impl fmt::Display for IoError {
             Self::WorkerPanicked => formatter.write_str("file I/O worker failed"),
             Self::ConfirmationRequired => formatter
                 .write_str("file destination changed or overwrite confirmation is required"),
+            Self::UnsupportedAtomicPublication => {
+                formatter.write_str("filesystem does not support guarded atomic publication")
+            }
         }
     }
 }

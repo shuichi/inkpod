@@ -575,6 +575,8 @@ InkScript は [INKSCRIPT.md の適用範囲](INKSCRIPT.md)に従い、language c
 
 InkScript catalog v8 の `apply_batch_operations` は四処理の順序付き列を一 canonical invocation／一 Commit／一 Undo として実行する。Color／Raster の role、UUID 付き strict target、先行 result reference を型付きで検査し、MainLine は `missing=skip` でも拒否する。target は initial input へ固定し、全列の実行直前 preflight と既存 canonical executor を使用する。失敗・cancel・stale・resource 超過は staged state を公開しない。fragment は展開済み順序を保持し、元の UI grouping や disabled operation を復元したと表示しない。詳細は [D1 接続契約](docs/inkscript-batch-connection.md#d1一-command-の表現と実行)に従う。
 
+InkScript file v3 の Core-only 入出力は明示 `inputs.profile = batch | canonical`（省略は canonical）を持ち、[入力契約](INKSCRIPT.md#73-inputs)に従って順序、range、重複、open snapshot の意味を保持する。共通codecの `.inkpod`／PNG／TIFF／TGA／BMP、非再帰folder、発行時active入力を共有Rust I/O managerで扱う。[出力契約](INKSCRIPT.md#79-output)のclosed native naming／folder／active_document／new_tabsを使い、activeは単一Batch transactionと両savepoint・path authorityを保持し、新規tabは新identity／pathless／dirtyとする。[画像preview](INKSCRIPT.md#821-画像-preview-と-staged-publication)は全入力を隔離後に保存・再読込し、4 GiB／16,777,216 pixelsの上限とcleanup-before-publication、元targetの固定を守る。これらは製品Batch切替や新しいABI／Windows公開を意味しない。
+
 
 ### 20. 形式、白透過、一般画像入出力
 
@@ -592,7 +594,7 @@ InkScript catalog v8 の `apply_batch_operations` は四処理の順序付き列
 | snapshot-composite schema | 5 | [snapshot](rust/inkpod-core/src/snapshot.rs) の `canonical_composite_digest`／`COMPOSITE_DIGEST_CONTEXT` |
 | `.inkbatch`／operation schema | 5／4 | [Batch format](rust/inkpod-format/src/batch.rs) の `BATCH_GRAPH_VERSION`／`BATCH_OPERATION_VERSION` |
 | InkScript registry schema | 2 | [registry schema](schemas/inkscript/registry-schema-v2.json) と各 registry の `registry_schema_version` |
-| InkScript language／file | 2 | [language](schemas/inkscript/language-v2.json) の `file_version`、[source](rust/inkpod-format/src/inkscript/source.rs) の `INKSCRIPT_FILE_VERSION` |
+| InkScript language／file | 3 | [language](schemas/inkscript/language-v3.json) の `file_version`、[source](rust/inkpod-format/src/inkscript/source.rs) の `INKSCRIPT_FILE_VERSION` |
 | InkScript production catalog／owner manifest | v8、75 command | [catalog](schemas/inkscript/catalog-v8.json) の `catalog_version`／`entries`、[owner manifest v8](schemas/inkscript/owner-manifest-v8.json) の `replay_contract` |
 | `EditShootingFrame` schema／semantics | 3／2 | [primitive catalog](rust/inkpod-core/src/primitive/catalog.rs) の `EDIT_SHOOTING_FRAME` |
 | `ApplyLineCorrection` schema／semantics | 2／1 | 同 catalog の `APPLY_LINE_CORRECTION` |

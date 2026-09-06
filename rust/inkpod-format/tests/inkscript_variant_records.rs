@@ -37,7 +37,7 @@ fn catalog_variant_fields_are_required_only_for_the_selected_kind() {
         ("kind = many; values = [1,2,3];", false),
     ] {
         let text = format!(
-            "inkscript_fragment 2; requires {{ procedure_catalog = {}; replay_epoch = {}; }} program {{ step \"variant\" {{ enabled = true; invoke variant_test {{ argument = {{ {record} }}; }}; }} }}",
+            "inkscript_fragment 3; requires {{ procedure_catalog = {}; replay_epoch = {}; }} program {{ step \"variant\" {{ enabled = true; invoke variant_test {{ argument = {{ {record} }}; }}; }} }}",
             inkpod_format::INKSCRIPT_PROCEDURE_CATALOG_VERSION,
             inkpod_format::INKSCRIPT_REQUIRED_REPLAY_EPOCH
         );
@@ -105,7 +105,7 @@ fn disabled_nested_batch_references_remain_in_fragment_dependency_closure() {
     let schema =
         InkScriptSchemaView::exact_current_with_catalog(ENUMS, &[], RECORDS, COMMANDS).unwrap();
     let text = format!(
-        "inkscript_fragment 2; requires {{ procedure_catalog = {}; replay_epoch = {}; }} bindings {{ let existing = select plane {{ cardinality = first; }}; }} program {{ step \"Producer\" as made {{ enabled = true; invoke duplicate_plane {{ plane_id = $existing; }}; }} step \"Batch\" {{ enabled = true; invoke apply_batch_operations {{ operations = [{{ kind = erase; enabled = false; target = {{ kind = references; layer = none; plane = $made.plane; }}; colors = [rgba8(0,0,0,0)]; }}]; }}; }} }}",
+        "inkscript_fragment 3; requires {{ procedure_catalog = {}; replay_epoch = {}; }} bindings {{ let existing = select plane {{ cardinality = first; }}; }} program {{ step \"Producer\" as made {{ enabled = true; invoke duplicate_plane {{ plane_id = $existing; }}; }} step \"Batch\" {{ enabled = true; invoke apply_batch_operations {{ operations = [{{ kind = erase; enabled = false; target = {{ kind = references; layer = none; plane = $made.plane; }}; colors = [rgba8(0,0,0,0)]; }}]; }}; }} }}",
         inkpod_format::INKSCRIPT_PROCEDURE_CATALOG_VERSION,
         inkpod_format::INKSCRIPT_REQUIRED_REPLAY_EPOCH
     );

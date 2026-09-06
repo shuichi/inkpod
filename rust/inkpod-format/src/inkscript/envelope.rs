@@ -6,11 +6,11 @@ use super::parser::InkScriptDocumentKind;
 use super::schema::{INKSCRIPT_PROCEDURE_CATALOG_VERSION, INKSCRIPT_REQUIRED_REPLAY_EPOCH};
 use super::source::INKSCRIPT_FILE_VERSION;
 use super::syntax::{
-    InkScriptInput, InkScriptInputKind, InkScriptRecord, InkScriptSemanticDocument,
-    InkScriptSemanticSection, InkScriptValue,
+    InkScriptInput, InkScriptInputKind, InkScriptInputs, InkScriptRecord,
+    InkScriptSemanticDocument, InkScriptSemanticSection, InkScriptValue,
 };
 
-/// Maximum execution delay between two planned items in InkScript file version 1.
+/// Maximum execution delay between two planned items in the exact-current language.
 pub const MAX_INKSCRIPT_WAIT_MS: u32 = 3_600_000;
 
 /// Stable failure categories produced while typing an orchestration envelope.
@@ -32,9 +32,9 @@ pub enum InkScriptEnvelopeErrorCode {
     InvalidMetadataExtension,
     /// A metadata extension key occurs more than once.
     DuplicateMetadataExtension,
-    /// An input cell selection is zero, reversed, or invalid for the input kind.
+    /// An input cell selection violates its profile's bounds or input-kind policy.
     InvalidCellRange,
-    /// Recursive folder input is not available in file version 1.
+    /// Recursive folder input is not available in the exact-current language.
     UnsupportedRecursiveInput,
     /// The output record is not one of the closed exact-current variants.
     InvalidOutput,
@@ -162,10 +162,10 @@ impl InkScriptMetadata {
     }
 }
 
-/// Closed input declaration kinds in InkScript file version 1.
+/// Closed input declaration kinds in the exact-current language.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InkScriptInputDeclarationKind {
-    /// One native Cell file path intent.
+    /// One native Cell or supported raster file path intent.
     File,
     /// One non-recursive folder enumeration path intent.
     Folder,
@@ -175,12 +175,23 @@ pub enum InkScriptInputDeclarationKind {
     CurrentSequence,
 }
 
+/// Input ordering, duplicate, range and immutable snapshot policy.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InkScriptInputProfile {
+    /// General script semantics, including global natural order and complete snapshots.
+    #[default]
+    Canonical,
+    /// Batch declaration order, file identity duplicates and materialized document snapshots.
+    Batch,
+}
+
 /// A typed display-number selection applied when an input is expanded.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InkScriptCellSelection {
     /// Select every available item.
     All,
-    /// Select a nonzero inclusive display-number range.
+    /// Select an inclusive number range. Canonical requires nonzero bounds;
+    /// Batch treats zero on either side as unbounded.
     Inclusive {
         /// First selected display number.
         first: u32,
@@ -216,11 +227,45 @@ impl InkScriptInputDeclaration {
     }
 }
 
-/// The only output format accepted by InkScript file version 1.
+/// Closed output encodings. Raster encoding uses the shared composite export path.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InkScriptOutputFormat {
     /// Exact-current native `.inkpod` output.
     Inkpod,
+    /// PNG raster output.
+    Png,
+    /// TIFF raster output.
+    Tiff,
+    /// TGA raster output.
+    Tga,
+    /// BMP raster output.
+    Bmp,
+}
+
+/// Bounded folder output intent with a validated naming template.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InkScriptFolderOutput {
+    folder: String,
+    naming_template: String,
+    format: InkScriptOutputFormat,
+}
+
+impl InkScriptFolderOutput {
+    /// Returns unresolved nonempty folder text (at most 32,768 UTF-8 bytes).
+    pub fn folder(&self) -> &str {
+        &self.folder
+    }
+
+    /// Returns a 1–1,024 byte template containing only literal stem text,
+    /// `{stem}` and `{index:N}` placeholders, where N is 1–12.
+    pub fn naming_template(&self) -> &str {
+        &self.naming_template
+    }
+
+    /// Returns the selected encoding; it determines the filename extension.
+    pub const fn format(&self) -> InkScriptOutputFormat {
+        self.format
+    }
 }
 
 /// Numbering direction for duplicate and new-save output.
@@ -269,7 +314,7 @@ impl InkScriptNumberedOutput {
     }
 }
 
-/// Closed output policy union for InkScript file version 1.
+/// Closed output policy union for the exact-current language.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum InkScriptOutput {
     /// Create an independently named native output without changing document identity.
@@ -278,12 +323,21 @@ pub enum InkScriptOutput {
     NewSave(InkScriptNumberedOutput),
     /// Replace each eligible closed file-backed input after later authority/confirmation gates.
     ExplicitOverwrite,
+    /// Create one file per result beneath an authorized output folder.
+    Folder(InkScriptFolderOutput),
+    /// Stage one Batch mutation for the issue-time active document.
+    ActiveDocument,
+    /// Stage independently identified, pathless dirty documents.
+    NewTabs,
 }
 
 impl InkScriptOutput {
-    /// Returns the closed native output format.
+    /// Returns the file encoding, or native encoding for staged active/new-tab results.
     pub const fn format(&self) -> InkScriptOutputFormat {
-        InkScriptOutputFormat::Inkpod
+        match self {
+            Self::Folder(output) => output.format,
+            _ => InkScriptOutputFormat::Inkpod,
+        }
     }
 }
 
@@ -324,9 +378,9 @@ impl InkScriptExecutionPolicy {
 /// Filesystem capability described by source path-intent text.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum InkScriptPathIntentAccess {
-    /// Read one native file.
+    /// Read one supported native or raster file.
     Read,
-    /// Enumerate one folder without recursive traversal in version 1.
+    /// Enumerate one folder without recursive traversal.
     Enumerate,
     /// Create output beneath a later-authorized folder.
     Create,
@@ -381,6 +435,7 @@ pub struct InkScriptOrchestrationEnvelope {
     requirements: InkScriptRequirements,
     metadata: InkScriptMetadata,
     inputs: Vec<InkScriptInputDeclaration>,
+    input_profile: InkScriptInputProfile,
     output: InkScriptOutput,
     execution: InkScriptExecutionPolicy,
 }
@@ -404,6 +459,11 @@ impl InkScriptOrchestrationEnvelope {
     /// Returns input declarations in source order.
     pub fn inputs(&self) -> &[InkScriptInputDeclaration] {
         &self.inputs
+    }
+
+    /// Returns the explicit input policy, defaulting to canonical when omitted.
+    pub const fn input_profile(&self) -> InkScriptInputProfile {
+        self.input_profile
     }
 
     /// Returns the closed output variant.
@@ -437,6 +497,14 @@ impl InkScriptOrchestrationEnvelope {
             }
         }
         match &self.output {
+            InkScriptOutput::Folder(output) => {
+                intents.push(InkScriptPathIntent {
+                    access: InkScriptPathIntentAccess::Create,
+                    input_index: None,
+                    text: output.folder.clone(),
+                });
+            }
+            InkScriptOutput::ActiveDocument | InkScriptOutput::NewTabs => {}
             InkScriptOutput::Duplicate(output) | InkScriptOutput::NewSave(output) => {
                 intents.push(InkScriptPathIntent {
                     access: InkScriptPathIntentAccess::Create,
@@ -502,7 +570,7 @@ pub fn build_inkscript_orchestration_envelope(
         requires.ok_or_else(|| error(InkScriptEnvelopeErrorCode::MissingSection, "requires"))?,
     )?;
     let metadata = meta.map_or_else(|| Ok(InkScriptMetadata::default()), type_metadata)?;
-    let inputs = type_inputs(
+    let (input_profile, inputs) = type_inputs(
         inputs.ok_or_else(|| error(InkScriptEnvelopeErrorCode::MissingSection, "inputs"))?,
     )?;
     let output = type_output(
@@ -517,6 +585,7 @@ pub fn build_inkscript_orchestration_envelope(
         requirements,
         metadata,
         inputs,
+        input_profile,
         output,
         execution,
     })
@@ -586,18 +655,26 @@ fn type_metadata(record: &InkScriptRecord) -> Result<InkScriptMetadata, InkScrip
 }
 
 fn type_inputs(
-    inputs: &[InkScriptInput],
-) -> Result<Vec<InkScriptInputDeclaration>, InkScriptEnvelopeError> {
-    inputs
+    inputs: &InkScriptInputs,
+) -> Result<(InkScriptInputProfile, Vec<InkScriptInputDeclaration>), InkScriptEnvelopeError> {
+    let profile = match inputs.profile.as_deref() {
+        None | Some("canonical") => InkScriptInputProfile::Canonical,
+        Some("batch") => InkScriptInputProfile::Batch,
+        _ => return Err(invalid_type("inputs.profile")),
+    };
+    let declarations = inputs
+        .declarations
         .iter()
         .enumerate()
-        .map(|(index, input)| type_input(input, index))
-        .collect()
+        .map(|(index, input)| type_input(input, index, profile))
+        .collect::<Result<_, _>>()?;
+    Ok((profile, declarations))
 }
 
 fn type_input(
     input: &InkScriptInput,
     index: usize,
+    profile: InkScriptInputProfile,
 ) -> Result<InkScriptInputDeclaration, InkScriptEnvelopeError> {
     let path = format!("inputs[{index}]");
     let (kind, expects_path) = match input.kind {
@@ -613,7 +690,12 @@ fn type_input(
     if expects_path != input.path.is_some() {
         return Err(invalid_type(format!("{path}.path")));
     }
-    let cells = match input.options.0.get("cells") {
+    if profile == InkScriptInputProfile::Batch
+        && kind == InkScriptInputDeclarationKind::CurrentSequence
+    {
+        return Err(invalid_type(format!("{path}.kind")));
+    }
+    let mut cells = match input.options.0.get("cells") {
         None => InkScriptCellSelection::All,
         Some(InkScriptValue::Enum(value)) if value == "all" => InkScriptCellSelection::All,
         Some(InkScriptValue::Constructor { name, arguments }) if name == "range" => {
@@ -625,7 +707,11 @@ fn type_input(
             }
             let first = value_u32(&arguments[0], &format!("{path}.cells.first"))?;
             let last = value_u32(&arguments[1], &format!("{path}.cells.last"))?;
-            if first == 0 || last < first {
+            let invalid = match profile {
+                InkScriptInputProfile::Canonical => first == 0 || last < first,
+                InkScriptInputProfile::Batch => first != 0 && last != 0 && last < first,
+            };
+            if invalid {
                 return Err(error(
                     InkScriptEnvelopeErrorCode::InvalidCellRange,
                     format!("{path}.cells"),
@@ -638,10 +724,13 @@ fn type_input(
     if kind == InkScriptInputDeclarationKind::CurrentDocument
         && cells != InkScriptCellSelection::All
     {
-        return Err(error(
-            InkScriptEnvelopeErrorCode::InvalidCellRange,
-            format!("{path}.cells"),
-        ));
+        if profile == InkScriptInputProfile::Canonical {
+            return Err(error(
+                InkScriptEnvelopeErrorCode::InvalidCellRange,
+                format!("{path}.cells"),
+            ));
+        }
+        cells = InkScriptCellSelection::All;
     }
     if let Some(value) = input.options.0.get("recursive") {
         match value {
@@ -666,6 +755,21 @@ fn type_output(
     record: &InkScriptRecord,
     inputs: &[InkScriptInputDeclaration],
 ) -> Result<InkScriptOutput, InkScriptEnvelopeError> {
+    match enum_value(record, "policy", "output")? {
+        "folder" => return type_folder_output(record).map(InkScriptOutput::Folder),
+        "new_tabs" => return Ok(InkScriptOutput::NewTabs),
+        "active_document" => {
+            if inputs.len() != 1 || inputs[0].kind != InkScriptInputDeclarationKind::CurrentDocument
+            {
+                return Err(error(
+                    InkScriptEnvelopeErrorCode::IncompatibleOutputPolicy,
+                    "output.policy",
+                ));
+            }
+            return Ok(InkScriptOutput::ActiveDocument);
+        }
+        _ => {}
+    }
     if enum_value(record, "format", "output")? != "inkpod" {
         return Err(error(
             InkScriptEnvelopeErrorCode::InvalidOutput,
@@ -695,6 +799,73 @@ fn type_output(
             "output.policy",
         )),
     }
+}
+
+fn type_folder_output(
+    record: &InkScriptRecord,
+) -> Result<InkScriptFolderOutput, InkScriptEnvelopeError> {
+    let format = match enum_value(record, "format", "output")? {
+        "inkpod" => InkScriptOutputFormat::Inkpod,
+        "png" => InkScriptOutputFormat::Png,
+        "tiff" => InkScriptOutputFormat::Tiff,
+        "tga" => InkScriptOutputFormat::Tga,
+        "bmp" => InkScriptOutputFormat::Bmp,
+        _ => {
+            return Err(error(
+                InkScriptEnvelopeErrorCode::InvalidOutput,
+                "output.format",
+            ));
+        }
+    };
+    let folder = required_string(record, "folder", "output")?;
+    if folder.is_empty() || folder.len() > 32_768 || folder.contains('\0') {
+        return Err(error(
+            InkScriptEnvelopeErrorCode::InvalidOutput,
+            "output.folder",
+        ));
+    }
+    let naming_template = required_string(record, "naming_template", "output")?;
+    if !valid_naming_template(&naming_template) {
+        return Err(error(
+            InkScriptEnvelopeErrorCode::InvalidOutput,
+            "output.naming_template",
+        ));
+    }
+    Ok(InkScriptFolderOutput {
+        folder,
+        naming_template,
+        format,
+    })
+}
+
+fn valid_naming_template(template: &str) -> bool {
+    if template.is_empty() || template.len() > 1_024 {
+        return false;
+    }
+    let mut rest = template;
+    while !rest.is_empty() {
+        if let Some(after_open) = rest.strip_prefix('{') {
+            let Some((token, after)) = after_open.split_once('}') else {
+                return false;
+            };
+            if token != "stem"
+                && !token
+                    .strip_prefix("index:")
+                    .and_then(|width| width.parse::<usize>().ok())
+                    .is_some_and(|width| (1..=12).contains(&width))
+            {
+                return false;
+            }
+            rest = after;
+        } else {
+            let character = rest.chars().next().expect("nonempty template remainder");
+            if matches!(character, '\0' | '.' | '/' | '\\' | '}') {
+                return false;
+            }
+            rest = &rest[character.len_utf8()..];
+        }
+    }
+    true
 }
 
 fn type_numbered_output(

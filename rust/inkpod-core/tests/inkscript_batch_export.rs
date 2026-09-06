@@ -106,7 +106,7 @@ fn replace(target: BatchTargetSelector) -> BatchOperation {
 
 fn file(fragment: &str) -> InkScriptSource {
     let text = fragment
-        .replacen("inkscript_fragment 2;", "inkscript 2;", 1)
+        .replacen("inkscript_fragment 3;", "inkscript 3;", 1)
         .replacen("program {", "inputs { current_document; }\nprogram {", 1);
     InkScriptSource::new(
         InkScriptSourceId::new(3100),

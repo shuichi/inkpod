@@ -17,10 +17,11 @@ pub use diagnostic::{
 pub use emit::emit_inkscript_canonical;
 pub use envelope::{
     InkScriptCellSelection, InkScriptEnvelopeError, InkScriptEnvelopeErrorCode,
-    InkScriptExecutionFailure, InkScriptExecutionPolicy, InkScriptInputDeclaration,
-    InkScriptInputDeclarationKind, InkScriptMetadata, InkScriptMetadataExtension,
-    InkScriptNumberDirection, InkScriptNumberedOutput, InkScriptOrchestrationEnvelope,
-    InkScriptOutput, InkScriptOutputFormat, InkScriptPathIntent, InkScriptPathIntentAccess,
+    InkScriptExecutionFailure, InkScriptExecutionPolicy, InkScriptFolderOutput,
+    InkScriptInputDeclaration, InkScriptInputDeclarationKind, InkScriptInputProfile,
+    InkScriptMetadata, InkScriptMetadataExtension, InkScriptNumberDirection,
+    InkScriptNumberedOutput, InkScriptOrchestrationEnvelope, InkScriptOutput,
+    InkScriptOutputFormat, InkScriptPathIntent, InkScriptPathIntentAccess,
     InkScriptPathIntentPreview, InkScriptRequirements, MAX_INKSCRIPT_WAIT_MS,
     build_inkscript_orchestration_envelope,
 };
@@ -59,8 +60,8 @@ pub use source::{
     MAX_INKSCRIPT_SOURCE_BYTES, MAX_INKSCRIPT_STRING_BYTES, MAX_INKSCRIPT_TOKENS,
 };
 pub use syntax::{
-    InkScriptAsset, InkScriptBinding, InkScriptInput, InkScriptInputKind, InkScriptParameter,
-    InkScriptProgramStatement, InkScriptRecord, InkScriptReferenceSegment,
+    InkScriptAsset, InkScriptBinding, InkScriptInput, InkScriptInputKind, InkScriptInputs,
+    InkScriptParameter, InkScriptProgramStatement, InkScriptRecord, InkScriptReferenceSegment,
     InkScriptSemanticDocument, InkScriptSemanticSection, InkScriptTypeReference, InkScriptValue,
     build_inkscript_semantic, parse_inkscript_value,
 };

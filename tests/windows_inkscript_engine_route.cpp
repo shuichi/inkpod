@@ -129,7 +129,7 @@ std::string CurrentDocumentSource(
     std::uint32_t wait_milliseconds,
     const char* basename,
     std::uint64_t start_number = 1U) {
-    std::string source = R"(inkscript 2;
+    std::string source = R"(inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {
@@ -153,7 +153,7 @@ std::string FolderSource(
     std::uint32_t wait_milliseconds,
     const char* basename,
     std::uint64_t start_number = 1U) {
-    std::string source = R"(inkscript 2;
+    std::string source = R"(inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { folder "in"; }
 program {
@@ -174,7 +174,7 @@ execution { failure = stop; wait_ms = )";
 }
 
 std::string OverwriteFolderSource() {
-    return R"(inkscript 2;
+    return R"(inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { file "input.inkpod"; }
 program {

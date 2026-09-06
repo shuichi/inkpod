@@ -10,19 +10,19 @@ const PREVIEW_CELL_PADDING: u32 = 8;
 const PREVIEW_DIRECTORY_NAME: &str = "inkpod-batch-preview";
 
 #[derive(Clone)]
-enum ContactSheetSlot {
+pub(crate) enum ContactSheetSlot {
     Thumbnail(Thumbnail),
     Failed,
     Unprocessed,
 }
 
-struct ContactSheetLayout {
+pub(crate) struct ContactSheetLayout {
     columns: u32,
     cell_size: u32,
     padding: u32,
-    width: u32,
-    height: u32,
-    thumbnail_maximum_dimension: u32,
+    pub(crate) width: u32,
+    pub(crate) height: u32,
+    pub(crate) thumbnail_maximum_dimension: u32,
 }
 
 impl Core {
@@ -289,6 +289,13 @@ fn copy_file_bounded(
 }
 
 fn contact_sheet_layout(item_count: usize) -> Result<ContactSheetLayout, CoreError> {
+    contact_sheet_layout_with_limit(item_count, MAX_IMAGE_EDIT_PIXELS)
+}
+
+pub(crate) fn contact_sheet_layout_with_limit(
+    item_count: usize,
+    maximum_pixels: u64,
+) -> Result<ContactSheetLayout, CoreError> {
     if item_count == 0 {
         return Err(CoreError::InvalidArgument(
             "batch preview contact sheet requires an item",
@@ -305,11 +312,16 @@ fn contact_sheet_layout(item_count: usize) -> Result<ContactSheetLayout, CoreErr
     let rows = count.div_ceil(columns);
     let mut cell_size = PREVIEW_THUMBNAIL_MAXIMUM_DIMENSION + PREVIEW_CELL_PADDING * 2;
     loop {
+        if cell_size == 0 {
+            return Err(CoreError::InvalidState(
+                "contact sheet cannot fit the pixel bound",
+            ));
+        }
         let width = u64::from(columns) * u64::from(cell_size);
         let height = u64::from(rows) * u64::from(cell_size);
         if width
             .checked_mul(height)
-            .is_some_and(|pixels| pixels <= MAX_IMAGE_EDIT_PIXELS)
+            .is_some_and(|pixels| pixels <= maximum_pixels.min(MAX_IMAGE_EDIT_PIXELS))
         {
             let padding = PREVIEW_CELL_PADDING.min(cell_size.saturating_sub(1) / 2);
             return Ok(ContactSheetLayout {
@@ -333,7 +345,7 @@ fn contact_sheet_layout(item_count: usize) -> Result<ContactSheetLayout, CoreErr
     }
 }
 
-fn compose_contact_sheet(
+pub(crate) fn compose_contact_sheet(
     layout: &ContactSheetLayout,
     slots: &[ContactSheetSlot],
 ) -> Result<(Vec<u8>, u128), CoreError> {

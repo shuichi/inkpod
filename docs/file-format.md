@@ -1217,6 +1217,28 @@ out-of-range opacity/grid values, stable-ID collisions across document and
 light-table state, and a tree
 plane ID that does not correspond one-to-one with a persisted plane payload.
 
+## InkScript file envelope
+
+The current `.inkscript` file and `inkscript_fragment` header version is **3**.
+[Language v3](../schemas/inkscript/language-v3.json) uses registry schema 2 and
+catalog/owner v8 (75 commands). Version 2 files and fragments are rejected;
+there is no migration reader. The approved input profile and closed output
+variants extend the file envelope without changing any canonical invocation,
+native payload, replay semantics or C ABI. Native v34, replay epoch 29 and
+ABI v34 therefore remain current. Catalog/owner metadata identifies file v3;
+the command contract and owner assignments remain unchanged.
+
+`inputs.profile` selects `canonical` by default or explicit `batch` ordering,
+range, duplicate and snapshot semantics. `folder` adds bounded template naming
+and the common raster codecs; `active_document` and `new_tabs` transfer owned
+staged results. Existing `duplicate`/`new_save`/`explicit_overwrite` retain their
+native-only output and identity rules. The envelope, authority, preview and
+publication rules are normative in [INKSCRIPT sections 7–8](../INKSCRIPT.md#7-section-仕様)
+and the approved [Batch connection contract](inkscript-batch-connection.md).
+These are Core-only routes; product cutover and ABI/Windows integration gates
+remain separate. Availability and verification belong to
+[compatibility](compatibility.md).
+
 ## Common raster formats
 
 The Rust format layer exposes a bounded straight-alpha `CommonRaster` DTO and

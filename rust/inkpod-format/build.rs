@@ -221,7 +221,7 @@ fn main() {
 
 fn generate() -> Result<(), String> {
     let crate_dir = PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").ok_or("missing manifest dir")?);
-    let language = crate_dir.join("../../schemas/inkscript/language-v2.json");
+    let language = crate_dir.join("../../schemas/inkscript/language-v3.json");
     let catalog = crate_dir.join("../../schemas/inkscript/catalog-v8.json");
     println!("cargo:rerun-if-changed={}", language.display());
     println!("cargo:rerun-if-changed={}", catalog.display());
@@ -233,7 +233,7 @@ fn generate() -> Result<(), String> {
     let required_replay_epoch = number(member(&root, "required_replay_epoch")?)?;
     if string(member(&root, "kind")?)? != "inkpod.inkscript.language"
         || registry_schema_version != 2
-        || file_version != 2
+        || file_version != 3
         || procedure_catalog_version != 8
         || required_replay_epoch != 29
     {
@@ -244,7 +244,7 @@ fn generate() -> Result<(), String> {
     let catalog_version = number(member(&catalog_root, "catalog_version")?)?;
     let command_count = array(member(&catalog_root, "entries")?)?.len();
     let catalog_fingerprint = fnv1a64(&catalog_bytes);
-    const FROZEN_CATALOG_V8_FNV1A64: u64 = 0xec655f3463bb293c;
+    const FROZEN_CATALOG_V8_FNV1A64: u64 = 0xd3db3ae40c017f5d;
     if string(member(&catalog_root, "kind")?)? != "inkpod.inkscript.catalog"
         || number(member(&catalog_root, "registry_schema_version")?)? != 2
         || number(member(&catalog_root, "file_version")?)? != file_version

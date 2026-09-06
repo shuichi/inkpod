@@ -303,7 +303,7 @@ int InkpodRunAbiSmoke() {
         || core == nullptr) {
         return 2;
     }
-    constexpr char script_text[] = R"(inkscript 2;
+    constexpr char script_text[] = R"(inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {

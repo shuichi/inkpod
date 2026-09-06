@@ -35,7 +35,7 @@ impl InkScriptSemanticDocument {
 pub enum InkScriptSemanticSection {
     Requires(InkScriptRecord),
     Meta(InkScriptRecord),
-    Inputs(Vec<InkScriptInput>),
+    Inputs(InkScriptInputs),
     Parameters(Vec<InkScriptParameter>),
     Bindings(Vec<InkScriptBinding>),
     Program(Vec<InkScriptProgramStatement>),
@@ -66,6 +66,25 @@ pub enum InkScriptInputKind {
     Folder,
     CurrentDocument,
     CurrentSequence,
+}
+
+/// An input section with its explicit policy and ordered declarations.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InkScriptInputs {
+    pub(crate) profile: Option<String>,
+    pub(crate) declarations: Vec<InkScriptInput>,
+}
+
+impl InkScriptInputs {
+    /// Returns the input policy spelling, with the canonical default resolved.
+    pub fn profile(&self) -> &str {
+        self.profile.as_deref().unwrap_or("canonical")
+    }
+
+    /// Returns input declarations in source order.
+    pub fn declarations(&self) -> &[InkScriptInput] {
+        &self.declarations
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -312,10 +331,25 @@ impl<'a, 'schema> SemanticParser<'a, 'schema> {
         })
     }
 
-    fn inputs(&mut self) -> Result<Vec<InkScriptInput>, InkScriptSemanticError> {
+    fn inputs(&mut self) -> Result<InkScriptInputs, InkScriptSemanticError> {
         self.expect_punctuation(InkScriptPunctuation::LeftBrace)?;
         let mut result = Vec::new();
+        let mut profile = None;
         while !self.take_punctuation(InkScriptPunctuation::RightBrace) {
+            if self.peek_kind() == InkScriptTokenKind::Word {
+                let field = self.identifier()?;
+                if field != "profile" || profile.is_some() {
+                    return Err(self.syntax("inputs.profile"));
+                }
+                self.expect_punctuation(InkScriptPunctuation::Equals)?;
+                let value = self.identifier()?;
+                if !matches!(value.as_str(), "batch" | "canonical") {
+                    return Err(self.syntax("inputs.profile"));
+                }
+                self.expect_punctuation(InkScriptPunctuation::Semicolon)?;
+                profile = Some(value);
+                continue;
+            }
             let (kind, path_required, schema_name) = match self.peek_kind() {
                 InkScriptTokenKind::Keyword(InkScriptKeyword::File) => {
                     (InkScriptInputKind::File, true, "file_input_options")
@@ -355,7 +389,10 @@ impl<'a, 'schema> SemanticParser<'a, 'schema> {
                 options,
             });
         }
-        Ok(result)
+        Ok(InkScriptInputs {
+            profile: profile.filter(|value| value != "canonical"),
+            declarations: result,
+        })
     }
 
     fn parameters(&mut self) -> Result<Vec<InkScriptParameter>, InkScriptSemanticError> {
@@ -536,6 +573,10 @@ impl<'a, 'schema> SemanticParser<'a, 'schema> {
 
     fn value(&mut self) -> Result<InkScriptValue, InkScriptSemanticError> {
         match self.peek_kind() {
+            InkScriptTokenKind::Keyword(InkScriptKeyword::Folder) => {
+                self.take();
+                Ok(InkScriptValue::Enum("folder".to_owned()))
+            }
             InkScriptTokenKind::Keyword(InkScriptKeyword::True) => {
                 self.take();
                 Ok(InkScriptValue::Boolean(true))
@@ -876,6 +917,9 @@ fn normalize_output(
         "duplicate" => "output_duplicate",
         "new_save" => "output_new_save",
         "explicit_overwrite" => "output_explicit_overwrite",
+        "folder" => "output_folder",
+        "active_document" => "output_active_document",
+        "new_tabs" => "output_new_tabs",
         _ => {
             return Err(error(
                 InkScriptSemanticErrorCode::UnknownRecordSchema,

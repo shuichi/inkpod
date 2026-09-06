@@ -57,9 +57,13 @@ mod model;
 mod operations;
 mod pairs;
 mod validation;
+pub(crate) use contact_sheet::{
+    ContactSheetSlot, compose_contact_sheet, contact_sheet_layout_with_limit,
+};
 
 pub(crate) use operations::{apply_batch_operations_canonical, preflight_batch_operations};
 pub(crate) use operations::{apply_color_replacement, apply_separation};
+pub(crate) use operations::{core_from_document, render_naming_template};
 pub(crate) use validation::validate_operation;
 
 pub use model::{

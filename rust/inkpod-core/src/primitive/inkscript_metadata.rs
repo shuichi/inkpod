@@ -246,7 +246,7 @@ impl MetadataColorGuideScriptStep {
         invocation: &MetadataColorGuideInvocation,
     ) -> Result<Self, MetadataColorGuideAdapterError> {
         let mut source = String::from(
-            "inkscript_fragment 2;\nrequires { procedure_catalog = 8; replay_epoch = 29; }\n",
+            "inkscript_fragment 3;\nrequires { procedure_catalog = 8; replay_epoch = 29; }\n",
         );
         let mut references = InkScriptRuntimeReferences::default();
         let (command, arguments, has_result) =

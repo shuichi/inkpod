@@ -185,6 +185,146 @@ pub(crate) fn normalized_leaf(name: &str) -> String {
     }
 }
 
+pub(crate) fn path_object_identity(path: &Path) -> IoResult<FileIdentity> {
+    #[cfg(windows)]
+    {
+        windows::path_object_identity(path)
+    }
+    #[cfg(not(windows))]
+    {
+        object_identity(&File::open(path)?)
+    }
+}
+
+pub(crate) const fn supports_guarded_publication() -> bool {
+    cfg!(windows)
+}
+
+pub(crate) fn canonical_path_key(path: &Path) -> IoResult<String> {
+    let text = path
+        .to_str()
+        .ok_or(IoError::InvalidInput("authority path is not UTF-8"))?
+        .replace('\\', "/");
+    let text = text.strip_prefix("//?/").unwrap_or(&text);
+    Ok(if text.contains(":/") {
+        text.to_owned()
+    } else {
+        format!("file:{text}")
+    })
+}
+
+pub(crate) fn path_alias_key(path: &Path) -> IoResult<[u8; 32]> {
+    let text = canonical_path_key(path)?;
+    #[cfg(windows)]
+    let text = text.to_uppercase();
+    Ok(*blake3::hash(text.as_bytes()).as_bytes())
+}
+
+pub(crate) fn object_identity(file: &File) -> IoResult<FileIdentity> {
+    #[cfg(windows)]
+    {
+        windows::object_identity(file)
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        let metadata = file.metadata()?;
+        Ok(FileIdentity {
+            volume: metadata.dev(),
+            file: u128::from(metadata.ino()),
+        })
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        let _ = file;
+        Err(IoError::InvalidInput("physical identity is unsupported"))
+    }
+}
+
+pub(crate) fn open_authority_directory(path: &Path, write: bool) -> IoResult<File> {
+    #[cfg(windows)]
+    {
+        windows::open_authority_directory(path, write)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (path, write);
+        Err(IoError::InvalidInput("guarded publication is unsupported"))
+    }
+}
+
+pub(crate) fn create_authority_child(
+    parent: &File,
+    path: &Path,
+    directory: bool,
+) -> IoResult<File> {
+    #[cfg(windows)]
+    {
+        windows::create_authority_child(parent, path, directory)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (parent, path, directory);
+        Err(IoError::UnsupportedAtomicPublication)
+    }
+}
+pub(crate) fn open_authority_source(path: &Path) -> IoResult<File> {
+    #[cfg(windows)]
+    {
+        windows::open_authority_source(path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = path;
+        Err(IoError::InvalidInput("guarded publication is unsupported"))
+    }
+}
+pub(crate) fn open_authority_temporary(parent: &File, path: &Path) -> IoResult<File> {
+    #[cfg(windows)]
+    {
+        windows::open_authority_temporary(parent, path)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (parent, path);
+        Err(IoError::InvalidInput("guarded publication is unsupported"))
+    }
+}
+
+pub(crate) fn remove_authority_temporary(
+    parent: &File,
+    path: &Path,
+    expected: FileIdentity,
+) -> IoResult<()> {
+    #[cfg(windows)]
+    {
+        windows::remove_authority_temporary(parent, path, expected)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (parent, path, expected);
+        Err(IoError::InvalidInput(
+            "guarded temporary cleanup is unsupported",
+        ))
+    }
+}
+pub(crate) fn rename_with_authority(
+    file: &File,
+    parent: &File,
+    destination: &Path,
+    overwrite: bool,
+) -> IoResult<()> {
+    #[cfg(windows)]
+    {
+        windows::rename_with_authority(file, parent, destination, overwrite)
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = (file, parent, destination, overwrite);
+        Err(IoError::InvalidInput("guarded publication is unsupported"))
+    }
+}
+
 pub(crate) fn missing_identity(path: &Path) -> FileIdentity {
     let key = lock_path(path);
     let mut hasher = blake3::Hasher::new();

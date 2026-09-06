@@ -28,14 +28,14 @@ fn envelope(
 
 fn complete_file(requires: &str, inputs: &str, output: &str, execution: &str) -> String {
     format!(
-        "inkscript 2;\nrequires {{ {requires} }}\ninputs {{ {inputs} }}\nprogram {{}}\noutput {{ {output} }}\nexecution {{ {execution} }}\n"
+        "inkscript 3;\nrequires {{ {requires} }}\ninputs {{ {inputs} }}\nprogram {{}}\noutput {{ {output} }}\nexecution {{ {execution} }}\n"
     )
 }
 
 #[test]
 fn typed_envelope_round_trips_all_input_kinds_and_path_intents_without_io() {
     let input = source(
-        br#"inkscript 2;
+        br#"inkscript 3;
 execution { preview_before_save = true; wait_ms = 25; failure = continue; }
 output { direction = descending; start_number = 7; basename = "painted"; cell_folder = true; folder = "missing/out"; format = inkpod; policy = duplicate; }
 program {}
@@ -163,7 +163,7 @@ requires { replay_epoch = 29; procedure_catalog = 8; }
 
 #[test]
 fn exact_current_versions_and_complete_file_boundary_fail_closed() {
-    assert_eq!(INKSCRIPT_FILE_VERSION, 2);
+    assert_eq!(INKSCRIPT_FILE_VERSION, 3);
     assert_eq!(INKSCRIPT_PROCEDURE_CATALOG_VERSION, 8);
     assert_eq!(INKSCRIPT_REQUIRED_REPLAY_EPOCH, 29);
 
@@ -199,7 +199,7 @@ fn exact_current_versions_and_complete_file_boundary_fail_closed() {
     }
 
     let fragment = source(
-        b"inkscript_fragment 2; requires { procedure_catalog = 8; replay_epoch = 29; } program {}",
+        b"inkscript_fragment 3; requires { procedure_catalog = 8; replay_epoch = 29; } program {}",
     );
     let parsed = parse_inkscript(&fragment);
     let semantic = build_inkscript_semantic(&parsed, &schema()).unwrap();
@@ -231,7 +231,7 @@ fn metadata_ranges_and_execution_bounds_reject_invalid_values_atomically() {
         ),
     ] {
         let text = format!(
-            "inkscript 2; requires {{ procedure_catalog = 8; replay_epoch = 29; }} {meta} inputs {{ file \"a.inkpod\"; }} program {{}} output {{ {base_output} }} execution {{ {base_execution} }}"
+            "inkscript 3; requires {{ procedure_catalog = 8; replay_epoch = 29; }} {meta} inputs {{ file \"a.inkpod\"; }} program {{}} output {{ {base_output} }} execution {{ {base_execution} }}"
         );
         assert_eq!(envelope(text.as_bytes()).unwrap_err().code(), expected);
     }

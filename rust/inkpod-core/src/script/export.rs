@@ -273,7 +273,7 @@ pub fn export_inkscript_fragment_with_limits(
     let strict_owners = augment_light_table_owner_bindings(&snapshot, &mut strict)?;
 
     let mut source = String::from(
-        "inkscript_fragment 2;\nrequires { procedure_catalog = 8; replay_epoch = 29; }\n",
+        "inkscript_fragment 3;\nrequires { procedure_catalog = 8; replay_epoch = 29; }\n",
     );
     if !strict.is_empty() {
         source.push_str("bindings {\n");
@@ -2057,7 +2057,7 @@ mod tests {
             export_inkscript_fragment(&source_core, &[event], &mut never_cancel).unwrap();
         let text = exported
             .text()
-            .replacen("inkscript_fragment 2;", "inkscript 2;", 1)
+            .replacen("inkscript_fragment 3;", "inkscript 3;", 1)
             .replacen("program {", "inputs { current_document; }\nprogram {", 1);
         let text = format!(
             "{text}output {{ policy = duplicate; format = inkpod; folder = \"out\"; cell_folder = false; basename = \"asset\"; start_number = 1; direction = ascending; }}\nexecution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}\n"

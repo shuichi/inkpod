@@ -84,7 +84,7 @@ fn assert_export_round_trip(base: &Core, scripted: &Core) {
         });
     let text = exported
         .text()
-        .replacen("inkscript_fragment 2;", "inkscript 2;", 1)
+        .replacen("inkscript_fragment 3;", "inkscript 3;", 1)
         .replacen("program {", "inputs { current_document; }\nprogram {", 1);
     let text = format!(
         "{text}output {{ policy = duplicate; format = inkpod; folder = \"out\"; cell_folder = false; basename = \"export\"; start_number = 1; direction = ascending; }}\nexecution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}\n"
@@ -137,7 +137,7 @@ fn assert_export_round_trip(base: &Core, scripted: &Core) {
 
 fn complete_source(parameters: &str, bindings: &str, program: &str) -> InkScriptSource {
     source(format!(
-        r#"inkscript 2;
+        r#"inkscript 3;
 requires {{ procedure_catalog = 8; replay_epoch = 29; }}
 inputs {{ current_document; }}
 parameters {{ {parameters} }}
@@ -151,7 +151,7 @@ execution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}
 
 fn complete_source_with_assets(bindings: &str, program: &str, assets: &str) -> InkScriptSource {
     source(format!(
-        r#"inkscript 2;
+        r#"inkscript 3;
 requires {{ procedure_catalog = 8; replay_epoch = 29; }}
 inputs {{ current_document; }}
 parameters {{}}
@@ -417,7 +417,7 @@ fn compiler_freezes_parameters_and_checks_cancel_invalid_and_aggregate_resources
     assert_eq!(limited, Err(ScriptCompileError::ResourceLimit));
 
     let invalid =
-        source("inkscript 2; requires { procedure_catalog = 8; replay_epoch = 29; }".to_owned());
+        source("inkscript 3; requires { procedure_catalog = 8; replay_epoch = 29; }".to_owned());
     assert!(matches!(
         compile_inkscript(&invalid, InkScriptRunParameterDecision::Resolve(Vec::new())),
         Err(ScriptCompileError::Syntax) | Err(ScriptCompileError::Semantic(_))

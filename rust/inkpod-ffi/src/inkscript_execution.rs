@@ -2489,6 +2489,12 @@ pub unsafe extern "C" fn inkpod_core_inkscript_confirmation_release(
 
 fn outcome_to_abi(value: &ScriptItemOutcome) -> (u32, u32) {
     match value {
+        // ABI v34 adapters cannot pass staged-output preflight. Fail closed if
+        // an unsupported Core-only result ever crosses this boundary.
+        ScriptItemOutcome::Staged => (
+            INKPOD_INKSCRIPT_OUTCOME_FAILED,
+            INKPOD_INKSCRIPT_FAILURE_ADAPTER,
+        ),
         ScriptItemOutcome::NotStarted => (INKPOD_INKSCRIPT_OUTCOME_NOT_STARTED, 0),
         ScriptItemOutcome::Installed => (INKPOD_INKSCRIPT_OUTCOME_INSTALLED, 0),
         ScriptItemOutcome::DryRun => (INKPOD_INKSCRIPT_OUTCOME_DRY_RUN, 0),

@@ -546,6 +546,7 @@ impl<'source> Parser<'source> {
     fn parse_inputs_section(&mut self) -> Option<InkScriptCstNode> {
         let start = self.significant_index();
         let mut children = Vec::new();
+        let mut profile_seen = false;
         if !self.take_punctuation(InkScriptPunctuation::LeftBrace) {
             return self.expected_error(start);
         }
@@ -569,6 +570,17 @@ impl<'source> Parser<'source> {
                     break;
                 }
                 if let Some(node) = self.parse_input_declaration() {
+                    children.push(node);
+                }
+            } else if self.peek_kind() == InkScriptTokenKind::Word {
+                let (node, name, range) = self.parse_field();
+                if name.as_deref() == Some("profile") {
+                    if profile_seen {
+                        self.report(InkScriptDiagnosticCode::DuplicateField, range);
+                    }
+                    profile_seen = true;
+                }
+                if let Some(node) = node {
                     children.push(node);
                 }
             } else if let Some(error) = self.recover_container_item() {
@@ -1004,7 +1016,10 @@ impl<'source> Parser<'source> {
         let mut children = Vec::new();
         match self.peek_kind() {
             InkScriptTokenKind::Keyword(
-                InkScriptKeyword::True | InkScriptKeyword::False | InkScriptKeyword::None,
+                InkScriptKeyword::True
+                | InkScriptKeyword::False
+                | InkScriptKeyword::None
+                | InkScriptKeyword::Folder,
             )
             | InkScriptTokenKind::IntegerLiteral
             | InkScriptTokenKind::DecimalLiteral

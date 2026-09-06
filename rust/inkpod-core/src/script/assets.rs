@@ -921,7 +921,7 @@ mod tests {
         assets: &str,
     ) -> Result<InkScriptDeclarationModel, InkScriptTypeDiagnosticCode> {
         let text = format!(
-            r#"inkscript 2;
+            r#"inkscript 3;
 requires {{ procedure_catalog = 8; replay_epoch = 29; }}
 inputs {{ current_document; }}
 program {{}}

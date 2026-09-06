@@ -16,7 +16,7 @@ from typing import Any
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
-LANGUAGE_PATH = ROOT / "schemas" / "inkscript" / "language-v2.json"
+LANGUAGE_PATH = ROOT / "schemas" / "inkscript" / "language-v3.json"
 CATALOG_PATH = ROOT / "schemas" / "inkscript" / "catalog-v8.json"
 REFERENCE_PATH = ROOT / "docs" / "inkscript-command-reference.md"
 

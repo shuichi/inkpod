@@ -224,7 +224,7 @@ samples are retained below. They were approved for Windows 26200.9168,
 MS-7E26/Ryzen 9 9950X3D, 127.6 GiB, Rust/Cargo 1.97.1 / LLVM 22.1.6 /
 MSVC 19.51.36252.0, x64 Release, Balanced. They are not current-toolchain samples.
 
-The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v8 and replay
+The approved checksum was fixed for InkScript source ID 913, file v2/catalog v8 and replay
 epoch 29, 128 `set_plane_properties` steps, four successful 4-by-4 current-v34
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
@@ -488,6 +488,75 @@ recorded above; these accepted runs follow the approved expectation correction,
 not retries of an unchanged failing gate. This test-only literal update adds
 no version or production behavior change. M3's earlier workspace/Windows evidence
 is retained separately; those suites were not repeated for this literal update.
+
+### M4 file-v3 checksum decision
+
+**Pending approval, 2026-09-06.** M4 uses file/fragment v3 with catalog v8,
+epoch 29, native v34 and ABI v34. The quick source changes only its header
+`inkscript 2;` to `inkscript 3;`. The two additional exhaustive `Staged` match
+arms panic if this file-install fixture ever reaches them. Its workload,
+counter expectations, FNV byte walk, timing interval and 64–107 ms envelope
+are unchanged. Independent read-only review confirmed those differences.
+The canonical emitter includes the current header in the bytes hashed by the
+BLAKE3 compile digest; the quick FNV checksum incorporates that digest first.
+Canonical input profile is omitted by normalization and emission, so this
+fixture has no newly emitted profile field.
+
+On source `35e6366d3b2ec0fca7b4ab60bd4d2af249778c2a` plus M4 changes,
+Windows 26200.9278 / MS-7E26 / Ryzen 9 9950X3D / Rust-Cargo 1.98.1 /
+LLVM 22.1.8 / MSVC 19.51.36256 / x64 Release / static CRT / Balanced,
+the original gate exited **101** at actual `d72add6ac2e137c7`, expected
+`8c5b98c2c721c868`. The final-source original gate also exited **101** at
+the same assertion. Neither run is an accepted timing sample.
+
+After all native tests and builds finished, the unchanged
+`current_quick_performance_diagnostic` ran in ten independent processes,
+without concurrent builds or tests. Every process exited **101**, reported
+`acceptance=false`, and observed **only checksum drift**. The discarded
+warm-up was **87,513,500 ns**. A preceding discarded collector attempt
+observed **88,565,600 ns** and the same single drift, but its native exit code
+was not retained: the external log collector failed to recognize a line
+prefixed by the Rust test name. Its log is retained separately; correcting
+that text extraction did not change the benchmark or any acceptance check.
+
+| Complete diagnostic samples in run order (ns) | Median (ns) |
+| --- | ---: |
+| 86,639,700; 86,298,800; 86,989,000; 86,276,300; 86,397,600; 86,118,200; 86,679,700; 86,476,200; 88,095,100 | 86,476,200 |
+
+The median **86.4762 ms** and every retained sample fall within the unchanged
+64–107 ms envelope. This diagnostic does not make the failed gate pass.
+Every process retained these exact non-time observations:
+
+| Observations | Values |
+| --- | --- |
+| source bytes / tokens / CST nodes | 371,176 / 7,965 / 2,000 |
+| parameters / bindings / asserts | 0 / 1 / 1 |
+| steps / dependency edges / catalog invocations / catalog work units | 128 / 128 / 128 / 128 |
+| asset declarations / unique assets | 1 / 1 |
+| logical / unique logical / inline decoded / copied asset bytes | 262,144 / 262,144 / 262,144 / 262,144 |
+| authorized asset read bytes | 0 |
+| input native / runner native read / installed output bytes | 24,768 / 37,152 / 91,584 |
+| attempted items / binding resolutions | 6 / 6 |
+| statement evaluations / invocations | 774 / 768 |
+| Commits / no-ops | 384 / 384 |
+| installed / failed Save / cancelled items | 4 / 1 / 1 |
+| cache-free reopens / replayed Commits | 4 / 256 |
+| checksum | `d72add6ac2e137c7` |
+
+The recommended proposal is exactly one literal, **not yet applied**:
+
+```diff
+-const EXPECTED_CHECKSUM: u64 = 0x8c5b_98c2_c721_c868;
++const EXPECTED_CHECKSUM: u64 = 0xd72a_dd6a_c2e1_37c7;
+```
+
+Keeping the current literal preserves the deterministic failure. Removing
+source identity from the checksum or accepting multiple values would weaken
+the gate and is not recommended. After explicit approval, rerun the original
+gate independently; diagnostic success is not a substitute. This proposal
+does not change counters, workload, hash operations, interval or envelope.
+It also does not resolve M4's guarded-overwrite failure, complete M4, approve
+M15 cutover, or activate the reserved M17 full fixture.
 
 ## Approved output-color-guard envelope
 

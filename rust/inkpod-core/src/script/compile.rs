@@ -271,6 +271,7 @@ pub fn compile_inkscript_with_limits(
             )?;
         }
     }
+    validate_output_program(&envelope, &model, &frozen_arguments)?;
     if budget.max_invocations > limits.invocations
         || budget.max_work_units > MAX_SCRIPT_WORK_UNITS
         || budget.max_output_growth > MAX_SCRIPT_OUTPUT_GROWTH
@@ -294,6 +295,70 @@ pub fn compile_inkscript_with_limits(
         envelope,
         path_intents,
     })
+}
+
+fn validate_output_program(
+    envelope: &InkScriptOrchestrationEnvelope,
+    model: &InkScriptDeclarationModel,
+    arguments: &[InkScriptTypedValue],
+) -> Result<(), ScriptCompileError> {
+    let invalid =
+        || ScriptCompileError::Envelope(InkScriptEnvelopeErrorCode::IncompatibleOutputPolicy);
+    if matches!(envelope.output(), InkScriptOutput::ExplicitOverwrite)
+        && envelope.inputs().iter().any(|input| {
+            input.kind() == InkScriptInputDeclarationKind::File
+                && !input.path_text().is_some_and(|path| {
+                    path.rsplit('.')
+                        .next()
+                        .is_some_and(|extension| extension.eq_ignore_ascii_case("inkpod"))
+                })
+        })
+    {
+        return Err(invalid());
+    }
+    if matches!(envelope.output(), InkScriptOutput::ActiveDocument) {
+        let enabled = model
+            .steps()
+            .iter()
+            .filter(|step| step.enabled())
+            .collect::<Vec<_>>();
+        if envelope.inputs().len() != 1
+            || envelope.inputs()[0].kind() != InkScriptInputDeclarationKind::CurrentDocument
+            || enabled.len() != 1
+            || enabled[0].command() != "apply_batch_operations"
+        {
+            return Err(invalid());
+        }
+    }
+    if matches!(envelope.output(), InkScriptOutput::Folder(output) if output.format() != inkpod_format::InkScriptOutputFormat::Inkpod)
+    {
+        for (step, arguments) in model.steps().iter().zip(arguments) {
+            if !step.enabled() || step.command() != "apply_batch_operations" {
+                continue;
+            }
+            let InkScriptTypedValueKind::Record(record) = arguments.kind() else {
+                return Err(invalid());
+            };
+            let Some(InkScriptTypedValueKind::List(operations)) =
+                record.get("operations").map(|value| value.kind())
+            else {
+                return Err(invalid());
+            };
+            for operation in operations {
+                let InkScriptTypedValueKind::Record(operation) = operation.kind() else {
+                    return Err(invalid());
+                };
+                if matches!(
+                    operation.get("enabled").map(|v| v.kind()),
+                    Some(InkScriptTypedValueKind::Boolean(true))
+                ) && matches!(operation.get("kind").map(|v| v.kind()), Some(InkScriptTypedValueKind::Enum(kind)) if kind == "masking")
+                {
+                    return Err(invalid());
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn catalog_asset_summaries(
@@ -1509,6 +1574,15 @@ fn build_path_intents(
         }
     }
     match envelope.output() {
+        InkScriptOutput::Folder(output) => {
+            push_path_intent(
+                &mut intents,
+                InkScriptPathIntentAccess::Create,
+                output.folder(),
+                ScriptPathIntentSubject::OutputRoot,
+            )?;
+        }
+        InkScriptOutput::ActiveDocument | InkScriptOutput::NewTabs => {}
         InkScriptOutput::Duplicate(output) | InkScriptOutput::NewSave(output) => {
             push_path_intent(
                 &mut intents,

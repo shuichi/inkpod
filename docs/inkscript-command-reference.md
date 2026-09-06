@@ -10,11 +10,11 @@ The JSON registries remain normative when this presentation differs.
 | Contract | Exact-current value |
 | --- | ---: |
 | Registry schema | 2 |
-| InkScript file | 2 |
+| InkScript file | 3 |
 | Procedure catalog | 8 |
 | Required replay epoch | 29 |
 | Commands | 75 |
-| Catalog FNV-1a drift fingerprint | `ec655f3463bb293c` |
+| Catalog FNV-1a drift fingerprint | `d3db3ae40c017f5d` |
 
 ## Language selectors
 

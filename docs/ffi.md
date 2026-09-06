@@ -333,8 +333,11 @@ manager を release する。manager release は worker の終了を待つため
 ## InkScript source／compiler／fragment（現行 ABI v34）
 
 ABI v15 で追加されたsource parse、diagnostic copy、static compile、journal fragment exportは、exact-current
-InkScript file v2／procedure catalog v8／replay epoch 29としてABI v34に保持される。`.inkscript` file filter、
-Windows command／UI、実Windows path authorityはまだ接続しない。
+InkScript file v3／procedure catalog v8／replay epoch 29としてABI v34に保持される。`.inkscript` file filterと
+製品Windows command／UIは未接続であり、既存のprivate Windows authority経路とは区別する。
+M4の共有Rust I/O／画像preview／active・新規tab結果はCore-onlyの公開契約である。
+既存ABI adapterはstaged出力のpreflightを拒否し、staged結果を既存のInstalledとして公開しない。
+対応するbounded take／releaseとWindows engine統合はM5で扱う。M4ではABI symbol／record／versionを変更しない。
 
 `inkpod_inkscript_source_parse` は `InkpodInkScriptSourceInput` の UTF-8 span を呼出中だけ借用し、128 MiB
 以下を Rust 所有へ一回コピーする。lex／parse error は API failure ではなく、`OK` と invalid source handle、
@@ -347,7 +350,7 @@ identity、diagnostic count だけを固定幅で返し、CST／AST pointer を�
 
 `inkpod_core_inkscript_compile` はCore owner threadだけで、sourceの`controller_id`／`session_generation`と
 requestをexact matchしてから既存の単一Rust compilerへ委譲する。parameter spanは`ask = each_run`の各parameterに
-stored default受理またはoverrideを名前で一件ずつ指定する。overrideのUTF-8 spanは呼出中だけ借用し、file v2の
+stored default受理またはoverrideを名前で一件ずつ指定する。overrideのUTF-8 spanは呼出中だけ借用し、file v3の
 bounded standalone value grammarで一つのclosed valueとしてRust所有へparseした後、source declarationの型へ
 exact checkする。persisted sourceのstored defaultは変更しない。成功したprogramはsourceを親にせず、resolved value、
 digest、budget、path intentを所有する一方、作成Core generationとowner threadへ束縛される。summary／releaseには同じlive Coreが

@@ -21,13 +21,14 @@ M1 から採番する。完了済み工程・旧版への更新経緯は Git 履
 新番号の対応、および registry owner ID を変更しない規則は 16.5 節に置く。
 
 現行の machine-readable contract は [registry schema v2](schemas/inkscript/registry-schema-v2.json)、
-[language v2](schemas/inkscript/language-v2.json)、[catalog v8](schemas/inkscript/catalog-v8.json)、
+[language v3](schemas/inkscript/language-v3.json)、[catalog v8](schemas/inkscript/catalog-v8.json)、
 [owner manifest v8](schemas/inkscript/owner-manifest-v8.json) である。language は command 非依存の
 type、section、selector、assert、asset の exact field、型、default、上限を固定し、catalog は
 75 command の閉じた集合を定義する。退役 primitive ID は tombstone として再利用しない。
 production Rust compile／bind／staged-run API と、実装済みの source／export／execution C ABI、
 Windows private authority／engine route を再利用する。これらの存在は `.inkscript` の product
-file filter、clipboard、Batch pane への接続を意味しない。公開境界は 14–17 節に従う。
+file filter、clipboard、Batch pane への接続を意味しない。公開境界は 14–17 節に従う。M4 の input profile／codec／staged output／画像 preview は
+Core-only の実行経路であり、既存 ABI の native private 経路への接続拡張は M5 で扱う。
 [command reference](docs/inkscript-command-reference.md) は registry からの生成物であり、手編集しない。
 
 本文中の「必須」「禁止」「拒否」は規範要件である。「推奨」は、同等の安全性、
@@ -37,7 +38,7 @@ file filter、clipboard、Batch pane への接続を意味しない。公開境�
 
 | 項目                                |                                       現在値 |
 | ----------------------------------- | -------------------------------------------: |
-| InkScript file format version       |                                            2 |
+| InkScript file format version       |                                            3 |
 | InkScript procedure catalog version | 8（四処理の一 command 追加、75 command） |
 | required replay epoch               | 29 |
 | native output                       |                      exact-current `.inkpod` |
@@ -63,18 +64,18 @@ contractを識別する。実装coverageは非永続の内部状態であり、f
 
 ### 1.1 再開時の適用範囲
 
-4–13 節は現在の file v2／catalog v8 の language/runtime 契約を記す。clipboard と編集 UI の記述は
+4–13 節は現在の file v3／catalog v8 の language/runtime 契約を記す。clipboard と編集 UI の記述は
 未接続の受入契約であり、実装済みの主張ではない。現行 Batch の製品挙動は
-[SPEC 19 節](SPEC.md#19-バッチ処理)を正本とし、次の不足を M1–M5 で解決してから UI を接続する。
-本改訂だけで新 syntax、catalog entry、版番号、製品挙動を批准・変更しない。
+[SPEC 19 節](SPEC.md#19-バッチ処理)を正本とし、次表の Core-only 契約を維持し、M5 の ABI／Windows 統合と後続の受入を経て UI を接続する。
+M1 の承認は input profile／output envelope の実装契約であり、製品 cutover の承認を兼ねない。
 
 | 対象 | 現行 InkScript の境界 | 再開後に満たす契約 |
 | --- | --- | --- |
 | Batch program | catalog v8 の `apply_batch_operations` と展開済み Commit の fragment export | 四種類の処理と全 target を一 canonical invocation／一 transaction／一 Undo で実行し、M9 の製品 parity へ接続する |
-| 入力・出力 | native `.inkpod` 入力と native file 出力。`duplicate`／`new_save` は命名 policy | PNG/TIFF/TGA/BMP 入力・出力、bounded template、発行時 active document／新規 tab 出力と identity／savepoint 契約を満たす |
-| preview | immutable 実行計画と staged dry-run。製品の画像 preview とは別 | 全入力を隔離した temporary copy から処理する contact sheet と、preview tab の元 target 固定を維持する |
+| 入力・出力 | file v3 の二 profile、共通codec、native naming／folder／active／new_tabs の Core-only plan/run | M5 で ABI／Windows の ownership と発行時 target へ統合し、M9 で製品 parity を確認する |
+| preview | authority preview、staged dry-run、temporary copy から作る画像 contact sheet を別結果型とする Core-only API | M5 以降で元 target を保持する preview tab publication へ接続する |
 | 編集 UI | lossless source と typed model の基盤。製品 editor は未接続 | 現行の固定 Input／Output、四種類の処理、set 保存、専用 Batch tab、三つの実行 button を出発点にする |
-| I/O ownership | Windows の private native authority adapter／engine route が存在 | 共有 Rust I/O manager と private platform backend の境界へ統合し、authority／atomic install の強度を保つ |
+| I/O ownership | 共有 Rust I/O manager の Core-only adapter と private platform backend。既存 Windows native adapter は別経路 | M5 で Windows engine を共有 manager へ移管し、authority／atomic install の強度を保つ |
 
 標準 layer は MainLine と Color を各一枚持ち、追加 plane は Raster とする。保存選択 mask は
 document-owned collection、fill protection は selection と別の document state である。
@@ -117,7 +118,7 @@ Batch の四種類への制限を理由に、存続する一般 InkScript comman
   view、session、OS、UI 固有操作を script command にしない。
 - shell、任意 process、network、clock、locale、environment variable、registry、
   無制限 loop、recursion、動的 code loading を提供しない。
-- version 2では`include`、module、別script importを提供しない。完全file一件だけでprogram構造を
+- 現行版では`include`、module、別script importを提供しない。完全file一件だけでprogram構造を
   決定し、assetの`data_file`だけを明示的な外部byte依存として許可する。
 - Rust enum の `Debug` 表示や可視化画面の要約文字列を executable syntax として
   再利用しない。
@@ -144,8 +145,8 @@ UTF-8 .inkscript / clipboard fragment
     -> typed ScriptExecutionPlan
     -> preview順に既存 canonical primitive executor
     -> 通常の Commit 列を持つ staged Core
-    -> exact-current .inkpod encode
-    -> input ごとの atomic install
+    -> 選択codecのencode／active・new-tabのstaged result
+    -> input ごとのatomic install／owner-thread publication
 ```
 
 InkScript は新しい画像処理 engine を持たない。各 `invoke` は既存の typed request /
@@ -160,11 +161,12 @@ InkScript には二つの層がある。
 
 切替後の Batch は、document program と command catalog を利用する UI projection とする。
 現行 Batch v5 の処理列を一 canonical transaction にする境界は保持し、既存 primitive executor を
-再利用する。下記 native-only pipeline から製品の入力・出力・画像 preview への拡張は M1–M5 の対象である。
+再利用する。共通codec・I/O manager による入力／出力／画像 preview は M4 の Core-only scope とし、
+ABI／Windows engine は M5、製品切替は M15 で扱う。
 
 sourceは編集用のlossless CSTと実行用のsemantic ASTを分離する。外部pathを読む前までの
 static compile、authority取得後の`PlanTask`、確認後の`RunTask`は別lifecycleとする。
-version 2のitem実行とinstallはimmutable preview順の逐次実行に固定し、Core single-writer、
+現行版のitem実行とinstallはimmutable preview順の逐次実行に固定し、Core single-writer、
 `failure = stop`、`wait_ms`、report順を一意にする。
 
 ## 4. ソースファイル
@@ -189,7 +191,7 @@ version 2のitem実行とinstallはimmutable preview順の逐次実行に固定�
 完全な file は必ず次の header から始める。
 
 ```inkscript
-inkscript 2;
+inkscript 3;
 ```
 
 header 後の section 順序は parser が許容するが、同名 section の重複を拒否する。
@@ -211,7 +213,7 @@ canonical formatter は次の順序で出力する。
 ### 4.3 comment
 
 `//` から行末までを comment とする。string と Base64 literal の内部では comment を
-開始しない。block comment と nested comment は version 2 では提供しない。
+開始しない。block comment と nested comment は現行版では提供しない。
 comment は実行意味を持たない。
 
 parser はsource textを二種類の表現へ分ける。
@@ -240,7 +242,7 @@ canonical emitterは検証済みsemantic ASTまたはtyped modelだけを入力�
 - ユーザーが明示した「文書を整形」
 - semantic/golden test用の正規形生成
 
-version 2の出力規則は次のとおりとする。
+現行版の出力規則は次のとおりとする。
 
 - BOMなしUTF-8、LF、末尾改行一つ、trailing whitespaceなし
 - indentationはASCII space 4個
@@ -372,7 +374,8 @@ meta             = "meta", record ;
 output           = "output", record ;
 execution        = "execution", record ;
 
-inputs           = "inputs", "{", input_decl*, "}" ;
+inputs           = "inputs", "{", (input_decl | input_profile)*, "}" ;
+input_profile    = "profile", "=", ("canonical" | "batch"), ";" ;
 input_decl       = "file", string, record?, ";"
                  | "folder", string, record?, ";"
                  | "current_document", record?, ";"
@@ -401,7 +404,7 @@ value            = boolean | integer | decimal | string | uuid_literal | digest_
                  | enum_literal | list | inline_record ;
 boolean          = "true" | "false" ;
 none             = "none" ;
-enum_literal     = identifier ;
+enum_literal     = identifier | "folder" ;
 constructor      = identifier, "(", argument_list?, ")" ;
 argument_list    = value, (",", value)*, ","? ;
 asset_reference  = "asset", "(", identifier, ")" ;
@@ -484,9 +487,9 @@ escape、NUL、invalid scalar を拒否する。path、name、label は byte lim
 
 ### 6.4 型の形成とliteral解決
 
-version 2にuser-defined type、alias、generic function、implicit castはない。`type_ref`の
+現行版にuser-defined type、alias、generic function、implicit castはない。`type_ref`の
 identifierは合成済み`SchemaView`に登録されたbuiltinまたはnamed closed typeへexact-current catalogで
-解決する。`language-v2.json`はcommand非依存のbuiltin、stable ID reference、共有enum/record、asset
+解決する。`language-v3.json`はcommand非依存のbuiltin、stable ID reference、共有enum/record、asset
 reference、selector referenceだけを所有する。commandの引数/result専用enum、record、constructorは
 そのcatalog entryが所有し、language registryへ逆流させない。
 
@@ -581,66 +584,58 @@ portability判定へ使用しない。より豊かなmetadata値は別versionで
 
 ```inkscript
 inputs {
+    profile = batch;
     file "cells/A001.inkpod";
     folder "cells/sequence-02" {
-        cells = range(10, 40);
+        cells = range(10, 0);
         recursive = false;
     };
-    current_sequence {
-        cells = all;
-    };
+    current_document;
 }
 ```
 
-input kind は次の閉じた集合とする。
+`profile` は section 内に一個までの `canonical | batch` とし、省略は `canonical`。
+command や output から推測しない。canonical emitter は既定の `canonical` を省略し、
+`batch` は input declaration の前に出力する。四処理 pane の source は `batch` を明示する。
 
-- `file`: 一つの native Cell `.inkpod`
-- `folder`: 一つの folder 直下にある対応 native Cell file
-- `current_document`: command 発行時に固定した一つの document session
-- `current_sequence`: command 発行時に固定した通常の runtime Sequence catalog の ordered membership。Cut descriptor や永続 membership を意味しない
+input kind は `file`、非再帰 `folder`、発行時 `current_document`、`current_sequence` の閉じた集合。
+file／folder は native `.inkpod`、PNG、TIFF、TGA、BMP を共有 decoder で読む。
+`current_sequence` は `canonical` だけで受け入れ、通常の runtime Sequence catalog の membership を
+発行時に固定する。Cut descriptor や永続 membership は導入しない。
 
-展開itemのorder/name keyは次のとおりとする。`validated filename`は妥当なUnicode scalar列で、native
-`.inkpod` extensionを持つ一path componentである。`source_stem`はその最終extensionを除いた非空文字列とし、
-output path componentとしての妥当性も検査する。
+| 観測点 | `batch` | `canonical` |
+| --- | --- | --- |
+| item 順 | input 宣言順。folder 内だけ既存 Batch `natural_cmp` 順、同値は生 UTF-8 filename／canonical path key 順 | 全展開後の global natural order。下記 comparator を使う |
+| 重複 | 同一 file identity／alias を拒否。active の重複宣言は保持し、native UUID だけでは重複としない | native UUID 重複または file alias を拒否 |
+| `cells` | `all`／`range(first,last)`。各端の 0 は境界なし。非zero 両端が逆順なら拒否。stem の末尾数字runで比較し、数字なし／overflow は保持。active の range は構造検証後に無視 | nonzero の閉じた inclusive display-number range。逆順は拒否。current_document は `all` だけ |
+| pathless active | label は `active-document.inkpod`、stem は `active-document` | label は `current-cell.inkpod`、stem はなし |
+| open active snapshot | active 出力は完全な staged Core。その他の出力と画像 preview は document/assets から履歴/editor を再構成 | Genesis、asset、journal/branch、history cursor、全 namespace の ID high-watermark、document/editor と両 savepoint を保持 |
+| open session が所有する file／folder input | disk を読み、未保存 live 編集を混入しない | open session の immutable snapshot を使い、dirty 内容を disk へ読み替えない |
 
-| item origin                    | `display_label`           | `path_order_key`                       | `source_stem`            |
-| ------------------------------ | ------------------------- | -------------------------------------- | ------------------------ |
-| `file` / `folder`              | authorized final filename | `ValidatedPathIdentity`のcanonical key | validated filenameのstem |
-| `current_sequence` member      | validated member filename | file-backed memberのcanonical key      | member filenameのstem    |
-| file-backed `current_document` | backing filename          | backing fileのcanonical key            | backing filenameのstem   |
-| pathless `current_document`    | `current-cell.inkpod`     | empty bytes                            | なし                     |
+canonical comparator は UTF-8 byte 列を左から比較する。両側が ASCII digit なら連続 run の先頭 zero を
+除いた桁数、numeric digit bytes、元 run 長の順。その他の byte は ASCII だけ lowercase 化して比較する。
+同値は元 UTF-8 label bytes、canonical path key、document UUID bytes の順で確定する。
+Unicode normalization、locale、OS case-fold を使わない。profile が定める item ordinal を
+output numbering、Stop、report、wait の順序に共用する。
 
-canonical path keyはOS adapterが返すlossless UTF-8、`/`区切り、absolute/root-tag付きの比較専用値である。
-Unicode normalization、locale、display用短縮、sourceに書かれた未解決pathを使わない。lossless UTF-8 keyを
-作れないfilesystem entryはplan errorとする。pathless current documentでは`duplicate`の空basenameと
-`cell_folder = true`をplan errorにする。`new_save`の空basenameは7.9の`cell_<number>.inkpod`を使用できる。
+file-backed item の label は authorized final filename、stem は最終拡張子を除く非空 component、
+path order key は adapter が返す lossless UTF-8／`/`区切り／absolute root-tag 付き比較値とする。
+canonical の pathless input は `duplicate` の空 basename、`cell_folder = true`、folder template の
+`{stem}` を解決できないため拒否する。`new_save` の空 basename と `{index:4}` だけの template は使用できる。
 
-`cells` は `all` または inclusive display-number range `range(first, last)` とする。
-display number 0、逆 range、重複 input、同一 file の path alias、非 Cell native file を
-拒否する。folder は version 2 では再帰しない。全input declarationを
-展開してから、全itemをdisplay labelのglobal natural orderで並べる。input declaration順やOS列挙順を
-最終順序に使用しない。
+raster input は file fingerprint と ingestion snapshot を束縛する。batch は既存 Batch の encoded bytes 由来
+UUID、canonical は Rust が発行して plan 内で固定する非zero identity を使う。同じ bytes の別fileを
+native UUID 重複と扱わない。canonical raster の表示番号は stem の末尾数字run、数字なし／0／overflow は1。
+別 job 間の import identity 一致は保証せず、同じ plan の再実行と canonical pixel 結果の決定性を保つ。
 
-natural comparatorはUTF-8 byte列を左から比較する。両側がASCII digitなら連続runを取り、先頭zeroを
-除いた桁数、numeric digit bytes、元run長の順に比較する。その他のbyteはASCIIだけlowercase化して
-比較する。ここまで同値なら元UTF-8 label bytes、`path_order_key` bytes、document UUID bytesの
-順でtie-breakする。Unicode normalization、locale、OS case-foldを使わない。この順序をoutput numbering、
-`failure = stop`、report、`wait_ms`の唯一のitem ordinalとする。
+relative path は保存済み `.inkscript` の親、未保存なら frontend が明示した base authority を使う。
+暗黙 cwd、`~`、環境変数、wildcard／shell 展開は行わない。absolute path も authority と計画確認の対象。
 
-relative path は保存済み `.inkscript` の親 directory を基準にする。unsaved source で relative
-path を使用する場合、frontend が明示的な base directory を取得するまで実行できない。
-`~`、environment variable、implicit current directory、wildcard expansion は使用しない。
-absolute path は許可するが、frontend の path authority と preview の対象になる。
-
-command発行時の`CommandContext`はsession/sequence IDとgeneration、document UUID/revision/state digest、
-editor revision、ordered membershipを固定する。PlanTaskはCore engine threadでそれらを照合し、一致した
-open memberからimmutable `CoreSessionSnapshot`を取得する。snapshotはGenesis、asset store、append-only
-journal/branch graph、current StateId/history cursor、全persistent-ID namespaceのnext ID/high-watermark、
-document/editor state、両savepointを含む。不一致は`stale_input`で
-あり、現在activeな別文書へ再解決しない。dirtyまたはpathlessでもbacking fileへ読み替えず、snapshot取得後の
-live編集はplan結果へ影響しない。open `DocumentSession`が所有するmemberは必ずsnapshotを使い、それ以外の
-closed memberだけがauthorized file fingerprintを使う。この原子的な照合・capture時点を`plan snapshot time`
-と呼び、command issue timeと混同しない。live sessionのpath authorityはsnapshotへ移管しない。
+発行時 `CommandContext` は session／sequence ID と generation、document／editor revision、UUID、
+state digest、membership を固定する。PlanTask は Core owner thread で照合し、profile に従う immutable
+snapshot を capture する。不一致を `stale_input` とし、別の active 文書へ再解決しない。
+この capture を `plan snapshot time` と呼び、issue time と区別する。live path authority は移管しない。
+詳細と Batch 比較上の明示差は [D2 接続契約](docs/inkscript-batch-connection.md#d2input-profile-と-source-例)に従う。
 
 ### 7.4 `parameters`
 
@@ -690,7 +685,7 @@ binding は入力一件を staged Core へ読み込んだ後、最初の mutatio
 state に対して上から順に解決し、以後固定する。program 実行後の状態を selector で再検索しては
 ならない。step が作成した object は step result 変数を使用する。
 
-version 2 の selector entity は次の閉じた集合とする。次表は概要であり、exact field、型、
+現行版の selector entity は次の閉じた集合とする。次表は概要であり、exact field、型、
 required/default、owner relation、initial-order規則はschema registryと生成referenceを規範とする。
 
 | entity                                 | 主な filter                                                                   |
@@ -825,14 +820,14 @@ disabled producerへの参照はcompile error、`skip_dependents`によるskippe
 skip、`only_on_change` resultをno-op/failure後に参照した場合だけ、そのinput itemを
 `missing_result`として失敗させる。
 
-`assert` は mutation と Commit を生成しない。version 2 は次を持つ。
+`assert` は mutation と Commit を生成しない。現行版は次を持つ。
 
 - `assert document`: UUID、state digest、ID allocation digest、寸法、DPI、色空間等の既知field
 - `assert object`: binding reference と既知 property
 - `assert selection`: empty/nonempty と half-open bounds
 
 assert failure はその入力 item を変更せず失敗させる。汎用 boolean expression、条件分岐、
-loop は version 2 では提供しない。入力一件ごとの反復だけが暗黙の bounded loop である。
+loop は現行版では提供しない。入力一件ごとの反復だけが暗黙の bounded loop である。
 
 `id_allocation_digest`は全persistent-ID namespaceをregistryのnamespace tag順に並べ、各
 `(namespace_tag, next_nonzero_id)`をdomain-separated BLAKE3へ入れた値とする。削除済みIDを含む
@@ -961,7 +956,7 @@ external assetはPlanTaskがauthority検証済みhandleからidentityとlength�
 descriptorと`AssetId`をplan/confirmation digestへ含め、RunTaskはfreeze済みbytesだけを使用する。
 
 外部の一般画像を読み込む authoring convenience は、将来 `ingest` 宣言として追加できるが、
-version 2 の canonical `asset` と混同しない。Coreへ渡る procedure は外部 pathを保持しない。
+現行版の canonical `asset` と混同しない。Coreへ渡る procedure は外部 pathを保持しない。
 
 ### 7.9 `output`
 
@@ -977,9 +972,8 @@ output {
 }
 ```
 
-現行file v2の`output`はpolicyごとのclosed variantであり、`format = inkpod`だけを許可する。
-これはBatch v5の製品出力契約ではない。一般画像・active document・新規tabへの拡張は、M1で
-file/catalog版と公開意味を確定してから実装し、既存v2の意味を暗黙に変えない。
+file v3 の `output` は policy ごとの closed variant とし、別 variant の field、未知 field、
+重複 field を拒否する。既存の native naming 三 policy は次の field と意味を保持する。
 
 | field          | `duplicate` / `new_save`            | `explicit_overwrite` |
 | -------------- | ----------------------------------- | -------------------- |
@@ -991,7 +985,7 @@ file/catalog版と公開意味を確定してから実装し、既存v2の意味
 | `start_number` | 必須`u32`                           | 指定禁止             |
 | `direction`    | 必須、`ascending`または`descending` | 指定禁止             |
 
-現行InkScript runtimeのdestination derivationは次のとおりとする。
+三つの native naming policy の destination derivation は次のとおりとする。
 
 - `folder = ""`はfile-backed inputの親directory。pathless/in-memory inputではerror
 - relative folderは保存済みscriptのauthorized parent、unsaved sourceでは明示base authorityを基準にする
@@ -1010,9 +1004,9 @@ file/catalog版と公開意味を確定してから実装し、既存v2の意味
 
 三policyはいずれもstaged documentのUUID、Genesis、journal、stable ID、asset identityを変更しない。
 `duplicate`はlogical forkや新UUID、`new_save`はlive sessionのSave Asやpath authority移管を意味せず、
-差はdestination namingだけである。新document identityは別の明示fork/new-Genesis仕様を必要とする。
+差は destination naming だけである。下記 `new_tabs` は新 identity／Genesis を作る別 variant とする。
 
-`explicit_overwrite`はopen `DocumentSession`が所有していないfile-backed input自身だけをdestinationに
+`explicit_overwrite`はopen `DocumentSession`が所有していないnative file-backed input自身だけをdestinationに
 できる。open sessionのbacking path、current document/sequenceのopen member、別input pathを拒否する。
 source/destination identityとopen-session registry generationをplan時とinstall直前に再検査する。
 overwriteにはsource上のpolicyだけでなく、planへ一回限りで束縛したpreview/confirmation tokenが必須である。
@@ -1023,7 +1017,29 @@ planned fingerprintに対するno-lost-update guardをOS adapterが提供でき�
 delete、置換を排他するか確実に検出しなければならない。RunTaskはguard取得後にvolume/file identity、length、
 content digest、native document UUID、利用可能なchange tokenを再検証し、planned値と違えば`stale_input`として
 installしない。単なるcheck-then-replaceしか提供できないfilesystemではPlanTaskが
-`unsupported_atomic_overwrite`として拒否する。
+`unsupported_atomic_overwrite`として拒否する。raster input を native bytes で上書きしてはならない。
+
+file v3 は M1 承認済みの次の三 variant も持つ。
+
+| `policy` | 必須 field（`policy` 以外） | 契約 |
+| --- | --- | --- |
+| `folder` | `format`, `folder`, `naming_template` | format は `inkpod | png | tiff | tga | bmp`。非空 folder と bounded template から一 item 一 file を作る |
+| `active_document` | なし | input は `current_document` 一宣言／一件。enabled mutation step は単一 `apply_batch_operations` だけで、assert は許可 |
+| `new_tabs` | なし | 結果ごとに新 identity の pathless／dirty document を staged publication する |
+
+folder は32,768 UTF-8 bytes以下。template は1–1,024 bytes、`{stem}` と `{index:N}`（N=1–12）だけを
+placeholder とし、index は1始まり、extension はformatが決める。absolute path、separator、dot、`..`、
+extension token を拒否する。既存 destination、input alias、item 間 collision を拒否し、自動 rename しない。
+raster export は既存 common composite encoder を使う。RGBA16 の格納精度を新たに保証しない。
+enabled outer step 内の enabled Batch masking と raster folder の組合せは実行前に拒否する。
+入力に既存 mask があるだけでは拒否へ強化しない。
+
+active 出力は発行時 session／generation と文書・editor・savepoint を公開直前に照合し、一 Undo として
+適用する。path authority と両 savepoint は保持し、stale／cancel／invalid は live document を変更しない。
+new_tabs は最大必要件数を開始前に capacity preflight し、結果の document/assets から history/editor を
+再構成する。source、既存 session、同時公開結果と衝突しない新 identity を Rust が発行する。
+source history を持ち越す logical fork ではない。両 staged result は owner に一回だけ移管し、
+close／stale 時に別 session へ公開しない。詳細は [D3 接続契約](docs/inkscript-batch-connection.md#d3outputpreview失敗と所有権)に従う。
 
 ### 7.10 `execution`
 
@@ -1081,7 +1097,7 @@ document revision変更だけでは失効しない。session close/replacement�
 file/folder inputはplanned fingerprintからの変更で失効する。
 
 file/folder itemはauthorized final path、利用可能なOSのvolume/file identity、length、content digest、
-native document UUIDをfingerprintとして固定する。RunTaskはread直前とread後にidentity、length、digestを
+native document UUIDまたはraster ingestion identityを固定する。RunTaskはread直前とread後にidentity、length、digestを
 再検査し、不一致を`stale_input`としてmutation前に拒否する。静かに最新fileへ読み替えない。
 
 path authorityはfrontendが発行するruntime-only opaque tokenで、source/fragmentへserializeしない。
@@ -1090,10 +1106,11 @@ tokenはauthorized rootまたはexact object、`read | enumerate | create | repl
 generationを含めてplan digestを生成し、confirmation tokenだけがplan digestへ束縛される。OS adapterは
 authority後にhandle-basedでfinal targetを解決し、symlink/reparse
 targetがauthorized root内であることを検査する。alias判定はfile identityを優先する。`..`、implicit
-cwd、`~`、environment/wildcard/shell expansion、network URL、UNC pathはversion 2で拒否する。Rust Coreは
+cwd、`~`、environment/wildcard/shell expansion、network URL、UNC pathは現行版で拒否する。Rust Coreは
 opaque OS tokenを解釈せず、adapterが検証したbounded path/identity DTOだけを受け取る。
 
-temporary fileもoutputの`create` authority外へ書いてはならない。RunTaskは作成直前にcancel、authority
+file出力のtemporaryもoutputの`create` authority外へ書いてはならない。画像previewは8.2.1の専用temporaryを使う。
+RunTaskは作成直前にcancel、authority
 generation、confirmation tokenを再検査し、検証済みdestination parent handle配下へhandle-relative、
 no-follow、exclusive createで作る。名前衝突のretryはboundedとする。writer handleはwrite/flush後にcloseし、
 その後は検証済みparent-directory handle、temporaryのrelative component、file identityを保持する。installまたは
@@ -1122,20 +1139,21 @@ identityを検証して再利用できる。外部主体が作成・置換した
 
 各入力は独立したstaged Coreでpreview順に処理する。
 
-1. current_document/current_sequenceは固定snapshot、file/folderはfingerprint再検査済みのauthorized
-   sourceからcurrent native readerで完全にopenする。
+1. current_document/current_sequenceはprofileに従う固定snapshot、file/folderはfingerprint再検査済みの
+   authorized sourceからcurrent native readerまたは共有raster decoderでopenする。
 2. initial stateでbindingsを解決する。
 3. assertとenabled stepを順番に実行する。
 4. 各stepを既存canonical executorへ渡す。
-5. 完了後のCoreをcurrent `.inkpod` として完全encodeする。
-6. cancellation、authority、confirmation tokenを再検査し、検証済みdestination parent handle配下の
+5. file出力は選択codecで完全encodeする。active／new_tabsは7.9のstaged resultを作る。
+6. file出力ではcancellation、authority、confirmation tokenを再検査し、検証済みdestination parent handle配下の
    同一volume exclusive temporary fileをwrite/flush/closeする。
-7. overwriteではno-lost-update guard下の完全なsource fingerprint、全policyではdestination identity、
+7. file出力のoverwriteではno-lost-update guard下の完全なsource fingerprint、全file policyではdestination identity、
    open-session registry、authority、confirmation tokenを再検査してatomic installする。
 
-`CoreSessionSnapshot`は単なる`CellDocument` cloneから新Genesisを作らず、native open/cache-free replayと
+canonical profile の `CoreSessionSnapshot` は単なる`CellDocument` cloneから新Genesisを作らず、native open/cache-free replayと
 同じvalidation経路でstaged Coreへ復元する。既存journal/history/allocatorへscript Commitをappendし、
-UUID、Genesis、既存branch、savepointを保持する。出力だけが最終stateのprospective savepointを記録する。
+UUID、Genesis、既存branch、savepointを保持する。native file出力だけが最終stateのprospective savepointを記録する。
+batch profile の materialize と new_tabs の新Genesis化は7.3／7.9の別境界に従う。
 
 任意の段階のinvalid、failure、cancel、stale、overflow、allocation failureで、その入力の
 working Coreとexact temporary fileだけを破棄する。入力file、別item、live current document、
@@ -1145,7 +1163,7 @@ atomicityはdestination file内容についてitem単位であり、job全体や
 対象外である。atomic create/replace成功をitemのlinearization pointとし、その後に観測したcancelで当該itemを
 `cancelled`へ戻さず`installed`と報告し、次item以降だけを`not_started`にする。後続itemのfailure/cancelで
 install済みの先行itemをrollbackしない。reportはpreview ordinalごとに
-`installed | failed | cancelled | not_started`を必ず一件持つ。
+`installed | staged | dry_run | failed | cancelled | not_started`を必ず一件持つ。
 `failure = stop`は失敗itemの後を`not_started`にする。linearization前にcancelを観測したactive itemは
 `cancelled`としてinstallせず、残りを`not_started`にする。linearization後は前段の規則に従う。
 output `.inkpod`には最終stateを指すprospective document/editor savepointを書くが、source/live sessionの
@@ -1153,6 +1171,27 @@ savepoint、dirty、path authorityを進めない。
 
 dry-runも同じparser、binder、asset ingestion、canonical executorをstaged Coreで実行するが、
 encode用temporary fileを作らず、outputをinstallしない。単純なsyntax checkをdry-runと呼ばない。
+
+### 8.2.1 画像 preview と staged publication
+
+`PathIntentPreview`／`ExecutionPreview` は authority・入力順・衝突を確認する計画であり、画像ではない。
+staged dry-run は隔離 Core の実行 report、画像 preview は保存・再読込後の contact sheet とし、
+異なる結果型・副作用を持つ。画像 preview のために実 destination を作成・変更しない。
+
+画像 preview は plan の全file inputをfingerprint照合してcopyし、全session snapshotを7.3のprofile規則で
+materializeしてから最初のcommandを実行する。canonicalのopen dirty fileもsnapshotを使う。
+copy完了後は隔離したbytesを正本とし、元fileが後から変化しても最新bytesへの読み替え・再copyを行わない。
+origin session／authority の generation は公開直前まで照合し、別active文書へfallbackしない。
+folder出力なら同じcodec、その他ならnativeでtemporaryに保存・再読込してthumbnailを作る。
+
+専用temporaryはinput/output合計4 GiB以下。contact sheetは長辺160のthumbnail、padding8を基準に、
+16,777,216 pixels以下へ収めたRGBA8とする。input順、失敗の赤系slot、Stop後の未処理灰色slot、
+透明checkerboardを保持する。cleanup完了後にcancel／origin／authorityを再確認し、一つのclean／pathless
+表示専用Coreと元の発行時contextを返す。cancel／stale／cleanup失敗は表示結果を返さない。
+
+通常runの成功済み先行itemは後続failure／cancelでrollbackしない。new_tabsの完了staged itemも保持する。
+active出力は公開直前のcancel／stale照合を要する。未取得staged resultはtask/ownerのreleaseで破棄し、
+移管は一回限りとする。画像previewは全体で一つの表示結果のため、途中成功slotを単独公開しない。
 
 ### 8.3 journal と Undo
 
@@ -1167,7 +1206,7 @@ encode用temporary fileを作らず、outputをinstallしない。単純なsynta
 
 結果はOS path列挙順、hash iteration順、locale、clock、thread数、GPU、UI stateに依存しない。
 folder展開、selectorの`first/all`、asset、parameter、stepは明示的な決定順を持つ。
-version 2のitem execution、encode、installはimmutable preview順の逐次実行に固定する。item並列化、
+現行版のitem execution、encode、installはimmutable preview順の逐次実行に固定する。item並列化、
 out-of-order completion/installを禁止する。`wait_ms`は一item終了後から次item開始前だけに適用し、
 Core engine threadをsleep/blockせずtimer continuationでyieldする。immutable bytesのhash/encode等を
 workerへ委譲しても、Core操作とinstall順を変えてはならない。将来のitem並列化はfile/catalog versionを
@@ -1252,7 +1291,7 @@ preconditionを出力/reportする。`strict_source_only`をportableに見せず
 fragmentは完全fileとは別のheaderを持つ。
 
 ```inkscript
-inkscript_fragment 2;
+inkscript_fragment 3;
 
 requires {
     procedure_catalog = 8;
@@ -1313,7 +1352,7 @@ Cancelまたはstale destinationで一部だけ書き換えない。
 
 ### 10.4 clipboard encoding
 
-Windows clipboardはregistered format `Inkpod.InkScript.v2`へBOMなしUTF-8 byte列とbyte lengthを置き、
+Windows clipboardはregistered format `Inkpod.InkScript.v3`へBOMなしUTF-8 byte列とbyte lengthを置き、
 同時に`CF_UNICODETEXT`へ同じUnicode textを提供する。pasteはregistered formatを優先し、plain textは
 `inkscript_fragment`または`inkscript` headerを持つ場合だけInkScript候補として扱い、10.3の操作別規則を
 適用する。画像clipboardと誤認しない。
@@ -1342,7 +1381,7 @@ clipboard fragmentのassetはすべてinline `data`とし、`data_file`を生成
 
 ## 12. resource limit と安全性
 
-version 2 は少なくとも次を上限とし、検査付き加算でtotalを計算する。既存Core側のより小さい
+現行版は少なくとも次を上限とし、検査付き加算でtotalを計算する。既存Core側のより小さい
 上限がある場合は小さい方を適用する。
 
 | 対象                                                            |                                                       上限 |
@@ -1360,7 +1399,7 @@ version 2 は少なくとも次を上限とし、検査付き加算でtotalを�
 | folder列挙work units（検査entry数 + openしたdirectory数）       |                                                  1,048,576 |
 | folder traversal depth                                          |                         64、またはOS adapter上限の小さい方 |
 | 一native input file                                             |     exact-current native decoderのfile/section/payload上限 |
-| fingerprint/readするnative input bytes合計                      |                    64 GiB、またはapplication設定の小さい方 |
+| fingerprint/readするnative／raster input bytes合計                      |                    64 GiB、またはapplication設定の小さい方 |
 | parameters                                                      |                                                      4,096 |
 | bindings                                                        |                                                     65,536 |
 | program statements                                              |                                                     65,536 |
@@ -1376,6 +1415,9 @@ version 2 は少なくとも次を上限とし、検査付き加算でtotalを�
 | 一つのexternal canonical asset                                  |                                                    512 MiB |
 | asset logical payload合計                                       |                                                    768 MiB |
 | planned logical output + temporary合計                          |                    64 GiB、またはapplication設定の小さい方 |
+| 画像preview専用temporary（input＋output）                       |                                                      4 GiB |
+| 画像preview RGBA8 contact sheet                                  |                                          16,777,216 pixels |
+| folder naming template                                          |                                           1–1,024 UTF-8 bytes |
 | diagnostics                                                     |                                                        256 |
 | `wait_ms`                                                       |                                                  3,600,000 |
 | aggregate wait                                                  | `wait_ms * max(planned_item_count - 1, 0) <= 3,600,000 ms` |
@@ -1394,7 +1436,7 @@ PlanTaskとRunTaskはworkspaceあたり各一件をactiveにし、application-wi
 budgetを共有する。PlanTaskはfolder filter適用前に、OS adapterから観測したmatch/nonmatchすべてのentry、
 正規化name bytes、traversal depth、列挙work unitをjob/application counterへchecked加算する。超過時は列挙を
 cancelしてplan全体を無変更で拒否し、先頭16,384件だけへ暗黙truncateしない。fingerprint hash/read bytes、
-RunTaskのnative read bytes、timer continuationの残wait budgetも同じcounterへchecked加算する。上限到達後の
+RunTaskのnative／raster read bytes、timer continuationの残wait budgetも同じcounterへchecked加算する。上限到達後の
 parser recovery、Base64 scan、diagnostic生成も残りbudget内に制限する。
 
 scriptは権限境界を拡張しない。path intentをauthority前に表示し、absolute input、script directory外の
@@ -1407,12 +1449,12 @@ queue saturation、shutdown raceをfault injectionで検証する。
 
 ## 13. 完全な例
 
-次は現行file v2／catalog v8のsyntaxと、`replace_raster_colors`、`resize_document`の規範的なfieldを示す。
+次は現行file v3／catalog v8のsyntaxと、`replace_raster_colors`、`resize_document`の規範的なfieldを示す。
 四種類に限定された製品Batchの作成例ではなく、公開Rust runtime用の一般script例である。
 他commandのfieldをこの例から類推して追加してはならず、procedure catalogのexact signatureに従う。
 
 ```inkscript
-inkscript 2;
+inkscript 3;
 
 requires {
     procedure_catalog = 8;
@@ -1513,7 +1555,10 @@ execution {
   - `script/bind`: initial document selector解決
   - `script/assets`: bounded asset ingestion
   - `script/execute`: common primitive executorへの接続
-  - `script/run`: sequential staged runner、dry-run、native persistence
+  - `script/run`: sequential staged runner、dry-run、itemごとのfile／staged result
+  - `script/output`: shared codec、materialize、active／new-tabのpublication所有権
+  - `script/preview`: 専用temporaryのcopy／save-reopenとcontact sheet
+  - `script/io`: 共有Rust I/O managerを使うCore-only authority／plan／run adapter
   - `script/export`: canonical journalからfragment ASTへの変換
   - `script/report`: preview/dry-run/run report
 - `inkpod-ffi`
@@ -1768,7 +1813,16 @@ checksum 一 literal の更新は明示承認を得て適用し、[元の Releas
 - no-op、全無効、missing／hidden／non-editable、形式不一致、重複、cancel／overflowで部分commitしない。
 - 必要なfile／catalog／native／replay更新と旧版拒否が同じ変更で揃い、製品UIへはまだ接続しない。
 
-### [ ] M4 — 製品入出力・画像previewのRust実行経路
+### [!] M4 — 製品入出力・画像previewのRust実行経路
+
+**未完了（修正が必要）**：承認済み D2/D3 の Core-only 入出力・staged result・画像preview を実装した。
+file／fragment v3、catalog v8／75 command、epoch 29／native v34／ABI v34 を使用する。
+共有 Windows I/O の guarded overwrite は、外部の write／rename を禁止した source handle と
+原子的置換の両立が未解決で、成功契約の test が失敗している。保護を外す fallback は追加せず、
+この工程の完了条件を満たしたとは扱わない。file v3 による Release quick の checksum 不一致も
+期待値を変更せず保持し、[一値の更新案と全sample](docs/core-benchmark-baseline.md#m4-file-v3-checksum-decision)
+を承認待ちとする。代表検証・既知差分は [compatibility](docs/compatibility.md) に記録する。
+次回は M4 の修正と検証だけを行い、M5・製品 cutover へ進まない。
 
 **範囲**
 

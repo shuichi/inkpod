@@ -1,7 +1,7 @@
 {
   "kind": "inkpod.inkscript.language",
   "registry_schema_version": 2,
-  "file_version": 2,
+  "file_version": 3,
   "procedure_catalog_version": 8,
   "required_replay_epoch": 29,
   "canonicalization": {
@@ -338,9 +338,10 @@
       },
       {
         "name": "inputs",
-        "ebnf": "\"inputs\" \"{\" input_decl* \"}\"",
+        "ebnf": "\"inputs\" \"{\" (input_decl | input_profile)* \"}\"",
         "references": [
-          "input_decl"
+          "input_decl",
+          "input_profile"
         ]
       },
       {
@@ -487,7 +488,7 @@
       },
       {
         "name": "enum_literal",
-        "ebnf": "identifier",
+        "ebnf": "identifier | \"folder\"",
         "references": [
           "identifier"
         ]
@@ -551,6 +552,11 @@
           "identifier",
           "type_ref"
         ]
+      },
+      {
+        "name": "input_profile",
+        "ebnf": "\"profile\" \"=\" (\"canonical\" | \"batch\") \";\"; at most once per inputs section",
+        "references": []
       }
     ]
   },
@@ -784,7 +790,7 @@
       "name": "output_record",
       "kind": "reference",
       "constraints": [
-        "closed-policy-union:duplicate,new_save,explicit_overwrite"
+        "closed-policy-union:duplicate,new_save,explicit_overwrite,folder,active_document,new_tabs"
       ]
     },
     {
@@ -870,13 +876,20 @@
       "members": [
         "duplicate",
         "new_save",
-        "explicit_overwrite"
+        "explicit_overwrite",
+        "folder",
+        "active_document",
+        "new_tabs"
       ]
     },
     {
       "name": "output_format",
       "members": [
-        "inkpod"
+        "inkpod",
+        "png",
+        "tiff",
+        "tga",
+        "bmp"
       ]
     },
     {
@@ -928,6 +941,13 @@
       "members": [
         "horizontal",
         "vertical"
+      ]
+    },
+    {
+      "name": "input_profile",
+      "members": [
+        "canonical",
+        "batch"
       ]
     }
   ],
@@ -1107,16 +1127,12 @@
         {
           "name": "first",
           "type": "u32",
-          "constraints": [
-            "nonzero"
-          ]
+          "constraints": []
         },
         {
           "name": "last",
           "type": "u32",
-          "constraints": [
-            "greater-than-or-equal:first"
-          ]
+          "constraints": []
         }
       ],
       "conversion": "exact"
@@ -1222,7 +1238,7 @@
           "default": "all",
           "canonical_order": 0,
           "constraints": [
-            "inclusive-display-number-range"
+            "profile-dependent-inclusive-number-range"
           ]
         }
       ]
@@ -1237,7 +1253,7 @@
           "default": "all",
           "canonical_order": 0,
           "constraints": [
-            "inclusive-display-number-range"
+            "profile-dependent-inclusive-number-range"
           ]
         },
         {
@@ -1247,7 +1263,7 @@
           "default": false,
           "canonical_order": 1,
           "constraints": [
-            "must-be-false-in-v2"
+            "must-be-false-in-v3"
           ]
         }
       ]
@@ -1262,7 +1278,7 @@
           "default": "all",
           "canonical_order": 0,
           "constraints": [
-            "captured-document-only"
+            "canonical-all-only-batch-range-ignored"
           ]
         }
       ]
@@ -1277,7 +1293,7 @@
           "default": "all",
           "canonical_order": 0,
           "constraints": [
-            "inclusive-display-number-range"
+            "profile-dependent-inclusive-number-range"
           ]
         }
       ]
@@ -1560,13 +1576,21 @@
       "name": "inputs_section",
       "fields": [
         {
+          "name": "profile",
+          "type": "input_profile",
+          "required": false,
+          "default": "canonical",
+          "canonical_order": 0,
+          "constraints": []
+        },
+        {
           "name": "declarations",
           "type": "list<input_declaration>",
           "required": true,
           "default": [],
-          "canonical_order": 0,
+          "canonical_order": 1,
           "constraints": [
-            "global-natural-order-after-expansion"
+            "profile-dependent-expansion-order"
           ]
         }
       ]
@@ -1654,7 +1678,9 @@
           "required": true,
           "default": "inkpod",
           "canonical_order": 1,
-          "constraints": []
+          "constraints": [
+            "must-equal:inkpod"
+          ]
         },
         {
           "name": "folder",
@@ -1721,7 +1747,9 @@
           "required": true,
           "default": "inkpod",
           "canonical_order": 1,
-          "constraints": []
+          "constraints": [
+            "must-equal:inkpod"
+          ]
         },
         {
           "name": "folder",
@@ -1790,7 +1818,9 @@
           "required": true,
           "default": "inkpod",
           "canonical_order": 1,
-          "constraints": []
+          "constraints": [
+            "must-equal:inkpod"
+          ]
         }
       ]
     },
@@ -1950,6 +1980,83 @@
           "constraints": [
             "exactly-one-of:data,data_file",
             "raw-canonical-payload-only"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "output_folder",
+      "fields": [
+        {
+          "name": "policy",
+          "type": "output_policy",
+          "required": true,
+          "default": "folder",
+          "canonical_order": 0,
+          "constraints": [
+            "must-equal:folder"
+          ]
+        },
+        {
+          "name": "format",
+          "type": "output_format",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": []
+        },
+        {
+          "name": "folder",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "utf8-bytes:1..32768"
+          ]
+        },
+        {
+          "name": "naming_template",
+          "type": "string",
+          "required": true,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "utf8-bytes:1..1024",
+            "stem-or-index-width-1..12-template",
+            "filename-without-dot-or-separator"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "output_active_document",
+      "fields": [
+        {
+          "name": "policy",
+          "type": "output_policy",
+          "required": true,
+          "default": "active_document",
+          "canonical_order": 0,
+          "constraints": [
+            "must-equal:active_document",
+            "single-current-document-input",
+            "single-enabled-apply-batch-operations-step"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "output_new_tabs",
+      "fields": [
+        {
+          "name": "policy",
+          "type": "output_policy",
+          "required": true,
+          "default": "new_tabs",
+          "canonical_order": 0,
+          "constraints": [
+            "must-equal:new_tabs"
           ]
         }
       ]

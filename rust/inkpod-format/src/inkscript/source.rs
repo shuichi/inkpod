@@ -3,7 +3,7 @@ use super::diagnostic::{
     InkScriptSourceRange, InkScriptSourceSpan,
 };
 
-pub const INKSCRIPT_FILE_VERSION: u32 = 2;
+pub const INKSCRIPT_FILE_VERSION: u32 = 3;
 pub const MAX_INKSCRIPT_SOURCE_BYTES: usize = 128 * 1024 * 1024;
 pub const MAX_INKSCRIPT_IDENTIFIER_BYTES: usize = 128;
 pub const MAX_INKSCRIPT_NUMERIC_BYTES: usize = 128;

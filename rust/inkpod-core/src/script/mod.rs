@@ -12,6 +12,16 @@ mod catalog;
 mod compile;
 mod execute;
 mod export;
+mod identity;
+mod io;
+pub use io::ScriptIoAdapter;
+mod output;
+pub use output::{ScriptStagedResult, ScriptStagedResultKind};
+mod preview;
+pub use preview::{
+    ScriptImagePreviewError, ScriptImagePreviewLimits, ScriptImagePreviewResult,
+    preview_inkscript_images,
+};
 #[cfg(test)]
 mod performance;
 mod plan;
@@ -45,9 +55,9 @@ pub use plan::{
     AuthorityGrant, AuthoritySnapshot, FolderScan, NativeInputFingerprint, OpenSessionRecord,
     OpenSessionSetSnapshot, ScriptCommandContext, ScriptConfirmationToken, ScriptDestinationBase,
     ScriptDestinationRequest, ScriptExecutionPlan, ScriptExecutionPreviewItem, ScriptPlanAdapter,
-    ScriptPlanAdapterError, ScriptPlanError, ScriptPlanLimits, ScriptRunScope,
-    ScriptSequenceExpectation, ScriptSequenceMemberSnapshot, ScriptSequenceSnapshot,
-    ScriptSessionExpectation, ScriptSessionSnapshot, ValidatedPathIdentity,
+    ScriptPlanAdapterError, ScriptPlanError, ScriptPlanLimits, ScriptPlannedDestination,
+    ScriptRunScope, ScriptSequenceExpectation, ScriptSequenceMemberSnapshot,
+    ScriptSequenceSnapshot, ScriptSessionExpectation, ScriptSessionSnapshot, ValidatedPathIdentity,
     issue_confirmation_token, plan_inkscript,
 };
 #[doc(hidden)]

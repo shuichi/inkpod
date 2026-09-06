@@ -822,7 +822,7 @@ pub(super) fn working_core(
     Ok(core)
 }
 
-pub(super) fn core_from_document(
+pub(crate) fn core_from_document(
     document: CellDocument,
     assets: asset::AssetStore,
 ) -> Result<Core, CoreError> {
@@ -869,7 +869,11 @@ pub(super) fn output_path_for(
     Ok(base_folder.join(format!("{basename}.{extension}")))
 }
 
-fn render_naming_template(template: &str, stem: &str, index: usize) -> Result<String, CoreError> {
+pub(crate) fn render_naming_template(
+    template: &str,
+    stem: &str,
+    index: usize,
+) -> Result<String, CoreError> {
     validate_naming_template(template)?;
     let mut rendered = String::new();
     let mut remaining = template;

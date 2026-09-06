@@ -9,6 +9,32 @@ impl Default for Core {
 }
 
 impl Core {
+    /// Publishes a validated canonical candidate while retaining independent live view and
+    /// file-owner state. The caller must finish all stale/transaction checks before entry.
+    pub(crate) fn publish_staged_document_edit(&mut self, mut staged: Core) {
+        staged.current_path = self.current_path.clone();
+        staged.view = self.view;
+        staged.secondary_views = self.secondary_views.clone();
+        staged.next_view_id = self.next_view_id;
+        staged.next_render_tile_revision = self.next_render_tile_revision;
+        staged.next_preview_revision = self.next_preview_revision;
+        staged.render_cache.clear();
+        staged.color_check = self.color_check;
+        staged.sequence = self.sequence.clone();
+        staged.motion_check = self.motion_check.clone();
+        staged.subpalette_index = self.subpalette_index;
+        staged.editor_defaults = self.editor_defaults.clone();
+        staged.shortcuts = self.shortcuts.clone();
+        staged.shortcut_defaults = self.shortcut_defaults.clone();
+        staged.new_cell_raster_format = self.new_cell_raster_format;
+        staged.io_manager = self.io_manager.clone();
+        staged.io_pair_authority = self.io_pair_authority.clone();
+        staged.io_pair_plan = self.io_pair_plan.clone();
+        staged.persistence_state = self.persistence_state.clone();
+        staged.io_install_pending = self.io_install_pending;
+        *self = staged;
+    }
+
     /// Returns immutable identity and base-surface metadata for active Genesis.
     ///
     /// This query does not change document, history, revisions, asset retention,

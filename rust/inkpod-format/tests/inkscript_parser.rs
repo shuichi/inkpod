@@ -33,7 +33,7 @@ fn public_parser_accepts_a_complete_file_and_preserves_every_source_byte() {
     assert_send_sync::<InkScriptParsed<'static>>();
 
     let bytes = concat!(
-        "\u{feff}inkscript 2;\r\n",
+        "\u{feff}inkscript 3;\r\n",
         "// retained comment\r\n",
         "meta { title = \"\\u{69}nkpod\"; }\r\n",
         "requires { procedure_catalog = 8; replay_epoch = 29; }\r\n",
@@ -100,7 +100,7 @@ fn public_parser_accepts_a_complete_file_and_preserves_every_source_byte() {
 #[test]
 fn public_parser_accepts_the_minimal_fragment_and_all_value_forms() {
     let source = source(
-        br#"inkscript_fragment 2;
+        br#"inkscript_fragment 3;
 requires { procedure_catalog = 8; }
 parameters { param p: nullable<list<u32>> = none; }
 bindings { let item = select plane {}; }
@@ -154,7 +154,7 @@ fn public_parser_rejects_noncurrent_versions_without_a_compatibility_reader() {
     for bytes in [
         &b"inkscript 0; requires {} inputs {} program {} output {} execution {}"[..],
         &b"inkscript 1; requires {} inputs {} program {} output {} execution {}"[..],
-        &b"inkscript 3; requires {} inputs {} program {} output {} execution {}"[..],
+        &b"inkscript 4; requires {} inputs {} program {} output {} execution {}"[..],
         &b"inkscript_fragment 0; requires {} program {}"[..],
     ] {
         assert_eq!(
@@ -167,7 +167,7 @@ fn public_parser_rejects_noncurrent_versions_without_a_compatibility_reader() {
 #[test]
 fn public_parser_rejects_duplicate_sections_fields_and_step_members() {
     let source = source(
-        br#"inkscript 2;
+        br#"inkscript 3;
 requires { version = 1; version = 1; }
 requires {}
 inputs {}
@@ -207,7 +207,7 @@ execution {}
 #[test]
 fn public_parser_rejects_missing_sections_and_step_members() {
     let file_codes = diagnostic_codes(
-        br#"inkscript 2;
+        br#"inkscript 3;
 requires {}
 program {
   step "missing invoke" { enabled = true; }
@@ -231,7 +231,7 @@ program {
     );
 
     assert_eq!(
-        diagnostic_codes(b"inkscript_fragment 2; requires {}"),
+        diagnostic_codes(b"inkscript_fragment 3; requires {}"),
         vec![InkScriptDiagnosticCode::MissingSection]
     );
 }
@@ -239,7 +239,7 @@ program {
 #[test]
 fn fragment_rejects_file_only_sections_and_reserved_identifiers() {
     let codes = diagnostic_codes(
-        br#"inkscript_fragment 2;
+        br#"inkscript_fragment 3;
 requires {}
 inputs {}
 program {
@@ -261,7 +261,7 @@ program {
 
 #[test]
 fn parser_recovers_with_error_nodes_and_never_rewrites_invalid_source() {
-    let bytes = b"inkscript 2;\r\nrequires { broken true; ok = 1; }\r\n@\r\nprogram {}\r\n";
+    let bytes = b"inkscript 3;\r\nrequires { broken true; ok = 1; }\r\n@\r\nprogram {}\r\n";
     let source = source(bytes);
     let parsed = parse_inkscript(&source);
 
@@ -279,7 +279,7 @@ fn parser_recovers_with_error_nodes_and_never_rewrites_invalid_source() {
 
 #[test]
 fn parser_truncation_corpus_is_deterministic_and_always_lossless() {
-    let valid = b"inkscript_fragment 2; requires { x = [1, 2]; } program { assert ready {}; }";
+    let valid = b"inkscript_fragment 3; requires { x = [1, 2]; } program { assert ready {}; }";
     for length in 0..=valid.len() {
         let bytes = &valid[..length];
         let source = source(bytes);
@@ -297,7 +297,7 @@ fn parser_diagnostic_recovery_stops_at_the_caller_lowered_limit() {
     let lexer_limits = InkScriptLexerLimits::exact_current().with_diagnostic_limit(3);
     let limits = InkScriptParserLimits::exact_current().with_lexer_limits(lexer_limits);
     let source =
-        source(b"inkscript_fragment 2; requires {} requires {} requires {} program {} program {}");
+        source(b"inkscript_fragment 3; requires {} requires {} requires {} program {} program {}");
     let parsed = parse_inkscript_with_limits(&source, limits);
 
     assert!(!parsed.is_complete());
@@ -316,27 +316,27 @@ fn parser_enforces_node_nesting_list_reference_and_container_limits() {
     let cases = [
         (
             InkScriptParserLimits::exact_current().with_node_limit(4),
-            b"inkscript_fragment 2; requires {} program {}".as_slice(),
+            b"inkscript_fragment 3; requires {} program {}".as_slice(),
             InkScriptDiagnosticCode::NodeLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_nesting_depth_limit(2),
-            b"inkscript_fragment 2; requires { x = [[[1]]]; } program {}".as_slice(),
+            b"inkscript_fragment 3; requires { x = [[[1]]]; } program {}".as_slice(),
             InkScriptDiagnosticCode::NestingLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_total_list_element_limit(2),
-            b"inkscript_fragment 2; requires { x = [1, 2, 3]; } program {}".as_slice(),
+            b"inkscript_fragment 3; requires { x = [1, 2, 3]; } program {}".as_slice(),
             InkScriptDiagnosticCode::ListElementLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_reference_segment_limit(2),
-            b"inkscript_fragment 2; requires { x = $a.b[0].c; } program {}".as_slice(),
+            b"inkscript_fragment 3; requires { x = $a.b[0].c; } program {}".as_slice(),
             InkScriptDiagnosticCode::ReferenceSegmentLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_container_element_limit(2),
-            b"inkscript_fragment 2; requires { a = 1; b = 2; c = 3; } program {}".as_slice(),
+            b"inkscript_fragment 3; requires { a = 1; b = 2; c = 3; } program {}".as_slice(),
             InkScriptDiagnosticCode::ContainerElementLimitExceeded,
         ),
     ];
@@ -354,27 +354,27 @@ fn parser_enforces_section_and_declaration_limits_without_truncation() {
     let cases = [
         (
             InkScriptParserLimits::exact_current().with_section_limit(1),
-            b"inkscript_fragment 2; requires {} program {}".as_slice(),
+            b"inkscript_fragment 3; requires {} program {}".as_slice(),
             InkScriptDiagnosticCode::SectionLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_input_limit(1),
-            b"inkscript 2; requires {} inputs { current_document; current_sequence; } program {} output {} execution {}".as_slice(),
+            b"inkscript 3; requires {} inputs { current_document; current_sequence; } program {} output {} execution {}".as_slice(),
             InkScriptDiagnosticCode::InputLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_parameter_limit(1),
-            b"inkscript_fragment 2; requires {} parameters { param a: u32 = 1; param b: u32 = 2; } program {}".as_slice(),
+            b"inkscript_fragment 3; requires {} parameters { param a: u32 = 1; param b: u32 = 2; } program {}".as_slice(),
             InkScriptDiagnosticCode::ParameterLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_binding_limit(1),
-            b"inkscript_fragment 2; requires {} bindings { let a = select layer {}; let b = select layer {}; } program {}".as_slice(),
+            b"inkscript_fragment 3; requires {} bindings { let a = select layer {}; let b = select layer {}; } program {}".as_slice(),
             InkScriptDiagnosticCode::BindingLimitExceeded,
         ),
         (
             InkScriptParserLimits::exact_current().with_program_statement_limit(1),
-            b"inkscript_fragment 2; requires {} program { assert a {}; assert b {}; }".as_slice(),
+            b"inkscript_fragment 3; requires {} program { assert a {}; assert b {}; }".as_slice(),
             InkScriptDiagnosticCode::ProgramStatementLimitExceeded,
         ),
     ];
@@ -391,7 +391,7 @@ fn parser_enforces_section_and_declaration_limits_without_truncation() {
 fn editor_groups_are_nonempty_and_must_form_one_contiguous_run() {
     assert_eq!(
         diagnostic_codes(
-            br#"inkscript_fragment 2; requires {} program {
+            br#"inkscript_fragment 3; requires {} program {
 step "a" { enabled = true; editor_group = ""; invoke c {}; }
 }"#,
         ),
@@ -399,7 +399,7 @@ step "a" { enabled = true; editor_group = ""; invoke c {}; }
     );
 
     let codes = diagnostic_codes(
-        br#"inkscript_fragment 2; requires {} program {
+        br#"inkscript_fragment 3; requires {} program {
 step "a" { enabled = true; editor_group = "g"; invoke c {}; }
 step "b" { enabled = true; invoke c {}; }
 step "c" { enabled = true; editor_group = "\u{67}"; invoke c {}; }

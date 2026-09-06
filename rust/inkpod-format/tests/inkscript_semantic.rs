@@ -47,7 +47,7 @@ fn schema() -> InkScriptSchemaView<'static> {
 fn semantic_ast_and_canonical_file_round_trip_use_registry_order_and_values() {
     let original = source(
         concat!(
-            "\u{feff}inkscript 2;\r\n",
+            "\u{feff}inkscript 3;\r\n",
             "// canonical output must not retain this\r\n",
             "execution { preview_before_save = true; wait_ms = -0; failure = continue; }\r\n",
             "output { direction = ascending; start_number = 1; basename = \"cell\"; ",
@@ -80,7 +80,7 @@ fn semantic_ast_and_canonical_file_round_trip_use_registry_order_and_values() {
     assert_eq!(
         std::str::from_utf8(&canonical).unwrap(),
         concat!(
-            "inkscript 2;\n",
+            "inkscript 3;\n",
             "\n",
             "requires {\n",
             "    procedure_catalog = 8;\n",
@@ -154,7 +154,7 @@ fn semantic_ast_and_canonical_file_round_trip_use_registry_order_and_values() {
 #[test]
 fn canonical_fragment_is_deterministic_and_preserves_declaration_order() {
     let input = source(
-        br#"inkscript_fragment 2;
+        br#"inkscript_fragment 3;
 program {
   step "second" { enabled = false; invoke test_command { count = 2; ratio = 1.00; text = "b"; options = { zeta = 2; }; values = []; payload = base64""""""; }; }
   step "first" { enabled = true; invoke test_command { count = 1; ratio = 0.0; text = "a"; options = { zeta = 1; }; values = []; payload = base64""""""; }; }
@@ -170,7 +170,7 @@ requires { replay_epoch = 29; procedure_catalog = 8; }
     let second = emit_inkscript_canonical(&ast, &schema()).unwrap();
     assert_eq!(first, second);
     let text = std::str::from_utf8(&first).unwrap();
-    assert!(text.starts_with("inkscript_fragment 2;\n\nrequires"));
+    assert!(text.starts_with("inkscript_fragment 3;\n\nrequires"));
     assert!(text.find("step \"second\"").unwrap() < text.find("step \"first\"").unwrap());
 
     let canonical_source = source(&first);
@@ -182,7 +182,7 @@ requires { replay_epoch = 29; procedure_catalog = 8; }
 #[test]
 fn compound_literals_references_and_constructors_round_trip_canonically() {
     let input = source(
-        br#"inkscript_fragment 2;
+        br#"inkscript_fragment 3;
 requires { replay_epoch = 29; procedure_catalog = 8; }
 program {
   step "literals" { enabled = true; invoke literal_command {
@@ -212,13 +212,13 @@ program {
 
 #[test]
 fn invalid_syntax_and_missing_command_schema_never_fallback() {
-    let invalid = source(b"inkscript_fragment 2; requires {} // missing program");
+    let invalid = source(b"inkscript_fragment 3; requires {} // missing program");
     let parsed = parse_inkscript(&invalid);
     let error = build_inkscript_semantic(&parsed, &schema()).unwrap_err();
     assert_eq!(error.code(), InkScriptSemanticErrorCode::InvalidSyntax);
 
     let valid = source(
-        br#"inkscript_fragment 2;
+        br#"inkscript_fragment 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 program { step "x" { enabled = true; invoke test_command { count = 0; ratio = 0.0; text = ""; options = { zeta = 1; }; values = []; payload = base64""""""; }; } }
 "#,

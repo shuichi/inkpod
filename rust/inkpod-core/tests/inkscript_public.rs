@@ -19,7 +19,7 @@ fn source(text: &str) -> InkScriptSource {
 
 fn program_source() -> InkScriptSource {
     source(
-        r#"inkscript 2;
+        r#"inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {
@@ -68,7 +68,7 @@ fn commit_events(core: &Core) -> Vec<JournalEventId> {
 
 fn fragment_as_file(fragment: &str) -> InkScriptSource {
     let text = fragment
-        .replacen("inkscript_fragment 2;", "inkscript 2;", 1)
+        .replacen("inkscript_fragment 3;", "inkscript 3;", 1)
         .replacen("program {", "inputs { current_document; }\nprogram {", 1);
     source(&format!(
         "{text}output {{ policy = duplicate; format = inkpod; folder = \"out\"; cell_folder = false; basename = \"export\"; start_number = 1; direction = ascending; }}\nexecution {{ failure = stop; wait_ms = 0; preview_before_save = false; }}\n"
@@ -131,7 +131,7 @@ fn public_compile_bind_and_staged_run_fail_closed() {
 
     assert_eq!(
         compile_inkscript(
-            &source("inkscript 2; requires { procedure_catalog = 8; replay_epoch = 29; }"),
+            &source("inkscript 3; requires { procedure_catalog = 8; replay_epoch = 29; }"),
             defaults(),
         ),
         Err(ScriptCompileError::Syntax)
@@ -198,7 +198,7 @@ fn journal_export_round_trips_a_linear_selection_with_typed_results() {
     base.release_history_cache().unwrap();
     base.verify_journal_replay().unwrap();
 
-    let text = r#"inkscript 2;
+    let text = r#"inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {
@@ -512,7 +512,7 @@ fn journal_export_uses_schema_role_indices_for_deleted_intermediate_outputs() {
         .unwrap();
     let info = base.document_info().unwrap();
     let script = format!(
-        r#"inkscript 2;
+        r#"inkscript 3;
 requires {{ procedure_catalog = 8; replay_epoch = 29; }}
 inputs {{ current_document; }}
 bindings {{

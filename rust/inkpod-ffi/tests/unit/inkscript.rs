@@ -1,7 +1,7 @@
 use super::*;
 
 fn source_text() -> &'static [u8] {
-    br#"inkscript 2;
+    br#"inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {
@@ -18,7 +18,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
 }
 
 fn parameter_source_text() -> &'static [u8] {
-    br#"inkscript 2;
+    br#"inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 parameters {
@@ -553,7 +553,7 @@ fn inkscript_compile_and_export_are_generation_bound_and_failure_atomic() {
         INKPOD_STATUS_OK
     );
     let text = std::str::from_utf8(&text).unwrap();
-    assert!(text.starts_with("inkscript_fragment 2;\n"));
+    assert!(text.starts_with("inkscript_fragment 3;\n"));
     assert!(text.contains("invoke add_guide"));
 
     let before = unsafe { (*core).core.document_state_digest().unwrap() };

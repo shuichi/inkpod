@@ -5,9 +5,9 @@ use super::assets::{
 use super::compile::{ScriptPathIntentSubject, ScriptStaticPathIntent, StaticScriptProgram};
 use crate::{Core, DocumentStateDigest, EditorStateDigest};
 use inkpod_format::{
-    InkScriptCellSelection, InkScriptInputDeclarationKind, InkScriptNumberDirection,
-    InkScriptOutput, InkScriptPathIntentAccess, MAX_INKSCRIPT_INPUTS, MAX_INKSCRIPT_STRING_BYTES,
-    MAX_INKSCRIPT_WAIT_MS, encode_procedure_file,
+    InkScriptCellSelection, InkScriptInputDeclarationKind, InkScriptInputProfile,
+    InkScriptNumberDirection, InkScriptOutput, InkScriptOutputFormat, InkScriptPathIntentAccess,
+    MAX_INKSCRIPT_INPUTS, MAX_INKSCRIPT_STRING_BYTES, MAX_INKSCRIPT_WAIT_MS, encode_procedure_file,
 };
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
@@ -192,6 +192,7 @@ pub struct NativeInputFingerprint {
     content_digest: [u8; 32],
     change_token: Option<[u8; 32]>,
     supports_atomic_overwrite: bool,
+    native: bool,
 }
 
 impl NativeInputFingerprint {
@@ -226,7 +227,50 @@ impl NativeInputFingerprint {
             content_digest,
             change_token,
             supports_atomic_overwrite,
+            native: true,
         })
+    }
+
+    /// Captures a supported raster file fingerprint. The byte-derived identity is used by the
+    /// Batch profile; canonical planning assigns and retains a separate ingestion identity.
+    /// No decoding or file access occurs here. Zero/absent identities and unsupported labels fail.
+    pub fn new_raster(
+        path: ValidatedPathIdentity,
+        display_label: String,
+        logical_length: u64,
+        content_digest: [u8; 32],
+        change_token: Option<[u8; 32]>,
+    ) -> Result<Self, ScriptPlanError> {
+        path.validate()?;
+        if path.expected_absent
+            || !valid_input_filename(&display_label)
+            || valid_native_filename(&display_label)
+            || logical_length == 0
+            || content_digest == [0; 32]
+            || change_token == Some([0; 32])
+        {
+            return Err(ScriptPlanError::InvalidInput);
+        }
+        let mut identity = [0; 16];
+        identity.copy_from_slice(&content_digest[..16]);
+        Ok(Self {
+            display_number: crate::animation::parse_cell_number(&display_label)
+                .filter(|n| *n != 0)
+                .unwrap_or(1),
+            path,
+            display_label,
+            document_uuid: u128::from_le_bytes(identity).max(1),
+            logical_length,
+            content_digest,
+            change_token,
+            supports_atomic_overwrite: false,
+            native: false,
+        })
+    }
+
+    /// Whether these bytes use the native document format and its embedded document identity.
+    pub const fn is_native(&self) -> bool {
+        self.native
     }
 
     pub const fn path(&self) -> &ValidatedPathIdentity {
@@ -282,6 +326,7 @@ pub struct ScriptSessionSnapshot {
     editor_digest: EditorStateDigest,
     estimated_native_bytes: u64,
     core: Box<Core>,
+    publication_token: Box<crate::DocumentSaveToken>,
 }
 
 impl ScriptSessionSnapshot {
@@ -319,13 +364,19 @@ impl ScriptSessionSnapshot {
             || session_generation == 0
             || source_generation == 0
             || display_number == 0
-            || !valid_native_filename(&display_label)
+            || !valid_input_filename(&display_label)
             || backing_path
                 .as_ref()
                 .is_some_and(|path| path.expected_absent)
         {
             return Err(ScriptPlanError::InvalidInput);
         }
+        // Reuse the complete persistence expectation captured from the live owner. The
+        // authority-free Core clone below intentionally has a separate runtime lifetime.
+        let publication_token = core
+            .capture_document_save()
+            .map_err(|_| ScriptPlanError::InvalidInput)?
+            .token;
         let mut snapshot_core = core.clone();
         snapshot_core.current_path = None;
         snapshot_core.io_pair_authority = None;
@@ -346,6 +397,7 @@ impl ScriptSessionSnapshot {
             editor_digest: editor.digest,
             estimated_native_bytes,
             core: Box::new(snapshot_core),
+            publication_token: Box::new(publication_token),
         })
     }
 
@@ -385,6 +437,10 @@ impl ScriptSessionSnapshot {
         self.validate_self()?;
         Ok((*self.core).clone())
     }
+
+    pub(super) fn publication_token(&self) -> crate::DocumentSaveToken {
+        self.publication_token.as_ref().clone()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -402,6 +458,14 @@ pub struct ScriptSessionExpectation {
 }
 
 impl ScriptSessionExpectation {
+    pub(super) const fn session_identity(&self) -> (u64, u64, u64) {
+        (
+            self.session_id,
+            self.session_generation,
+            self.source_generation,
+        )
+    }
+
     pub fn from_snapshot(snapshot: &ScriptSessionSnapshot) -> Result<Self, ScriptPlanError> {
         snapshot.validate_self()?;
         Ok(Self {
@@ -607,6 +671,14 @@ impl ScriptCommandContext {
             current_document,
             current_sequence,
         }
+    }
+
+    pub const fn current_document(&self) -> Option<&ScriptSessionExpectation> {
+        self.current_document.as_ref()
+    }
+
+    pub const fn current_sequence(&self) -> Option<&ScriptSequenceExpectation> {
+        self.current_sequence.as_ref()
     }
 }
 
@@ -841,6 +913,21 @@ pub trait ScriptPlanAdapter {
         request: &ScriptDestinationRequest,
         cancelled: &mut dyn FnMut() -> bool,
     ) -> Result<ValidatedPathIdentity, ScriptPlanAdapterError>;
+
+    /// Reserves/checks the maximum number of new result tabs before a job can be planned.
+    /// The default rejects staged publication in adapters that only support file output.
+    fn preflight_new_tabs(&mut self, _count: usize) -> Result<(), ScriptPlanAdapterError> {
+        Err(ScriptPlanAdapterError::Unavailable)
+    }
+
+    /// Checks that the issuing session can receive one staged active-document result.
+    /// The default keeps file-only adapters from silently accepting unhandled results.
+    fn preflight_active_document(
+        &mut self,
+        _expected: &ScriptSessionExpectation,
+    ) -> Result<(), ScriptPlanAdapterError> {
+        Err(ScriptPlanAdapterError::Unavailable)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -951,6 +1038,7 @@ pub(crate) struct ScriptPlannedInput {
     path_order_key: String,
     document_uuid: u128,
     source: PlannedInputSource,
+    materialize_session: bool,
 }
 
 impl ScriptPlannedInput {
@@ -979,6 +1067,22 @@ impl ScriptPlannedInput {
     pub(super) const fn document_uuid(&self) -> u128 {
         self.document_uuid
     }
+
+    pub(super) const fn materialize_session(&self) -> bool {
+        self.materialize_session
+    }
+}
+
+/// A destination resolved without assigning file identity to in-memory publication.
+#[derive(Clone, Debug, Eq, PartialEq)]
+#[doc(hidden)]
+pub enum ScriptPlannedDestination {
+    /// An authority-validated output path.
+    File(ValidatedPathIdentity),
+    /// The issuing live session, checked again by the publication owner.
+    ActiveDocument(ScriptSessionExpectation),
+    /// A fresh pathless document to be allocated by the publication owner.
+    NewTab,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -987,6 +1091,7 @@ pub struct ScriptExecutionPreviewItem {
     display_label: String,
     output_name: String,
     destination_key: String,
+    destination: ScriptPlannedDestination,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -998,7 +1103,7 @@ pub(crate) struct ScriptExecutionPreview {
 #[doc(hidden)]
 pub struct ScriptExecutionPlan {
     items: Vec<ScriptPlannedInput>,
-    destinations: Vec<ValidatedPathIdentity>,
+    destinations: Vec<ScriptPlannedDestination>,
     frozen_assets: FrozenScriptAssets,
     authority_generation: u64,
     open_session_set_generation: u64,
@@ -1007,6 +1112,7 @@ pub struct ScriptExecutionPlan {
     usage: ScriptPlanUsage,
     static_compile_digest: [u8; 32],
     path_intent_digest: [u8; 32],
+    command_context: ScriptCommandContext,
 }
 
 impl ScriptExecutionPlan {
@@ -1019,7 +1125,7 @@ impl ScriptExecutionPlan {
         &self.items
     }
 
-    pub(super) fn destinations(&self) -> &[ValidatedPathIdentity] {
+    pub(super) fn destinations(&self) -> &[ScriptPlannedDestination] {
         &self.destinations
     }
 
@@ -1047,6 +1153,12 @@ impl ScriptExecutionPlan {
         self.items.len()
     }
 
+    /// Returns the immutable issue-time context retained for result publication and preview
+    /// target reuse. It is never replaced by whichever tab later becomes active.
+    pub const fn command_context(&self) -> &ScriptCommandContext {
+        &self.command_context
+    }
+
     #[cfg(test)]
     pub(super) const fn performance_usage(&self) -> ScriptPlanUsage {
         self.usage
@@ -1064,6 +1176,10 @@ impl ScriptExecutionPreviewItem {
 
     pub fn destination_key(&self) -> &str {
         &self.destination_key
+    }
+
+    pub const fn destination(&self) -> &ScriptPlannedDestination {
+        &self.destination
     }
 }
 
@@ -1202,6 +1318,7 @@ pub fn plan_inkscript(
         asset: frozen_assets.usage(),
         ..ScriptPlanUsage::default()
     };
+    let profile = program.envelope.input_profile();
     let mut items = Vec::new();
     for (input_index, declaration) in program.envelope.inputs().iter().enumerate() {
         poll_cancel(cancelled)?;
@@ -1218,8 +1335,8 @@ pub fn plan_inkscript(
                     return Err(ScriptPlanError::StaleInput);
                 }
                 add_native_bytes(&mut usage, fingerprint.logical_length, limits)?;
-                if selected(declaration.cells(), fingerprint.display_number) {
-                    items.push(file_to_planned(
+                if selected_file(profile, declaration.cells(), &fingerprint) {
+                    let planned = file_to_planned(
                         input_index,
                         fingerprint,
                         &session_set,
@@ -1229,7 +1346,10 @@ pub fn plan_inkscript(
                             program.envelope.output(),
                             InkScriptOutput::ExplicitOverwrite
                         ),
-                    )?);
+                        profile,
+                    )?;
+                    add_file_snapshot_usage(&planned, &mut usage, limits)?;
+                    items.push(planned);
                 }
             }
             InkScriptInputDeclarationKind::Folder => {
@@ -1239,20 +1359,42 @@ pub fn plan_inkscript(
                     &ScriptPathIntentSubject::Input(input_index),
                     InkScriptPathIntentAccess::Enumerate,
                 )?;
-                let scan = adapter.enumerate_folder(grant.intent_id, cancelled)?;
+                let mut scan = adapter.enumerate_folder(grant.intent_id, cancelled)?;
                 add_folder_usage(&mut usage, &scan, limits)?;
+                if profile == InkScriptInputProfile::Batch {
+                    scan.matching_files.sort_by(|left, right| {
+                        crate::animation::natural_cmp(&left.display_label, &right.display_label)
+                            .then_with(|| {
+                                left.display_label
+                                    .as_bytes()
+                                    .cmp(right.display_label.as_bytes())
+                            })
+                            .then_with(|| {
+                                left.path
+                                    .canonical_key
+                                    .as_bytes()
+                                    .cmp(right.path.canonical_key.as_bytes())
+                            })
+                    });
+                }
                 for fingerprint in scan.matching_files {
                     poll_cancel(cancelled)?;
                     add_native_bytes(&mut usage, fingerprint.logical_length, limits)?;
-                    if selected(declaration.cells(), fingerprint.display_number) {
-                        items.push(file_to_planned(
+                    if selected_file(profile, declaration.cells(), &fingerprint) {
+                        if items.len() as u64 >= limits.expanded_inputs {
+                            return Err(ScriptPlanError::ResourceLimit);
+                        }
+                        let planned = file_to_planned(
                             input_index,
                             fingerprint,
                             &session_set,
                             adapter,
                             cancelled,
                             false,
-                        )?);
+                            profile,
+                        )?;
+                        add_file_snapshot_usage(&planned, &mut usage, limits)?;
+                        items.push(planned);
                     }
                 }
             }
@@ -1268,7 +1410,7 @@ pub fn plan_inkscript(
                     return Err(ScriptPlanError::StaleInput);
                 }
                 add_snapshot_bytes(&mut usage, snapshot.estimated_native_bytes, limits)?;
-                items.push(session_to_planned(input_index, snapshot)?);
+                items.push(session_to_planned(input_index, snapshot, profile)?);
             }
             InkScriptInputDeclarationKind::CurrentSequence => {
                 let expected = authority
@@ -1291,6 +1433,9 @@ pub fn plan_inkscript(
                     if !selected(declaration.cells(), display_number) {
                         continue;
                     }
+                    if items.len() as u64 >= limits.expanded_inputs {
+                        return Err(ScriptPlanError::ResourceLimit);
+                    }
                     match member {
                         ScriptSequenceMemberSnapshot::Session(snapshot) => {
                             snapshot.validate_self()?;
@@ -1299,18 +1444,21 @@ pub fn plan_inkscript(
                                 snapshot.estimated_native_bytes,
                                 limits,
                             )?;
-                            items.push(session_to_planned(input_index, snapshot)?);
+                            items.push(session_to_planned(input_index, snapshot, profile)?);
                         }
                         ScriptSequenceMemberSnapshot::File { fingerprint, .. } => {
                             add_native_bytes(&mut usage, fingerprint.logical_length, limits)?;
-                            items.push(file_to_planned(
+                            let planned = file_to_planned(
                                 input_index,
                                 fingerprint,
                                 &session_set,
                                 adapter,
                                 cancelled,
                                 false,
-                            )?);
+                                profile,
+                            )?;
+                            add_file_snapshot_usage(&planned, &mut usage, limits)?;
+                            items.push(planned);
                         }
                     }
                 }
@@ -1323,8 +1471,15 @@ pub fn plan_inkscript(
     if items.is_empty() {
         return Err(ScriptPlanError::InvalidInput);
     }
-    reject_duplicate_inputs(&items)?;
-    items.sort_by(compare_inputs);
+    reject_duplicate_inputs(&items, profile)?;
+    if profile == InkScriptInputProfile::Canonical {
+        assign_ingestion_identities(&mut items, &session_set)?;
+        items.sort_by(compare_inputs);
+    }
+    for item in &mut items {
+        item.materialize_session = profile == InkScriptInputProfile::Batch
+            && !matches!(program.envelope.output(), InkScriptOutput::ActiveDocument);
+    }
     validate_aggregate_plan(program, items.len(), &mut usage, limits)?;
     let requests = build_destination_requests(program, &items, &grants)?;
     let destinations = resolve_destinations(
@@ -1340,12 +1495,17 @@ pub fn plan_inkscript(
         items: items
             .iter()
             .zip(&destinations)
-            .map(|(input, destination)| ScriptExecutionPreviewItem {
-                display_label: input.display_label.clone(),
-                output_name: final_component(destination.canonical_key())
-                    .unwrap_or_default()
-                    .to_owned(),
-                destination_key: destination.canonical_key.clone(),
+            .map(|(input, destination)| {
+                let key = match destination {
+                    ScriptPlannedDestination::File(path) => path.canonical_key(),
+                    _ => "",
+                };
+                ScriptExecutionPreviewItem {
+                    display_label: input.display_label.clone(),
+                    output_name: final_component(key).unwrap_or_default().to_owned(),
+                    destination_key: key.to_owned(),
+                    destination: destination.clone(),
+                }
             })
             .collect(),
     };
@@ -1357,6 +1517,12 @@ pub fn plan_inkscript(
         &destinations,
         &frozen_assets,
     );
+    poll_cancel(cancelled)?;
+    if adapter.authority_generation()? != authority.generation
+        || adapter.open_session_set()?.generation != session_set.generation
+    {
+        return Err(ScriptPlanError::StaleAuthority);
+    }
     Ok(ScriptExecutionPlan {
         items,
         destinations,
@@ -1368,6 +1534,7 @@ pub fn plan_inkscript(
         usage,
         static_compile_digest: program.static_compile_digest,
         path_intent_digest: program.path_intent_digest,
+        command_context: authority.command_context.clone(),
     })
 }
 
@@ -1526,10 +1693,39 @@ fn add_snapshot_bytes(
     Ok(())
 }
 
+fn add_file_snapshot_usage(
+    item: &ScriptPlannedInput,
+    usage: &mut ScriptPlanUsage,
+    limits: ScriptPlanLimits,
+) -> Result<(), ScriptPlanError> {
+    if let PlannedInputSource::Session(snapshot) = &item.source {
+        add_snapshot_bytes(usage, snapshot.estimated_native_bytes, limits)?;
+    }
+    Ok(())
+}
+
 fn selected(selection: InkScriptCellSelection, number: u32) -> bool {
     match selection {
         InkScriptCellSelection::All => true,
         InkScriptCellSelection::Inclusive { first, last } => (first..=last).contains(&number),
+    }
+}
+
+fn selected_file(
+    profile: InkScriptInputProfile,
+    selection: InkScriptCellSelection,
+    fingerprint: &NativeInputFingerprint,
+) -> bool {
+    if profile == InkScriptInputProfile::Canonical {
+        return selected(selection, fingerprint.display_number);
+    }
+    match selection {
+        InkScriptCellSelection::All => true,
+        InkScriptCellSelection::Inclusive { first, last } => {
+            crate::animation::parse_cell_number(&fingerprint.display_label).is_none_or(|number| {
+                (first == 0 || first <= number) && (last == 0 || number <= last)
+            })
+        }
     }
 }
 
@@ -1540,6 +1736,7 @@ fn file_to_planned(
     adapter: &mut dyn ScriptPlanAdapter,
     cancelled: &mut dyn FnMut() -> bool,
     overwrite: bool,
+    profile: InkScriptInputProfile,
 ) -> Result<ScriptPlannedInput, ScriptPlanError> {
     if let Some(open) = session_set
         .sessions
@@ -1549,19 +1746,21 @@ fn file_to_planned(
         if overwrite {
             return Err(ScriptPlanError::OpenSessionOverwrite);
         }
-        let snapshot = adapter.capture_open_session(open, cancelled)?;
-        snapshot.validate_self()?;
-        if snapshot.session_id != open.session_id
-            || snapshot.session_generation != open.session_generation
-            || snapshot.document_uuid != open.document_uuid
-            || snapshot
-                .backing_path
-                .as_ref()
-                .is_none_or(|path| !path.aliases(&fingerprint.path))
-        {
-            return Err(ScriptPlanError::StaleInput);
+        if profile == InkScriptInputProfile::Canonical {
+            let snapshot = adapter.capture_open_session(open, cancelled)?;
+            snapshot.validate_self()?;
+            if snapshot.session_id != open.session_id
+                || snapshot.session_generation != open.session_generation
+                || snapshot.document_uuid != open.document_uuid
+                || snapshot
+                    .backing_path
+                    .as_ref()
+                    .is_none_or(|path| !path.aliases(&fingerprint.path))
+            {
+                return Err(ScriptPlanError::StaleInput);
+            }
+            return session_to_planned(input_index, snapshot, profile);
         }
-        return session_to_planned(input_index, snapshot);
     }
     let source_stem = source_stem(&fingerprint.display_label)?;
     Ok(ScriptPlannedInput {
@@ -1571,21 +1770,32 @@ fn file_to_planned(
         path_order_key: fingerprint.path.canonical_key.clone(),
         document_uuid: fingerprint.document_uuid,
         source: PlannedInputSource::File(fingerprint),
+        materialize_session: false,
     })
 }
 
 fn session_to_planned(
     input_index: usize,
     snapshot: ScriptSessionSnapshot,
+    profile: InkScriptInputProfile,
 ) -> Result<ScriptPlannedInput, ScriptPlanError> {
-    let source_stem = snapshot
+    let mut source_stem = snapshot
         .backing_path
         .as_ref()
         .map(|_| source_stem(&snapshot.display_label))
         .transpose()?;
+    let mut display_label = snapshot.display_label.clone();
+    if snapshot.backing_path.is_none() {
+        if profile == InkScriptInputProfile::Batch {
+            display_label = "active-document.inkpod".to_owned();
+            source_stem = Some("active-document".to_owned());
+        } else {
+            display_label = "current-cell.inkpod".to_owned();
+        }
+    }
     Ok(ScriptPlannedInput {
         input_index,
-        display_label: snapshot.display_label.clone(),
+        display_label,
         source_stem,
         path_order_key: snapshot
             .backing_path
@@ -1593,20 +1803,62 @@ fn session_to_planned(
             .map_or_else(String::new, |path| path.canonical_key.clone()),
         document_uuid: snapshot.document_uuid,
         source: PlannedInputSource::Session(snapshot),
+        materialize_session: false,
     })
 }
 
-fn reject_duplicate_inputs(items: &[ScriptPlannedInput]) -> Result<(), ScriptPlanError> {
+fn reject_duplicate_inputs(
+    items: &[ScriptPlannedInput],
+    profile: InkScriptInputProfile,
+) -> Result<(), ScriptPlanError> {
     for (index, item) in items.iter().enumerate() {
         if items[..index].iter().any(|other| {
-            item.document_uuid == other.document_uuid
+            (profile == InkScriptInputProfile::Canonical
+                && !is_raster_file(item)
+                && !is_raster_file(other)
+                && item.document_uuid == other.document_uuid)
                 || match (item.path(), other.path()) {
-                    (Some(left), Some(right)) => left.aliases(right),
+                    (Some(left), Some(right))
+                        if profile == InkScriptInputProfile::Canonical
+                            || matches!(
+                                (&item.source, &other.source),
+                                (PlannedInputSource::File(_), PlannedInputSource::File(_))
+                            ) =>
+                    {
+                        left.aliases(right)
+                    }
                     _ => false,
                 }
         }) {
             return Err(ScriptPlanError::DuplicateInput);
         }
+    }
+    Ok(())
+}
+
+fn is_raster_file(item: &ScriptPlannedInput) -> bool {
+    matches!(&item.source, PlannedInputSource::File(fingerprint) if !fingerprint.is_native())
+}
+
+fn assign_ingestion_identities(
+    items: &mut [ScriptPlannedInput],
+    sessions: &OpenSessionSetSnapshot,
+) -> Result<(), ScriptPlanError> {
+    let mut excluded = items
+        .iter()
+        .map(|item| item.document_uuid)
+        .chain(
+            sessions
+                .sessions
+                .iter()
+                .map(|session| session.document_uuid),
+        )
+        .collect::<Vec<_>>();
+    for item in items.iter_mut().filter(|item| is_raster_file(item)) {
+        let identity = super::identity::allocate_script_document_identity(excluded.iter().copied())
+            .map_err(|_| ScriptPlanError::ResourceLimit)?;
+        item.document_uuid = identity;
+        excluded.push(identity);
     }
     Ok(())
 }
@@ -1684,7 +1936,10 @@ fn build_destination_requests(
                 let PlannedInputSource::File(fingerprint) = &item.source else {
                     return Err(ScriptPlanError::OpenSessionOverwrite);
                 };
-                if !fingerprint.supports_atomic_overwrite || fingerprint.change_token.is_none() {
+                if !fingerprint.is_native()
+                    || !fingerprint.supports_atomic_overwrite
+                    || fingerprint.change_token.is_none()
+                {
                     return Err(ScriptPlanError::UnsupportedAtomicOverwrite);
                 }
                 let replace = intent_grant(
@@ -1747,6 +2002,45 @@ fn build_destination_requests(
                 }));
             }
         }
+        InkScriptOutput::Folder(settings) => {
+            let root = intent_grant(
+                program,
+                grants,
+                &ScriptPathIntentSubject::OutputRoot,
+                InkScriptPathIntentAccess::Create,
+            )?;
+            let extension = match settings.format() {
+                InkScriptOutputFormat::Inkpod => "inkpod",
+                InkScriptOutputFormat::Png => "png",
+                InkScriptOutputFormat::Tiff => "tiff",
+                InkScriptOutputFormat::Tga => "tga",
+                InkScriptOutputFormat::Bmp => "bmp",
+            };
+            for (ordinal, item) in items.iter().enumerate() {
+                let stem = match item.source_stem.as_deref() {
+                    Some(stem) => stem,
+                    None if !settings.naming_template().contains("{stem}") => "",
+                    None => return Err(ScriptPlanError::InvalidInput),
+                };
+                let basename =
+                    crate::batch::render_naming_template(settings.naming_template(), stem, ordinal)
+                        .map_err(|_| ScriptPlanError::InvalidInput)?;
+                let name = format!("{basename}.{extension}");
+                if !valid_input_filename(&name) {
+                    return Err(ScriptPlanError::InvalidInput);
+                }
+                output.push(Some(ScriptDestinationRequest {
+                    base: ScriptDestinationBase::AuthorizedRoot {
+                        intent_id: root.intent_id,
+                        root: root.resolved.clone(),
+                    },
+                    relative_components: vec![name],
+                }));
+            }
+        }
+        InkScriptOutput::ActiveDocument | InkScriptOutput::NewTabs => {
+            output.resize(items.len(), None);
+        }
     }
     Ok(output)
 }
@@ -1771,7 +2065,10 @@ fn output_name(
             };
             format!("{basename}_{number:04}.inkpod")
         }
-        InkScriptOutput::ExplicitOverwrite => return Err(ScriptPlanError::InvalidInput),
+        InkScriptOutput::ExplicitOverwrite
+        | InkScriptOutput::Folder(_)
+        | InkScriptOutput::ActiveDocument
+        | InkScriptOutput::NewTabs => return Err(ScriptPlanError::InvalidInput),
     };
     if !valid_native_filename(&value) {
         return Err(ScriptPlanError::InvalidInput);
@@ -1788,7 +2085,30 @@ fn resolve_destinations(
     requests: Vec<Option<ScriptDestinationRequest>>,
     adapter: &mut dyn ScriptPlanAdapter,
     cancelled: &mut dyn FnMut() -> bool,
-) -> Result<Vec<ValidatedPathIdentity>, ScriptPlanError> {
+) -> Result<Vec<ScriptPlannedDestination>, ScriptPlanError> {
+    match program.envelope.output() {
+        InkScriptOutput::ActiveDocument => {
+            if items.len() != 1 || !matches!(items[0].source, PlannedInputSource::Session(_)) {
+                return Err(ScriptPlanError::InvalidInput);
+            }
+            let expected = authority
+                .command_context
+                .current_document
+                .as_ref()
+                .ok_or(ScriptPlanError::StaleInput)?;
+            poll_cancel(cancelled)?;
+            adapter.preflight_active_document(expected)?;
+            return Ok(vec![ScriptPlannedDestination::ActiveDocument(
+                expected.clone(),
+            )]);
+        }
+        InkScriptOutput::NewTabs => {
+            poll_cancel(cancelled)?;
+            adapter.preflight_new_tabs(items.len())?;
+            return Ok(vec![ScriptPlannedDestination::NewTab; items.len()]);
+        }
+        _ => {}
+    }
     let mut destinations = Vec::with_capacity(items.len());
     for (item, request) in items.iter().zip(requests) {
         poll_cancel(cancelled)?;
@@ -1841,11 +2161,11 @@ fn resolve_destinations(
         }
         if destinations
             .iter()
-            .any(|other: &ValidatedPathIdentity| other.aliases(&destination))
+            .any(|other| matches!(other, ScriptPlannedDestination::File(path) if path.aliases(&destination)))
         {
             return Err(ScriptPlanError::OutputCollision);
         }
-        destinations.push(destination);
+        destinations.push(ScriptPlannedDestination::File(destination));
     }
     Ok(destinations)
 }
@@ -1855,7 +2175,7 @@ fn plan_digest(
     authority: &AuthoritySnapshot,
     session_set: &OpenSessionSetSnapshot,
     items: &[ScriptPlannedInput],
-    destinations: &[ValidatedPathIdentity],
+    destinations: &[ScriptPlannedDestination],
     assets: &FrozenScriptAssets,
 ) -> [u8; 32] {
     let mut hasher = blake3::Hasher::new_derive_key(PLAN_DIGEST_CONTEXT);
@@ -1868,6 +2188,7 @@ fn plan_digest(
         hasher.update(&grant.authority_id);
         hasher.update(&grant.generation.to_le_bytes());
     }
+    hash_command_context(&mut hasher, &authority.command_context);
     for item in items {
         hasher.update(&(item.input_index as u64).to_le_bytes());
         hash_bytes(&mut hasher, item.display_label.as_bytes());
@@ -1897,7 +2218,18 @@ fn plan_digest(
         }
     }
     for destination in destinations {
-        destination.hash_into(&mut hasher);
+        match destination {
+            ScriptPlannedDestination::File(path) => path.hash_into(&mut hasher),
+            ScriptPlannedDestination::ActiveDocument(expected) => {
+                hasher.update(b"active-document");
+                hasher.update(&expected.session_id.to_le_bytes());
+                hasher.update(&expected.session_generation.to_le_bytes());
+                hasher.update(&expected.source_generation.to_le_bytes());
+            }
+            ScriptPlannedDestination::NewTab => {
+                hasher.update(b"new-tab");
+            }
+        }
     }
     for asset in assets.plan_records() {
         hash_bytes(&mut hasher, asset.symbol.as_bytes());
@@ -1916,6 +2248,55 @@ fn plan_digest(
     *hasher.finalize().as_bytes()
 }
 
+fn hash_command_context(hasher: &mut blake3::Hasher, context: &ScriptCommandContext) {
+    // Context-free legacy file jobs keep the same byte walk. A context-bearing plan must bind
+    // its original target even when that target is not one of the selected file inputs.
+    if let Some(expected) = &context.current_document {
+        hasher.update(b"issue-document-context");
+        hasher.update(&expected.session_id.to_le_bytes());
+        hasher.update(&expected.session_generation.to_le_bytes());
+        hasher.update(&expected.source_generation.to_le_bytes());
+        hasher.update(&expected.document_uuid.to_le_bytes());
+        hasher.update(&expected.document_revision.to_le_bytes());
+        hasher.update(expected.state_digest.as_bytes());
+        hasher.update(&expected.editor_revision.to_le_bytes());
+        hasher.update(expected.editor_digest.as_bytes());
+        hasher.update(&expected.estimated_native_bytes.to_le_bytes());
+    }
+    if let Some(expected) = &context.current_sequence {
+        hasher.update(b"issue-sequence-context");
+        hasher.update(&expected.sequence_id.to_le_bytes());
+        hasher.update(&expected.generation.to_le_bytes());
+        hasher.update(&(expected.members.len() as u64).to_le_bytes());
+        for member in &expected.members {
+            match member {
+                ScriptSequenceMemberExpectation::Session {
+                    session_id,
+                    session_generation,
+                    document_uuid,
+                    source_generation,
+                } => {
+                    hasher.update(&[0]);
+                    hasher.update(&session_id.to_le_bytes());
+                    hasher.update(&session_generation.to_le_bytes());
+                    hasher.update(&document_uuid.to_le_bytes());
+                    hasher.update(&source_generation.to_le_bytes());
+                }
+                ScriptSequenceMemberExpectation::File {
+                    document_uuid,
+                    source_generation,
+                    path_alias,
+                } => {
+                    hasher.update(&[1]);
+                    hasher.update(&document_uuid.to_le_bytes());
+                    hasher.update(&source_generation.to_le_bytes());
+                    hasher.update(path_alias);
+                }
+            }
+        }
+    }
+}
+
 fn checked_add(left: u64, right: u64) -> Result<u64, ScriptPlanError> {
     left.checked_add(right)
         .ok_or(ScriptPlanError::ResourceLimit)
@@ -1931,7 +2312,8 @@ fn poll_cancel(cancelled: &mut dyn FnMut() -> bool) -> Result<(), ScriptPlanErro
 
 fn source_stem(label: &str) -> Result<String, ScriptPlanError> {
     let stem = label
-        .strip_suffix(".inkpod")
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
         .filter(|value| !value.is_empty())
         .ok_or(ScriptPlanError::InvalidInput)?;
     if !valid_component(stem) {
@@ -1942,9 +2324,19 @@ fn source_stem(label: &str) -> Result<String, ScriptPlanError> {
 
 fn valid_native_filename(value: &str) -> bool {
     value.len() <= MAX_INKSCRIPT_STRING_BYTES
-        && value
-            .strip_suffix(".inkpod")
-            .is_some_and(|stem| !stem.is_empty() && valid_component(stem))
+        && value.rsplit_once('.').is_some_and(|(stem, extension)| {
+            extension.eq_ignore_ascii_case("inkpod") && !stem.is_empty() && valid_component(stem)
+        })
+}
+
+fn valid_input_filename(value: &str) -> bool {
+    value.len() <= MAX_INKSCRIPT_STRING_BYTES
+        && value.rsplit_once('.').is_some_and(|(stem, extension)| {
+            valid_component(stem)
+                && ["inkpod", "png", "tif", "tiff", "tga", "bmp"]
+                    .iter()
+                    .any(|accepted| extension.eq_ignore_ascii_case(accepted))
+        })
 }
 
 fn valid_component(value: &str) -> bool {
@@ -1982,7 +2374,7 @@ mod tests {
         InkScriptSource::new(
             InkScriptSourceId::new(211),
             format!(
-                r#"inkscript 2;
+                r#"inkscript 3;
 requires {{ procedure_catalog = 8; replay_epoch = 29; }}
 inputs {{ {inputs} }}
 program {{}}

@@ -1,15 +1,14 @@
 use super::StaticScriptProgram;
 use super::execute::{ScriptRunError, run_inkscript_on_staged_core};
+use super::output::{ScriptStagedResult, encode_output, materialize};
 use super::plan::{
     NativeInputFingerprint, PlannedInputSource, ScriptConfirmationToken,
-    ScriptConsumedConfirmation, ScriptExecutionPlan, ScriptPlanError, ScriptPlannedInput,
-    ScriptRunScope, ScriptSessionSnapshot, ValidatedPathIdentity,
+    ScriptConsumedConfirmation, ScriptExecutionPlan, ScriptPlanError, ScriptPlannedDestination,
+    ScriptPlannedInput, ScriptRunScope, ScriptSessionSnapshot, ValidatedPathIdentity,
 };
 use super::report::ScriptDryRunReport;
 use crate::{Core, CoreError};
-use inkpod_format::{
-    InkScriptExecutionFailure, InkScriptOutput, decode_procedure_file, encode_procedure_file,
-};
+use inkpod_format::{InkScriptExecutionFailure, InkScriptOutput, decode_procedure_file};
 
 const MAX_RUN_OUTPUT_BYTES: u64 = 64 * 1024 * 1024 * 1024;
 
@@ -69,6 +68,16 @@ impl ScriptNativeRead {
             before,
             after,
         }
+    }
+
+    pub(super) fn matches(&self, expected: &NativeInputFingerprint) -> bool {
+        expected.matches_exact(&self.before)
+            && expected.matches_exact(&self.after)
+            && self.bytes.len() as u64 == expected.logical_length()
+            && *blake3::hash(&self.bytes).as_bytes() == expected.content_digest()
+    }
+    pub(super) fn into_bytes(self) -> Vec<u8> {
+        self.bytes
     }
 }
 
@@ -186,6 +195,28 @@ pub enum ScriptAtomicInstallResult {
 /// an error after the destination change has become visible.
 #[doc(hidden)]
 pub trait ScriptRunAdapter: Send {
+    /// Drains authoritative directory creations retained after a failed preparation.
+    fn take_created_directories(&mut self) -> Vec<ValidatedPathIdentity> {
+        Vec::new()
+    }
+    /// Optional manager-owned atomic publication. `Some` means the adapter completed
+    /// or rejected the operation while holding its identity/parent guards throughout.
+    fn publish_encoded(
+        &mut self,
+        _destination: &ValidatedPathIdentity,
+        _source: Option<&NativeInputFingerprint>,
+        _encoded: &[u8],
+        _cancelled: &mut dyn FnMut() -> bool,
+    ) -> Option<Result<ScriptAtomicInstallResult, ScriptRunAdapterError>> {
+        None
+    }
+    /// Issues an identity distinct from all live sessions and the supplied exclusions.
+    fn fresh_document_identity(
+        &mut self,
+        _excluded: &[u128],
+    ) -> Result<u128, ScriptRunAdapterError> {
+        Err(ScriptRunAdapterError::Unavailable)
+    }
     fn authority_generation(&mut self) -> Result<u64, ScriptRunAdapterError>;
     fn open_session_set_generation(&mut self) -> Result<u64, ScriptRunAdapterError>;
     fn session_is_current(
@@ -278,6 +309,7 @@ pub enum ScriptItemFailure {
 #[doc(hidden)]
 pub enum ScriptItemOutcome {
     Installed,
+    Staged,
     DryRun,
     Failed(ScriptItemFailure),
     Cancelled,
@@ -348,6 +380,8 @@ pub struct ScriptRunTask {
     phase: TaskPhase,
     known_directories: Vec<ValidatedPathIdentity>,
     report: ScriptRunReport,
+    staged_results: Vec<ScriptStagedResult>,
+    dry_results: Vec<(usize, super::execute::ScriptDryRunResult)>,
 }
 
 /// Consumes an immutable plan and one-shot confirmation into a sequential run task.
@@ -385,7 +419,10 @@ pub fn start_inkscript_run(
         .map(|(ordinal, (item, destination))| ScriptRunItemReport {
             ordinal,
             input_label: item.display_label().to_owned(),
-            destination_key: destination.canonical_key().to_owned(),
+            destination_key: match destination {
+                ScriptPlannedDestination::File(path) => path.canonical_key().to_owned(),
+                _ => String::new(),
+            },
             outcome: ScriptItemOutcome::NotStarted,
             execution: None,
         })
@@ -402,6 +439,8 @@ pub fn start_inkscript_run(
         total,
         phase: TaskPhase::Ready,
         known_directories: Vec::new(),
+        staged_results: Vec::new(),
+        dry_results: Vec::new(),
         report: ScriptRunReport {
             dry_run: mode == ScriptRunMode::DryRun,
             cancelled: false,
@@ -456,6 +495,9 @@ impl ScriptRunTask {
             &item,
             &destination,
             &mut self.known_directories,
+            &mut self.staged_results,
+            &mut self.dry_results,
+            ordinal,
             adapter,
             cancelled,
         );
@@ -507,6 +549,41 @@ impl ScriptRunTask {
         Ok(self.report.clone())
     }
 
+    /// Transfers isolated dry-run states and their input ordinals. These retain the
+    /// execution identity/history and never have active/new-tab publication authority.
+    pub fn take_dry_results(
+        &mut self,
+    ) -> Result<Vec<(usize, super::execute::ScriptDryRunResult)>, ScriptRunStartError> {
+        if self.phase != TaskPhase::Complete || self.mode != ScriptRunMode::DryRun {
+            return Err(ScriptRunStartError::NotComplete);
+        }
+        Ok(std::mem::take(&mut self.dry_results))
+    }
+
+    /// Transfers completed staged results once after revalidating authority and issue-time
+    /// sessions. Later-item cancellation retains successful earlier items. Stale authority
+    /// or source releases unclaimed results; closing an owner must invalidate its adapter.
+    pub fn take_staged_results(
+        &mut self,
+        adapter: &mut dyn ScriptRunAdapter,
+    ) -> Result<Vec<ScriptStagedResult>, ScriptItemFailure> {
+        let validate = (|| {
+            if self.phase != TaskPhase::Complete {
+                return Err(ScriptItemFailure::Adapter);
+            }
+            validate_runtime_state(&self.plan, &self.confirmation, adapter)?;
+            for result in &self.staged_results {
+                validate_source(&self.plan.items()[result.ordinal()], adapter)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = validate {
+            self.staged_results.clear();
+            return Err(error);
+        }
+        Ok(std::mem::take(&mut self.staged_results))
+    }
+
     fn has_remaining_selected(&self) -> bool {
         self.selected[self.next_ordinal..]
             .iter()
@@ -549,8 +626,11 @@ fn run_one_item(
     mode: ScriptRunMode,
     limits: ScriptRunLimits,
     item: &ScriptPlannedInput,
-    destination: &ValidatedPathIdentity,
+    destination: &ScriptPlannedDestination,
     known_directories: &mut Vec<ValidatedPathIdentity>,
+    staged_results: &mut Vec<ScriptStagedResult>,
+    dry_results: &mut Vec<(usize, super::execute::ScriptDryRunResult)>,
+    ordinal: usize,
     adapter: &mut dyn ScriptRunAdapter,
     cancelled: &mut dyn FnMut() -> bool,
 ) -> ItemRunResult {
@@ -575,9 +655,19 @@ fn run_one_item(
     #[cfg(test)]
     adapter.observe_staged_execution(&executed.report);
     if mode == ScriptRunMode::DryRun {
+        if cancelled() {
+            return ItemRunResult::cancelled();
+        }
+        if let Err(failure) = validate_runtime_state(plan, confirmation, adapter)
+            .and_then(|()| validate_source(item, adapter))
+        {
+            return ItemRunResult::failed(failure);
+        }
+        let report = executed.report.clone();
+        dry_results.push((ordinal, executed));
         return ItemRunResult {
             outcome: ScriptItemOutcome::DryRun,
-            execution: Some(executed.report),
+            execution: Some(report),
             created_directories: Vec::new(),
             cancel_after_linearization: false,
         };
@@ -586,18 +676,60 @@ fn run_one_item(
         return ItemRunResult::cancelled();
     }
 
-    let editor_digest = match executed.staged.editor_state() {
-        Ok(value) => value.digest,
-        Err(_) => return ItemRunResult::failed(ScriptItemFailure::Encode),
+    if !matches!(destination, ScriptPlannedDestination::File(_)) {
+        if let Err(failure) = validate_runtime_state(plan, confirmation, adapter)
+            .and_then(|()| validate_source(item, adapter))
+        {
+            return ItemRunResult::failed(failure);
+        }
+        let staged = match destination {
+            ScriptPlannedDestination::ActiveDocument(_) => {
+                let PlannedInputSource::Session(snapshot) = item.source() else {
+                    return ItemRunResult::failed(ScriptItemFailure::StaleInput);
+                };
+                ScriptStagedResult::active(ordinal, executed.staged, snapshot)
+                    .map_err(execution_failure)
+            }
+            ScriptPlannedDestination::NewTab => {
+                let mut excluded = plan
+                    .items()
+                    .iter()
+                    .map(|input| input.document_uuid())
+                    .collect::<Vec<_>>();
+                for result in staged_results.iter() {
+                    if let Ok(info) = result.core().document_info() {
+                        excluded.push(info.document_uuid);
+                    }
+                }
+                match adapter.fresh_document_identity(&excluded) {
+                    Ok(identity) if identity != 0 && !excluded.contains(&identity) => {
+                        ScriptStagedResult::new_tab(ordinal, &executed.staged, identity)
+                            .map_err(|_| ScriptItemFailure::Encode)
+                    }
+                    _ => Err(ScriptItemFailure::Adapter),
+                }
+            }
+            ScriptPlannedDestination::File(_) => unreachable!(),
+        };
+        let staged = match staged {
+            Ok(value) => value,
+            Err(failure) => return ItemRunResult::failed(failure),
+        };
+        if cancelled() {
+            return ItemRunResult::cancelled();
+        }
+        staged_results.push(staged);
+        return ItemRunResult {
+            outcome: ScriptItemOutcome::Staged,
+            execution: Some(executed.report),
+            created_directories: Vec::new(),
+            cancel_after_linearization: false,
+        };
+    }
+    let ScriptPlannedDestination::File(destination) = destination else {
+        unreachable!()
     };
-    let native = match executed
-        .staged
-        .build_procedure_file(Some(executed.staged.current_state), Some(editor_digest))
-    {
-        Ok(value) => value,
-        Err(_) => return ItemRunResult::failed(ScriptItemFailure::Encode),
-    };
-    let encoded = match encode_procedure_file(&native) {
+    let encoded = match encode_output(&executed.staged, program.envelope.output().format()) {
         Ok(value) => value,
         Err(_) => return ItemRunResult::failed(ScriptItemFailure::Encode),
     };
@@ -630,8 +762,26 @@ fn run_one_item(
     }
     let prepared = match adapter.prepare_destination(destination, known_directories, cancelled) {
         Ok(value) => value,
-        Err(error) if is_cancel(error) => return ItemRunResult::cancelled(),
-        Err(error) => return ItemRunResult::failed(adapter_failure(error)),
+        Err(error) => {
+            let created = match merge_directories(
+                known_directories,
+                adapter.take_created_directories(),
+                destination.volume_id(),
+            ) {
+                Ok(created) => created,
+                Err(failure) => return ItemRunResult::failed(failure),
+            };
+            return ItemRunResult {
+                outcome: if is_cancel(error) {
+                    ScriptItemOutcome::Cancelled
+                } else {
+                    ScriptItemOutcome::Failed(adapter_failure(error))
+                },
+                execution: None,
+                created_directories: created,
+                cancel_after_linearization: false,
+            };
+        }
     };
     let created = match merge_directories(
         known_directories,
@@ -664,6 +814,47 @@ fn run_one_item(
             execution: None,
             created_directories: created,
             cancel_after_linearization: false,
+        };
+    }
+    if let Err(failure) = validate_source(item, adapter) {
+        return ItemRunResult {
+            outcome: ScriptItemOutcome::Failed(failure),
+            execution: None,
+            created_directories: created,
+            cancel_after_linearization: false,
+        };
+    }
+    let source = match item.source() {
+        PlannedInputSource::File(source) => Some(source),
+        _ => None,
+    };
+    if let Some(result) = adapter.publish_encoded(&install_destination, source, &encoded, cancelled)
+    {
+        return match result {
+            Ok(ScriptAtomicInstallResult::CancelledBeforeLinearization) => ItemRunResult {
+                outcome: ScriptItemOutcome::Cancelled,
+                execution: None,
+                created_directories: created,
+                cancel_after_linearization: false,
+            },
+            Ok(installed) => ItemRunResult {
+                outcome: ScriptItemOutcome::Installed,
+                execution: Some(executed.report),
+                created_directories: created,
+                cancel_after_linearization: installed
+                    == ScriptAtomicInstallResult::InstalledAfterCancellation
+                    || cancelled(),
+            },
+            Err(error) => ItemRunResult {
+                outcome: if is_cancel(error) {
+                    ScriptItemOutcome::Cancelled
+                } else {
+                    ScriptItemOutcome::Failed(adapter_failure(error))
+                },
+                execution: None,
+                created_directories: created,
+                cancel_after_linearization: false,
+            },
         };
     }
     let temporary = match adapter.create_same_volume_temporary(&install_destination, cancelled) {
@@ -908,7 +1099,7 @@ fn scope_selects(scope: &ScriptRunScope, item: &ScriptPlannedInput) -> bool {
     }
 }
 
-fn validate_runtime_state(
+pub(super) fn validate_runtime_state(
     plan: &ScriptExecutionPlan,
     confirmation: &ScriptConsumedConfirmation,
     adapter: &mut dyn ScriptRunAdapter,
@@ -924,15 +1115,24 @@ fn validate_runtime_state(
     {
         return Err(ScriptItemFailure::StaleAuthority);
     }
+    if let Some(origin) = plan.command_context().current_document() {
+        let (id, generation, source) = origin.session_identity();
+        if !adapter
+            .session_is_current(id, generation, source)
+            .map_err(adapter_failure)?
+        {
+            return Err(ScriptItemFailure::StaleSession);
+        }
+    }
     Ok(())
 }
 
-enum ItemStageError {
+pub(super) enum ItemStageError {
     Cancelled,
     Failed(ScriptItemFailure),
 }
 
-fn stage_input(
+pub(super) fn stage_input(
     item: &ScriptPlannedInput,
     adapter: &mut dyn ScriptRunAdapter,
     cancelled: &mut dyn FnMut() -> bool,
@@ -940,9 +1140,14 @@ fn stage_input(
     match item.source() {
         PlannedInputSource::Session(snapshot) => {
             validate_session(snapshot, adapter).map_err(ItemStageError::Failed)?;
-            snapshot
+            let core = snapshot
                 .clone_staged_core()
-                .map_err(|_| ItemStageError::Failed(ScriptItemFailure::StaleInput))
+                .map_err(|_| ItemStageError::Failed(ScriptItemFailure::StaleInput))?;
+            if item.materialize_session() {
+                materialize(&core).map_err(|_| ItemStageError::Failed(ScriptItemFailure::Decode))
+            } else {
+                Ok(core)
+            }
         }
         PlannedInputSource::File(expected) => {
             let read = adapter.read_native(expected, cancelled).map_err(|error| {
@@ -958,6 +1163,16 @@ fn stage_input(
                 || *blake3::hash(&read.bytes).as_bytes() != expected.content_digest()
             {
                 return Err(ItemStageError::Failed(ScriptItemFailure::StaleInput));
+            }
+            if !expected.is_native() {
+                let format = inkpod_format::CommonRasterFormat::from_extension(
+                    expected.display_label().rsplit('.').next().unwrap_or(""),
+                )
+                .ok_or(ItemStageError::Failed(ScriptItemFailure::Decode))?;
+                let mut core = Core::new();
+                core.import_common_raster(format, &read.bytes, item.document_uuid())
+                    .map_err(|_| ItemStageError::Failed(ScriptItemFailure::Decode))?;
+                return Ok(core);
             }
             let file = decode_procedure_file(&read.bytes)
                 .map_err(|_| ItemStageError::Failed(ScriptItemFailure::Decode))?;
@@ -976,7 +1191,7 @@ fn stage_input(
     }
 }
 
-fn validate_source(
+pub(super) fn validate_source(
     item: &ScriptPlannedInput,
     adapter: &mut dyn ScriptRunAdapter,
 ) -> Result<(), ScriptItemFailure> {

@@ -510,7 +510,7 @@ impl<'schema> InkScriptSchemaView<'schema> {
             .find(|selector| selector.name == name)
     }
 
-    /// Returns the owner relation for an exact language-v2 selector entity.
+    /// Returns the owner relation for an exact-current selector entity.
     pub fn selector_owner(&self, name: &str) -> Option<InkScriptSelectorOwner> {
         self.selector_schema(name).map(|selector| selector.owner)
     }

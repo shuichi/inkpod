@@ -588,7 +588,7 @@ fn build_source_fixture() -> SourceFixture {
     let asset_id = raster_asset_id(payload.clone());
     let encoded = base64(&payload);
     let mut text = String::from(
-        "inkscript 2;\nrequires { procedure_catalog = 8; replay_epoch = 29; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
+        "inkscript 3;\nrequires { procedure_catalog = 8; replay_epoch = 29; }\ninputs { folder \"in\"; }\nparameters {}\nbindings { let paint = select plane { plane_kind = color; cardinality = one; missing = error; }; }\nprogram {\nassert selection { empty = true; };\n",
     );
     for index in 0..STEP_COUNT {
         let name = probe_name(index / 2);
@@ -843,6 +843,9 @@ fn count_semantics(
     for report in reports {
         for item in &report.items {
             match item.outcome {
+                ScriptItemOutcome::Staged => {
+                    panic!("native performance fixture must install files")
+                }
                 ScriptItemOutcome::Installed => counters.installed += 1,
                 ScriptItemOutcome::Failed(_) => counters.failed += 1,
                 ScriptItemOutcome::Cancelled => counters.cancelled += 1,
@@ -946,6 +949,7 @@ fn hash_run_report(hash: &mut Fnv1a64, label: &[u8], report: &ScriptRunReport) {
         hash.bytes(item.input_label.as_bytes());
         hash.bytes(item.destination_key.as_bytes());
         hash.byte(match item.outcome {
+            ScriptItemOutcome::Staged => panic!("native performance fixture must install files"),
             ScriptItemOutcome::Installed => 1,
             ScriptItemOutcome::DryRun => 2,
             ScriptItemOutcome::Failed(failure) => 10 + failure_code(failure),

@@ -4,9 +4,9 @@ use super::schema::{
 };
 use super::source::INKSCRIPT_FILE_VERSION;
 use super::syntax::{
-    InkScriptInput, InkScriptInputKind, InkScriptProgramStatement, InkScriptRecord,
-    InkScriptReferenceSegment, InkScriptSemanticDocument, InkScriptSemanticSection,
-    InkScriptTypeReference, InkScriptValue, enum_field, error, normalize_record, unwrap_type,
+    InkScriptInputKind, InkScriptProgramStatement, InkScriptRecord, InkScriptReferenceSegment,
+    InkScriptSemanticDocument, InkScriptSemanticSection, InkScriptTypeReference, InkScriptValue,
+    enum_field, error, normalize_record, unwrap_type,
 };
 
 /// Emits canonical BOM-free UTF-8 bytes for a validated complete file or fragment.
@@ -152,14 +152,25 @@ impl Emitter<'_, '_> {
         Ok(())
     }
 
-    fn inputs(&mut self, inputs: &[InkScriptInput]) -> Result<(), InkScriptSemanticError> {
+    fn inputs(
+        &mut self,
+        inputs: &super::syntax::InkScriptInputs,
+    ) -> Result<(), InkScriptSemanticError> {
         self.output.push_str("inputs {");
-        if inputs.is_empty() {
+        if inputs.declarations.is_empty()
+            && inputs
+                .profile
+                .as_deref()
+                .is_none_or(|value| value == "canonical")
+        {
             self.output.push_str("}\n");
             return Ok(());
         }
         self.output.push('\n');
-        for input in inputs {
+        if inputs.profile.as_deref() == Some("batch") {
+            self.output.push_str("    profile = batch;\n");
+        }
+        for input in &inputs.declarations {
             self.indent(1);
             let schema_name = match input.kind {
                 InkScriptInputKind::File => {
@@ -452,6 +463,9 @@ fn output_schema(record: &InkScriptRecord) -> Result<&'static str, InkScriptSema
         Some("duplicate") => Ok("output_duplicate"),
         Some("new_save") => Ok("output_new_save"),
         Some("explicit_overwrite") => Ok("output_explicit_overwrite"),
+        Some("folder") => Ok("output_folder"),
+        Some("active_document") => Ok("output_active_document"),
+        Some("new_tabs") => Ok("output_new_tabs"),
         _ => Err(error(
             InkScriptSemanticErrorCode::UnknownRecordSchema,
             "output.policy",

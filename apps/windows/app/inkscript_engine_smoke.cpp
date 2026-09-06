@@ -202,7 +202,7 @@ int RunPrivateInkScriptEngineSmoke() noexcept {
         request.source_id = UINT64_C(27003);
         request.source_generation = 1U;
         request.context = context;
-        request.source_utf8 = R"(inkscript 2;
+        request.source_utf8 = R"(inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {

@@ -32,7 +32,7 @@ fn diagnostic_codes(bytes: &[u8]) -> Vec<InkScriptDiagnosticCode> {
 #[test]
 fn public_lexer_accepts_v2_tokens_and_uses_maximal_munch() {
     let source = fixture_source(
-        br#"inkscript 2; uuid"550e8400-e29b-41d4-a716-446655440000" blake3"0000000000000000000000000000000000000000000000000000000000000000" base64"""QUJD""" uuid "plain" 1.25 -0 // tail
+        br#"inkscript 3; uuid"550e8400-e29b-41d4-a716-446655440000" blake3"0000000000000000000000000000000000000000000000000000000000000000" base64"""QUJD""" uuid "plain" 1.25 -0 // tail
 "#,
     );
     let lexed = lex_inkscript(&source);
@@ -62,7 +62,7 @@ fn public_lexer_accepts_v2_tokens_and_uses_maximal_munch() {
 
 #[test]
 fn public_lexer_exposes_the_exact_current_v2_keywords_limits_and_codes() {
-    assert_eq!(INKSCRIPT_FILE_VERSION, 2);
+    assert_eq!(INKSCRIPT_FILE_VERSION, 3);
     assert_eq!(MAX_INKSCRIPT_SOURCE_BYTES, 128 * 1024 * 1024);
     assert_eq!(MAX_INKSCRIPT_IDENTIFIER_BYTES, 128);
     assert_eq!(MAX_INKSCRIPT_NUMERIC_BYTES, 128);
@@ -397,7 +397,7 @@ fn public_lexer_empty_input_is_a_stable_no_op_and_source_is_owned() {
 
 #[test]
 fn public_lexer_malformed_and_truncation_corpus_never_panics() {
-    let valid = "inkscript 2;\nprogram { step \"é\" { enabled = true; invoke x {}; }; }\n";
+    let valid = "inkscript 3;\nprogram { step \"é\" { enabled = true; invoke x {}; }; }\n";
     for length in 0..=valid.len() {
         match InkScriptSource::new(InkScriptSourceId::new(31), &valid.as_bytes()[..length]) {
             Ok(source) => {

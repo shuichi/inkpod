@@ -13,7 +13,7 @@ markers record implementation and acceptance within that workflow.
 
 ## Current contract
 
-- Registry schema/language/file v2, catalog/owner v8, replay epoch 29, native v34
+- Registry schema v2, language/file v3, catalog/owner v8, replay epoch 29, native v34
   and ABI v34 align. The public catalog contains 75 commands. Retired assignments
   remain tombstones; older catalog/owner resources are rejected.
 - Grammar/section changes require an explicit file-version decision. Closed
@@ -26,10 +26,17 @@ markers record implementation and acceptance within that workflow.
 - Continuous Fill lowers one seed to one step and produces zero through N Commits.
   A contiguous non-semantic `editor_group` is the lossless 1:N source link; it
   cannot change execution or Commit boundaries.
+- Input profile, common codecs, closed folder/active/new-tab output and isolated
+  image preview follow [the approved D2/D3 contract](inkscript-batch-connection.md).
+  File v3 changes the orchestration envelope only. Canonical invocation semantics,
+  catalog membership, native replay and ABI v34 remain unchanged. Core-only plan,
+  run, staged ownership and image-preview APIs precede ABI/Windows integration.
 - `.inkbatch` v5 remains an independent closed product format. No `.inkscript`
   product filter, clipboard, command or authoring UI is implied by private APIs.
-  Future exposure requires a new explicit catalog/file-version decision and
-  input/output authority, replay, state/pixel/history/ID/savepoint/failure parity.
+  Future exposure requires the existing owner gates and explicit production
+  cutover, including input/output authority, replay,
+  state/pixel/history/ID/savepoint/failure parity. A future serialized/signature
+  change also requires the applicable version decision.
 - The quick performance contract is approved; full implementation remains reserved
   for M36. [The benchmark baseline](core-benchmark-baseline.md) owns its workload,
   counters, samples, environment and envelope. No milestone text here authorizes

@@ -17,6 +17,15 @@ pub struct SequenceDiscovery {
     pub truncated: bool,
 }
 
+/// Bounded non-recursive listing with counters for every observed entry,
+/// including directories and unsupported regular files.
+#[derive(Clone, Debug)]
+pub struct DirectoryListing {
+    pub observed_entries: u64,
+    pub name_bytes: u64,
+    pub regular_files: Vec<PathBuf>,
+}
+
 #[derive(Clone, Eq, PartialEq)]
 struct SequenceKey {
     digits: String,
@@ -62,6 +71,43 @@ fn pattern(stem: &str) -> Option<Pattern<'_>> {
 }
 
 impl IoManager {
+    /// Enumerates one approved directory and retains regular files only. The
+    /// returned accounting includes all names; symlinks are not followed.
+    pub fn list_directory(
+        &self,
+        directory: &Path,
+        context: &JobContext,
+    ) -> IoResult<DirectoryListing> {
+        self.check_running(context)?;
+        let mut listing = DirectoryListing {
+            observed_entries: 0,
+            name_bytes: 0,
+            regular_files: Vec::new(),
+        };
+        for entry in std::fs::read_dir(directory)? {
+            context.check_cancelled()?;
+            let entry = entry?;
+            listing.observed_entries += 1;
+            listing.name_bytes = listing
+                .name_bytes
+                .checked_add(entry.file_name().as_encoded_bytes().len() as u64)
+                .ok_or(IoError::LimitExceeded(
+                    "directory names exceed the byte limit",
+                ))?;
+            if listing.observed_entries > MAXIMUM_DIRECTORY_ENTRIES as u64
+                || listing.name_bytes > 256 * 1024 * 1024
+            {
+                return Err(IoError::LimitExceeded(
+                    "directory enumeration exceeds its resource limit",
+                ));
+            }
+            if entry.file_type()?.is_file() {
+                listing.regular_files.push(entry.path());
+            }
+        }
+        Ok(listing)
+    }
+
     /// Synchronously enumerates one directory with bounded retained memory. Call
     /// this from an I/O job, never from a UI event handler. PNG/TIFF/TGA/BMP may be
     /// mixed. Prefix/suffix comparison is case-insensitive, the last ASCII digit

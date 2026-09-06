@@ -481,7 +481,7 @@ fn inkscript_registry_meta_schema_and_production_catalog_are_closed() {
 
 #[test]
 fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -597,7 +597,7 @@ fn inkscript_document_tree_catalog_entries_are_closed_typed_and_owner_exact() {
 
 #[test]
 fn inkscript_metadata_color_and_guide_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -701,7 +701,7 @@ fn inkscript_metadata_color_and_guide_entries_are_closed_typed_and_owner_exact()
 
 #[test]
 fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -804,7 +804,7 @@ fn inkscript_stroke_geometry_and_import_entries_are_closed_typed_and_owner_exact
 
 #[test]
 fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -923,7 +923,7 @@ fn inkscript_fill_and_gradient_entries_are_closed_typed_and_owner_exact() {
 
 #[test]
 fn inkscript_gesture_alpha_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -1048,7 +1048,7 @@ fn inkscript_gesture_alpha_entries_are_closed_typed_and_owner_exact() {
 
 #[test]
 fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -1214,12 +1214,12 @@ fn inkscript_selection_floating_entries_are_closed_typed_and_owner_exact() {
 
 #[test]
 fn inkscript_current_shooting_frame_contract_is_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
-    assert_eq!(number(member(&language, "file_version")), 2);
+    assert_eq!(number(member(&language, "file_version")), 3);
     assert_eq!(number(member(&language, "procedure_catalog_version")), 8);
-    assert_eq!(number(member(&draft, "file_version")), 2);
+    assert_eq!(number(member(&draft, "file_version")), 3);
     assert_eq!(number(member(&draft, "catalog_version")), 8);
     let shooting_frame = named(member(&language, "selector_entities"), "shooting_frame");
     assert_eq!(string(member(shooting_frame, "owner")), "document");
@@ -1292,7 +1292,7 @@ fn inkscript_current_shooting_frame_contract_is_exact() {
 
 #[test]
 fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands_are_excluded() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -1452,7 +1452,7 @@ fn inkscript_light_table_entries_are_replayable_asset_owned_and_session_commands
 
 #[test]
 fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -1595,7 +1595,7 @@ fn inkscript_legacy_simple_catalog_entries_are_closed_typed_and_owner_exact() {
 
 #[test]
 fn inkscript_legacy_image_catalog_entries_are_closed_typed_and_owner_exact() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     let type_names = composed_catalog_type_names(&language, &draft);
@@ -1722,8 +1722,80 @@ fn inkscript_batch_command_preserves_the_existing_canonical_contract() {
 }
 
 #[test]
+fn inkscript_v3_product_envelope_registry_is_closed_and_preserves_catalog_semantics() {
+    let language = load_json("schemas/inkscript/language-v3.json");
+    assert!(
+        !repository()
+            .join("schemas/inkscript/language-v2.json")
+            .exists()
+    );
+    assert_eq!(number(member(&language, "file_version")), 3);
+    assert_eq!(number(member(&language, "procedure_catalog_version")), 8);
+    assert_eq!(number(member(&language, "required_replay_epoch")), 29);
+    let profiles = named(member(&language, "enums"), "input_profile");
+    assert_eq!(
+        array(member(profiles, "members"))
+            .iter()
+            .map(string)
+            .collect::<Vec<_>>(),
+        ["canonical", "batch"]
+    );
+    let inputs = named(member(&language, "records"), "inputs_section");
+    let profile = named(member(inputs, "fields"), "profile");
+    assert_eq!(member(profile, "required"), &Json::Bool(false));
+    assert_eq!(string(member(profile, "default")), "canonical");
+    for (record, expected_fields) in [
+        (
+            "output_folder",
+            &["policy", "format", "folder", "naming_template"][..],
+        ),
+        ("output_active_document", &["policy"][..]),
+        ("output_new_tabs", &["policy"][..]),
+    ] {
+        let fields = array(member(
+            named(member(&language, "records"), record),
+            "fields",
+        ));
+        assert_eq!(
+            fields
+                .iter()
+                .map(|field| string(member(field, "name")))
+                .collect::<Vec<_>>(),
+            expected_fields
+        );
+        assert!(
+            fields
+                .iter()
+                .all(|field| member(field, "required") == &Json::Bool(true))
+        );
+    }
+    for record in [
+        "output_duplicate",
+        "output_new_save",
+        "output_explicit_overwrite",
+    ] {
+        let format = named(
+            member(named(member(&language, "records"), record), "fields"),
+            "format",
+        );
+        assert_eq!(
+            array(member(format, "constraints"))
+                .iter()
+                .map(string)
+                .collect::<Vec<_>>(),
+            ["must-equal:inkpod"]
+        );
+    }
+    let catalog = load_json("schemas/inkscript/catalog-v8.json");
+    let batch = named(member(&catalog, "entries"), "apply_batch_operations");
+    assert_eq!(number(member(batch, "primitive_schema_version")), 3);
+    assert_eq!(number(member(batch, "semantics_revision")), 2);
+    assert_eq!(number(member(batch, "replay_epoch")), 29);
+}
+
+#[test]
 fn inkscript_language_core_is_closed_and_references_resolve() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     assert_exact_keys(
         &language,
         &[
@@ -2183,7 +2255,7 @@ fn inkscript_production_catalog_is_bijective_with_runtime_and_equivalence_eviden
     );
     assert_eq!(
         inkpod_format::INKSCRIPT_PRODUCTION_CATALOG_FINGERPRINT,
-        0xec655f3463bb293c
+        0xd3db3ae40c017f5d
     );
 
     let owners_by_command = owners
@@ -2359,13 +2431,13 @@ fn inkscript_generated_command_reference_has_no_drift() {
     let catalog = load_json("schemas/inkscript/catalog-v8.json");
     let reference_path = repository().join("docs/inkscript-command-reference.md");
     let bytes = fs::read(&reference_path).expect("generated command reference must be readable");
-    assert_eq!(fnv1a64_normalized(&bytes), 0x5bc8135399b1670d);
+    assert_eq!(fnv1a64_normalized(&bytes), 0x315e41daff507a9b);
     let reference = std::str::from_utf8(&bytes).expect("reference must be UTF-8");
     let reference = reference.replace("\r\n", "\n");
     assert!(reference.starts_with(
         "<!-- @generated by scripts/generate_inkscript_reference.py; do not edit. -->\n"
     ));
-    assert!(reference.contains("| Catalog FNV-1a drift fingerprint | `ec655f3463bb293c` |"));
+    assert!(reference.contains("| Catalog FNV-1a drift fingerprint | `d3db3ae40c017f5d` |"));
     let headings = reference
         .lines()
         .filter_map(|line| line.strip_prefix("### `")?.strip_suffix('`'))
@@ -2399,12 +2471,12 @@ fn inkscript_generated_command_reference_has_no_drift() {
 
 #[test]
 fn inkscript_versions_and_traceability_match_repository_contracts() {
-    let language = load_json("schemas/inkscript/language-v2.json");
+    let language = load_json("schemas/inkscript/language-v3.json");
     let draft = load_json("schemas/inkscript/catalog-v8.json");
     let manifest = load_json("schemas/inkscript/owner-manifest-v8.json");
     for value in [&language, &draft] {
         assert_eq!(number(member(value, "registry_schema_version")), 2);
-        assert_eq!(number(member(value, "file_version")), 2);
+        assert_eq!(number(member(value, "file_version")), 3);
         assert_eq!(number(member(value, "required_replay_epoch")), 29);
     }
     assert_eq!(number(member(&manifest, "registry_schema_version")), 2);
@@ -2422,7 +2494,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
             "replay_epoch",
         ],
     );
-    assert_eq!(number(member(contract, "inkscript_file_version")), 2);
+    assert_eq!(number(member(contract, "inkscript_file_version")), 3);
     assert_eq!(number(member(contract, "procedure_catalog_version")), 8);
     assert_eq!(number(member(contract, "replay_epoch")), 29);
     assert_eq!(number(member(contract, "inkpod_top_level_version")), 34);

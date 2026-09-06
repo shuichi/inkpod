@@ -68,6 +68,8 @@ route|rust|document-primitive|rust-core|inkpod_core::run_inkscript_dry
 route|rust|query-snapshot|rust-core|ScriptDryRunResult::staged_mut inkpod_core::export_inkscript_fragment inkpod_core::export_inkscript_fragment_with_limits
 route|rust|query-snapshot|rust-core|inkpod_core::plan_inkscript
 route|rust|os-application-adapter|rust-core|InkScriptExportLimits::with_asset_bytes InkScriptExportLimits::with_commits InkScriptExportLimits::with_source_bytes ScriptCompileLimits::with_invocations ScriptPlanLimits::with_folder_entries ScriptRunLimits::with_output_bytes ScriptRunTask::advance ValidatedPathIdentity::with_generations inkpod_core::start_inkscript_run
+route|rust|os-application-adapter|rust-core|ScriptImagePreviewLimits::with_pixels ScriptImagePreviewLimits::with_temporary_bytes ScriptIoAdapter::authority ScriptIoAdapter::capture_sequence ScriptIoAdapter::capture_session inkpod_core::preview_inkscript_images
+route|rust|query-snapshot|rust-core|ScriptRunTask::take_dry_results ScriptRunTask::take_staged_results
 route|rust|asset-data-plane|rust-core|SubpaletteCatalog::clear SubpaletteCatalog::load_cached_images SubpaletteCatalog::load_image SubpaletteCatalog::replace_sources
 route|rust|view-only-command|rust-core|SubpaletteCatalog::apply_view SubpaletteCatalog::select_cached_image
 route|rust|query-snapshot|rust-core|SubpaletteCatalog::build_snapshot
@@ -79,6 +81,23 @@ route|rust|query-snapshot|rust-core|Core::resolve_sequence_activation
 route|rust|editor-state-command|rust-core|Core::commit_sequence_activation
 route|rust|os-application-adapter|rust-core|Core::bind_file_io Core::set_new_cell_raster_format FileIoJob::apply FileIoJob::cancel
 route|rust|asset-data-plane|rust-format|inkpod_format::read_procedure_from_reader inkpod_format::write_procedure_to_writer
+
+### InkScript orchestration contracts
+
+The shared adapter captures immutable sessions and authority; it does not mutate
+live documents. Image preview owns bounded temporary I/O and returns an isolated
+display result. Result-taking methods transfer already staged ownership without
+publishing it into a live Core. Their classification follows those boundaries;
+canonical document execution retains its existing primitive owner.
+
+| Public route | Public contract tests |
+| --- | --- |
+| `ScriptIoAdapter::authority`, `capture_session` | [shared I/O](../rust/inkpod-core/tests/inkscript_shared_io.rs): `captured_dirty_file_uses_canonical_snapshot_and_batch_reads_disk`, `new_tab_capacity_stale_authority_and_shared_session_invalidation_are_enforced` |
+| `ScriptIoAdapter::capture_sequence` | [shared I/O](../rust/inkpod-core/tests/inkscript_shared_io.rs): `sequence_snapshot_runs_and_owner_recapture_invalidates_previous_plans` |
+| `ScriptRunTask::take_dry_results` | [shared I/O](../rust/inkpod-core/tests/inkscript_shared_io.rs): `planned_dry_results_preserve_canonical_identity_history_and_cache_free_replay` |
+| `ScriptRunTask::take_staged_results` | [shared I/O](../rust/inkpod-core/tests/inkscript_shared_io.rs): `shared_new_tab_has_fresh_identity_and_no_source_history`, `completed_new_tab_remains_takeable_when_a_later_item_is_cancelled`; [active output](../rust/inkpod-core/tests/inkscript_active_output.rs): `active_result_is_one_undo_with_original_path_both_savepoints_and_cache_free_replay` |
+| `preview_inkscript_images` | [image preview](../rust/inkpod-core/tests/inkscript_image_preview.rs): `preview_copies_all_inputs_then_reopens_each_codec_and_cleans_before_publication`, `file_preview_runs_from_complete_copies_after_originals_change`, `cleanup_failure_never_returns_a_display_result` |
+| `ScriptImagePreviewLimits::with_pixels`, `with_temporary_bytes` | [image preview](../rust/inkpod-core/tests/inkscript_image_preview.rs): `preview_stop_placeholders_cancel_resource_and_post_cleanup_stale_are_distinct` |
 
 ## C ABI surface
 

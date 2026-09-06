@@ -1,7 +1,7 @@
 {
   "kind": "inkpod.inkscript.catalog",
   "registry_schema_version": 2,
-  "file_version": 2,
+  "file_version": 3,
   "catalog_version": 8,
   "required_replay_epoch": 29,
   "production": true,

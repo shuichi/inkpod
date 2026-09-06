@@ -2,8 +2,10 @@
 
 本書は [INKSCRIPT M1](../INKSCRIPT.md#17-実装マイルストーン) で確定した後続実装契約である。
 **D1–D4の推奨案は2026-09-06に利用者承認済み**。D1 は M3 の catalog v8／file v2 の実装契約。
-D2–D4 の envelope・製品接続は後続工程で SPEC・language・registry の正本へ反映する。
-版番号は予約せず、各工程の実装時の exact-current から決める。
+D2／D3 の Core-only envelope・実行経路は M4 の file v3／catalog v8 契約とし、
+[SPEC](../SPEC.md)、[言語仕様](../INKSCRIPT.md)、[language v3](../schemas/inkscript/language-v3.json)へ反映する。
+D4 の製品接続と M5 以降の ABI／Windows 統合は別工程であり、cutover gate を維持する。
+以後の版番号も予約せず、実装時の exact-current から決める。
 実行結果・既知差分の記録先は [compatibility](compatibility.md) とする。
 
 ## 承認された判断
@@ -122,7 +124,7 @@ dependency closure 外、resource 超過、cancel は fragment を部分公開�
 
 ## D2：input profile と source 例
 
-提案 `inputs` は `profile` 一個（省略値 `canonical`）と既存の input declaration を持つ。
+`inputs` は `profile` 一個まで（省略値 `canonical`）と既存の input declaration を持つ。
 両 profile とも file／非再帰 folder／current_document を受け入れ、対応 codec は
 `.inkpod`、PNG、TIFF、TGA、BMP。新拡張の codec は共有 decoder を使用する。
 `current_sequence` は `canonical` だけで受け入れ、Batch 工程 UI へ追加しない。
@@ -142,7 +144,7 @@ dependency closure 外、resource 超過、cancel は fragment を部分公開�
 script 相対 path は保存先の親、未保存なら明示 base authority を必要とし、cwd から補完しない。
 
 旧 Batch の `natural_cmp` 同値（大文字小文字だけ異なるfilename等）は列挙順に依存していた。
-D2 はその未固定部分に上表のtie-breakを追加する提案で、通常の非同値順序は変えない。
+D2 はその未固定部分に上表のtie-breakを追加する承認済み契約で、通常の非同値順序は変えない。
 M4では列挙順を反転したfixtureを追加し、この差を旧結果とのparity成功に数えない。
 
 新しいraster入力はfile identity/fingerprintに結び付けたingestion snapshotを作る。
@@ -154,12 +156,12 @@ open raster sessionは上表のprofile規則を使う。canonicalのraster displ
 canonicalの別job間import identity一致は保証せず、同じimmutable plan内の再実行とcanonical pixel結果の
 決定性を検証する。batchのnative出力は既存UUID/digestとのparityを検査し、new_tabs公開時の新identity発行と区別する。
 
-次は **提案 source template**。`<FILE>`／`<CATALOG>`／`<EPOCH>` は実装時に確定する header 値の
-置換箇所であり、現行 parser が実行できる例ではない。新版番号を予約するものでもない。
+次は **file v3／catalog v8 の source template**。四処理と envelope を表す完全fileであり、
+Core-only compiler／plan／runnerで扱う。製品のfile filter／pane接続を意味しない。
 
 ```text
-inkscript <FILE>;
-requires { procedure_catalog = <CATALOG>; replay_epoch = <EPOCH>; }
+inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs {
     profile = batch;
     file "cells/A001.inkpod";
@@ -249,6 +251,8 @@ new_tabs の前段では profile に応じた staged実行/replayを検証し、
 透明 checkerboard を維持する。cleanup 完了後に一つの clean/pathless 表示専用 staged Core を返す。
 cancel／stale／cleanup failure では tab を公開しない。preview tab は元の issue-time context を保持し、
 次 job が元 target を再利用する。stale 時に preview や別 active 文書へ fallback しない。
+file input は copy 時に fingerprint を照合し、全copy完了後はその隔離bytesから実行する。
+その後の元fileの変更を最新bytesへ読み替えない。origin session／authority はcleanup後の公開直前にも照合する。
 
 | 失敗例 | 保持するもの／report |
 | --- | --- |
@@ -298,6 +302,11 @@ M3 の D1 実装は catalog／owner **8**、75 command を使用する。file **
 native top-level **34**、C ABI **34**、registry schema **2**、`.inkbatch` **5**／operation **4** は維持する。
 既存 record/list grammar と既存 registry の field constraint で表し、canonical payload/schema/semantics と
 native replay fingerprint を変更しない。MainLine の是正は raw selector lowering 前に限定する。
+
+M4 の D2／D3 は file **3** を使用し、旧file／fragment v2を拒否する。catalog／owner **8** は
+file版metadataだけを3へ更新し、75 command／signature／owner assignment／binding意味を保持する。
+registry schema **2**、epoch **29**、native **34**、ABI **34**、Batch **5**／operation **4** は維持する。
+生成referenceとdrift fingerprintを同時更新する。性能checksumの基準変更は別の明示承認対象である。
 
 | 工程／owner | 変更先・共有契約 | 版更新と受入 |
 | --- | --- | --- |

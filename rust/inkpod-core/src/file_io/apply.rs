@@ -292,30 +292,11 @@ impl FileIoJob {
             }
             Prepared::Output(_) => {}
             Prepared::Batch(result) => {
-                if let Some(mut staged) = result.active {
+                if let Some(staged) = result.active {
                     // Batch has already used the canonical executor on its COW
                     // candidate. Publish that one transaction while retaining
                     // independently changed view/session display state.
-                    staged.view = core.view;
-                    staged.secondary_views = core.secondary_views.clone();
-                    staged.next_view_id = core.next_view_id;
-                    staged.next_render_tile_revision = core.next_render_tile_revision;
-                    staged.next_preview_revision = core.next_preview_revision;
-                    staged.render_cache.clear();
-                    staged.color_check = core.color_check;
-                    staged.sequence = core.sequence.clone();
-                    staged.motion_check = core.motion_check.clone();
-                    staged.subpalette_index = core.subpalette_index;
-                    staged.editor_defaults = core.editor_defaults.clone();
-                    staged.shortcuts = core.shortcuts.clone();
-                    staged.shortcut_defaults = core.shortcut_defaults.clone();
-                    staged.new_cell_raster_format = core.new_cell_raster_format;
-                    staged.io_manager = core.io_manager.clone();
-                    staged.io_pair_authority = core.io_pair_authority.clone();
-                    staged.io_pair_plan = core.io_pair_plan.clone();
-                    staged.persistence_state = core.persistence_state.clone();
-                    staged.io_install_pending = core.io_install_pending;
-                    *core = *staged;
+                    core.publish_staged_document_edit(*staged);
                 }
                 self.batch_report = result.report;
                 self.batch_preview = result.preview;
