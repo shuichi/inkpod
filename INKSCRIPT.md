@@ -1819,9 +1819,10 @@ checksum 一 literal の更新は明示承認を得て適用し、[元の Releas
 file／fragment v3、catalog v8／75 command、epoch 29／native v34／ABI v34 を使用する。
 共有 Windows I/O の guarded overwrite は、外部の write／rename を禁止した source handle と
 原子的置換の両立が未解決で、成功契約の test が失敗している。保護を外す fallback は追加せず、
-この工程の完了条件を満たしたとは扱わない。file v3 による Release quick の checksum 不一致も
-期待値を変更せず保持し、[一値の更新案と全sample](docs/core-benchmark-baseline.md#m4-file-v3-checksum-decision)
-を承認待ちとする。代表検証・既知差分は [compatibility](docs/compatibility.md) に記録する。
+この工程の完了条件を満たしたとは扱わない。file v3 による Release quick の checksum 一値更新は
+明示承認を得て適用し、[元の gate の独立検証と全sample](docs/core-benchmark-baseline.md#m4-file-v3-checksum-decision)
+を記録した。性能基準は維持し、上書き処理の未解決事項と M4 の状態は変えない。
+代表検証・既知差分は [compatibility](docs/compatibility.md) に記録する。
 次回は M4 の修正と検証だけを行い、M5・製品 cutover へ進まない。
 
 **範囲**

@@ -42,7 +42,7 @@ const EXPECTED_COMMITS: u64 = 384;
 const EXPECTED_NO_OPS: u64 = 384;
 const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 91_584;
 const EXPECTED_REPLAYED_COMMITS: u64 = 256;
-const EXPECTED_CHECKSUM: u64 = 0x8c5b_98c2_c721_c868;
+const EXPECTED_CHECKSUM: u64 = 0xd72a_dd6a_c2e1_37c7;
 
 // The normal gate uses a statically dispatched assertion-only observer. Diagnostic
 // collection is opt-in and never changes an expectation or an acceptance result.

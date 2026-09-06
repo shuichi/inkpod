@@ -224,7 +224,7 @@ samples are retained below. They were approved for Windows 26200.9168,
 MS-7E26/Ryzen 9 9950X3D, 127.6 GiB, Rust/Cargo 1.97.1 / LLVM 22.1.6 /
 MSVC 19.51.36252.0, x64 Release, Balanced. They are not current-toolchain samples.
 
-The approved checksum was fixed for InkScript source ID 913, file v2/catalog v8 and replay
+The current approved checksum is fixed for InkScript source ID 913, file v3/catalog v8 and replay
 epoch 29, 128 `set_plane_properties` steps, four successful 4-by-4 current-v34
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
@@ -243,8 +243,9 @@ asset bytes, zero authorized reads, 24,768 planned input bytes, 37,152 runner
 native-read bytes, six attempted items/binding resolutions, 774 statements, 768
 invocations, 384 Commit and 384 no-op outcomes, installed/failed/cancelled
 4/1/1, 91,584 installed bytes, four cache-free reopens, 256 replayed Commits,
-and checksum `3568e2ed6fb803d5`. The failure reason must be exactly Save; neither
-negative probe may publish an output.
+and checksum `d72add6ac2e137c7`, as approved in the
+[M4 file-v3 correction](#m4-file-v3-checksum-decision). The failure reason must
+be exactly Save; neither negative probe may publish an output.
 
 The counters and checksum above are the fixed assertions in the checked-in
 Release runner. Passing Debug workspace tests does not execute this ignored
@@ -491,7 +492,8 @@ is retained separately; those suites were not repeated for this literal update.
 
 ### M4 file-v3 checksum decision
 
-**Pending approval, 2026-09-06.** M4 uses file/fragment v3 with catalog v8,
+**Approved and independently verified, 2026-09-06.** The user explicitly approved
+the single checksum-literal correction shown below. M4 uses file/fragment v3 with catalog v8,
 epoch 29, native v34 and ABI v34. The quick source changes only its header
 `inkscript 2;` to `inkscript 3;`. The two additional exhaustive `Staged` match
 arms panic if this file-install fixture ever reaches them. Its workload,
@@ -543,20 +545,41 @@ Every process retained these exact non-time observations:
 | cache-free reopens / replayed Commits | 4 / 256 |
 | checksum | `d72add6ac2e137c7` |
 
-The recommended proposal is exactly one literal, **not yet applied**:
+The approved and applied correction is exactly one literal:
 
 ```diff
 -const EXPECTED_CHECKSUM: u64 = 0x8c5b_98c2_c721_c868;
 +const EXPECTED_CHECKSUM: u64 = 0xd72a_dd6a_c2e1_37c7;
 ```
 
-Keeping the current literal preserves the deterministic failure. Removing
-source identity from the checksum or accepting multiple values would weaken
-the gate and is not recommended. After explicit approval, rerun the original
-gate independently; diagnostic success is not a substitute. This proposal
-does not change counters, workload, hash operations, interval or envelope.
-It also does not resolve M4's guarded-overwrite failure, complete M4, approve
-M15 cutover, or activate the reserved M17 full fixture.
+The former literal deterministically rejected the file-v3 source identity.
+Source identity remains part of the checksum, with exactly one accepted value.
+Counters, workload, hash operations, interval and envelope are unchanged.
+
+After approval, source `65becd5758ee2f2640cdf80ac218099d95a36be1` plus this
+test-only literal correction was built with
+`cargo test --release -p inkpod-core --lib script::tests::approved_quick_performance_contract --no-run`.
+The resulting original Release test binary then ran with
+`script::tests::approved_quick_performance_contract --ignored --exact --nocapture --test-threads=1`
+in ten independent processes, with no concurrent builds or tests. The environment
+above was retained; Rust/LLVM, x64 static-CRT settings and Balanced power were
+rechecked. All ten processes exited **0** with one passed test, zero failures,
+zero ignored tests, checksum `d72add6ac2e137c7` and every non-time observation
+identical to the diagnostic table above. The discarded warm-up was **87,942,300 ns**.
+
+| Complete accepted samples in run order (ns) | Median (ns) |
+| --- | ---: |
+| 88,173,900; 90,779,600; 95,425,700; 90,087,300; 88,890,200; 89,662,100; 87,237,600; 89,397,900; 88,512,800 | 89,397,900 |
+
+The accepted median is **89.3979 ms** and every retained sample is within the
+unchanged **64–107 ms** envelope. The original assertion failures and diagnostic
+results above remain recorded; these successful runs follow the approved
+expectation correction, not retries of an unchanged failing gate.
+This test-only correction adds no file/catalog/replay/native/ABI version or
+production behavior change. Earlier workspace, ABI and Windows/visible results
+were not repeated for this literal update. It does not resolve M4's two required
+guarded-overwrite success-test failures, complete M4, approve M15 cutover, or
+activate the reserved M17 full fixture. M4 remains **`[!]`**.
 
 ## Approved output-color-guard envelope
 
