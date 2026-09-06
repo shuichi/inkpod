@@ -2,12 +2,12 @@
 
 The current runtime uses procedure format 34, replay epoch 29, canonical numeric
 version 1 and the digest of the closed primitive catalog. The public InkScript
-catalog/owner manifest is v7 with 74 commands. Exact version, schema and retired
+catalog/owner manifest is v8 with 75 commands. Exact version, schema and retired
 code assignments are defined in [SPEC](../SPEC.md) and [file-format.md](file-format.md).
 An optional verified checkpoint never replaces the authoritative Genesis/assets/journal.
 
 The standard image tree, document-owned selection and masks, Canvas-only shooting
-frame and private Batch procedure all use the same canonical execution contract.
+frame and shared Batch procedure all use the same canonical execution contract.
 Retired document features and every noncurrent native/replay version are rejected;
 no migration reader or alternative replay executor is available.
 

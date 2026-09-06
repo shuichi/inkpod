@@ -130,7 +130,7 @@ std::string CurrentDocumentSource(
     const char* basename,
     std::uint64_t start_number = 1U) {
     std::string source = R"(inkscript 2;
-requires { procedure_catalog = 7; replay_epoch = 29; }
+requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {
     step "Add guide" as created {
@@ -154,7 +154,7 @@ std::string FolderSource(
     const char* basename,
     std::uint64_t start_number = 1U) {
     std::string source = R"(inkscript 2;
-requires { procedure_catalog = 7; replay_epoch = 29; }
+requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { folder "in"; }
 program {
     step "Add guide" {
@@ -175,7 +175,7 @@ execution { failure = stop; wait_ms = )";
 
 std::string OverwriteFolderSource() {
     return R"(inkscript 2;
-requires { procedure_catalog = 7; replay_epoch = 29; }
+requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { file "input.inkpod"; }
 program {
     step "Add guide" {

@@ -3,7 +3,7 @@
 This reference connects [SPEC requirements](../SPEC.md), the separate normative
 [language contract](../INKSCRIPT.md), machine-readable registries and executable
 evidence. It is not a milestone prompt. Current signatures come from
-[catalog-v7.json](../schemas/inkscript/catalog-v7.json); the generated presentation is
+[catalog-v8.json](../schemas/inkscript/catalog-v8.json); the generated presentation is
 [inkscript-command-reference.md](inkscript-command-reference.md).
 The language contract's scope rules distinguish normative runtime/publication gates
 from the opt-in milestone workflow. Reading this reference does not resume that
@@ -13,8 +13,8 @@ markers record implementation and acceptance within that workflow.
 
 ## Current contract
 
-- Registry schema/language/file v2, catalog/owner v7, replay epoch 29, native v34
-  and ABI v34 align. The public catalog contains 74 commands. Retired assignments
+- Registry schema/language/file v2, catalog/owner v8, replay epoch 29, native v34
+  and ABI v34 align. The public catalog contains 75 commands. Retired assignments
   remain tombstones; older catalog/owner resources are rejected.
 - Grammar/section changes require an explicit file-version decision. Closed
   semantic entities and references require an explicit catalog/replay rebaseline.
@@ -40,19 +40,20 @@ markers record implementation and acceptance within that workflow.
 | Product requirement | Related script requirements | Contract to verify |
 | --- | --- | --- |
 | `BATCH-001` | `SCRIPT-001`, `SCRIPT-003`, `SCRIPT-005` | Fixed Input/Output and ordered enabled operations; immutable graph, preview/run/save and staged output ownership |
-| `BATCH-002` | `SCRIPT-002`, `SCRIPT-005` | Four authorable operations: Color Replace, Move to Color Plane, Masking and Erase; private Batch primitive is not public InkScript |
+| `BATCH-002` | `SCRIPT-002`, `SCRIPT-005` | Four authorable operations: Color Replace, Move to Color Plane, Masking and Erase; one `apply_batch_operations` command preserves the entire ordered transaction |
 | `BATCH-003` | `SCRIPT-003`, `SCRIPT-005` | Bounded file/folder/issue-time active input and folder/active/new-tab output, current codecs and owner-thread publication |
 | `BATCH-004` | `SCRIPT-002`, `SCRIPT-003`, `SCRIPT-004`, `SCRIPT-005` | Exact-depth Color/Raster role or fixed-ID targets, deduplication, atomic movement and fill-protection replacement in one canonical transaction |
 
 ## Current machine-readable ownership
 
-[`owner-manifest-v7.json`](../schemas/inkscript/owner-manifest-v7.json) assigns all 74
+[`owner-manifest-v8.json`](../schemas/inkscript/owner-manifest-v8.json) assigns all 75
 current command owners exactly once. The owner IDs are stable registry metadata:
 
 | Owner | Replayable primitives | Scope |
 | --- | ---: | --- |
 | M07 | 6 | property, plane-format conversion and document transforms |
 | M08 | 7 | legacy fill, replacement, separation, filter, boundary-airbrush, dust and raster line correction adapters |
+| M09 | 1 | ordered four-operation Batch program, target binding and exact fragment export (workflow M3) |
 | M15 | 13 | paper/frame and remaining document tree operations |
 | M16 | 8 | color metadata and guide/grid operations |
 | M17 | 3 | raster stroke, geometry and canonical raster import |
@@ -62,11 +63,13 @@ current command owners exactly once. The owner IDs are stable registry metadata:
 | M21 | 1 | shooting frame |
 | M22 | 13 | replayable Light Table set/item operations |
 
-`LIGHT_TABLE_SWAP_WITH_ACTIVE` is excluded because it is session-only, and the private
-`APPLY_BATCH_OPERATIONS` procedure is excluded because `.inkbatch` v5 owns that route.
+`LIGHT_TABLE_SWAP_WITH_ACTIVE` is excluded because it is session-only.
+`APPLY_BATCH_OPERATIONS` is included as `apply_batch_operations` (INKS-EQ-0090).
+Its native catalog private flag remains unchanged because it is part of the persisted
+replay fingerprint; script membership is defined by the script registry and owner manifest.
 Query, view, preview, export, save/open, history-control, and frontend
 command IDs remain outside the manifest. The journal-fragment query therefore remains
-outside the 74-command catalog while exhaustively consuming its typed runtime variants.
+outside the 75-command catalog while exhaustively consuming its typed runtime variants.
 
 ## Executable evidence
 

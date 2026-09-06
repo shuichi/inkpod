@@ -224,7 +224,7 @@ samples are retained below. They were approved for Windows 26200.9168,
 MS-7E26/Ryzen 9 9950X3D, 127.6 GiB, Rust/Cargo 1.97.1 / LLVM 22.1.6 /
 MSVC 19.51.36252.0, x64 Release, Balanced. They are not current-toolchain samples.
 
-The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v7 and replay
+The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v8 and replay
 epoch 29, 128 `set_plane_properties` steps, four successful 4-by-4 current-v34
 inputs, one 256 KiB inline straight-sRGB RGBA8 asset, one Save failure and one
 pre-linearization cancellation. Every successful output is reopened through
@@ -403,6 +403,91 @@ format changes follow the same order: preserve failure → derive version-only
 bytes → obtain any necessary diagnostic authorization → retain all counters
 and samples → approve exact expectations/environment → independently rerun.
 The full fixture remains reserved for M17; this correction cannot complete it.
+
+### M3 catalog-v8 checksum decision
+
+**Approved and independently verified, 2026-09-06.** The user approved the
+one-literal checksum update below; the original Release quick gate subsequently
+passed one warm-up and nine retained independent processes. M3 adds
+`apply_batch_operations` to catalog v8 while retaining file v2, epoch 29, native
+v34 and ABI v34. The fixed benchmark source changes only `procedure_catalog = 7`
+to `procedure_catalog = 8`; its operations, source length, workload, counters,
+hash walk, timing interval and approved 64–107 ms envelope are unchanged.
+`compile_digest` hashes the canonical source, and the benchmark hashes that
+digest before native outputs and semantic observations. The version declaration
+therefore changes the checksum even though the fixture's canonical mutations
+and native bytes retain their existing contracts.
+
+On source `31bd657a9db55b8a9585f14aa249cc01ad17b988` plus the M3 changes,
+Windows 26200.9278 / MS-7E26 / Ryzen 9 9950X3D / Rust/Cargo 1.98.1 / LLVM 22.1.8 /
+MSVC 19.51.36256 / x64 Release / static CRT / Balanced, the original gate exited
+**101** at the checksum assertion: actual `8c5b98c2c721c868`, expected
+`3568e2ed6fb803d5`. All earlier byte and semantic assertions passed; this failing
+ordinary run is not an accepted timing sample.
+
+The existing, unchanged `current_quick_performance_diagnostic` then ran in ten
+independent processes after the Windows tests finished. No build or other test
+ran concurrently. Every process exited **101**, reported `acceptance=false`,
+and observed **only the checksum mismatch**. All non-time fields were identical.
+The warm-up was **87,254,600 ns** and was discarded.
+
+| Complete diagnostic samples in run order (ns) | Median (ns) |
+| --- | ---: |
+| 90,591,200; 89,610,000; 89,006,200; 87,203,600; 91,150,300; 89,005,000; 88,454,100; 86,747,800; 96,738,600 | 89,006,200 |
+
+The median **89.0062 ms** and all nine retained samples are within the
+existing 64–107 ms envelope. Diagnostic timing does not turn the failed gate
+into a pass. Every sample retained these exact counters:
+
+| Observations | Values |
+| --- | --- |
+| source bytes / tokens / CST nodes | 371,176 / 7,965 / 2,000 |
+| parameters / bindings / asserts | 0 / 1 / 1 |
+| steps / dependency edges / catalog invocations / catalog work units | 128 / 128 / 128 / 128 |
+| asset declarations / unique assets | 1 / 1 |
+| logical / unique logical / inline decoded / copied asset bytes | 262,144 / 262,144 / 262,144 / 262,144 |
+| authorized asset read bytes | 0 |
+| input native / runner native read / installed output bytes | 24,768 / 37,152 / 91,584 |
+| attempted items / binding resolutions | 6 / 6 |
+| statement evaluations / invocations | 774 / 768 |
+| Commits / no-ops | 384 / 384 |
+| installed / failed Save / cancelled items | 4 / 1 / 1 |
+| cache-free reopens / replayed Commits | 4 / 256 |
+| checksum | `8c5b98c2c721c868` |
+
+The approved and applied change is exactly one literal:
+
+```diff
+-const EXPECTED_CHECKSUM: u64 = 0x3568_e2ed_6fb8_03d5;
++const EXPECTED_CHECKSUM: u64 = 0x8c5b_98c2_c721_c868;
+```
+
+Keeping the old literal would preserve the deterministic failure. Removing
+static-source identity from the hash or accepting either checksum would weaken
+exact-current validation and is not recommended. This decision does not change
+any byte count, counter, hash operation, interval, workload or envelope and does
+not approve M15 cutover or the M17 full fixture.
+
+After the user's explicit checksum-update approval, the Release test binary was
+rebuilt without running tests, then the original
+`script::tests::approved_quick_performance_contract` ran with
+`--ignored --exact --nocapture --test-threads=1` in ten independent processes.
+No build or other test ran concurrently. All ten exited **0**, each reporting
+one passed test, no failures and no ignored tests. The discarded warm-up was
+**88,377,200 ns**.
+
+| Complete accepted samples in run order (ns) | Median (ns) |
+| --- | ---: |
+| 87,750,000; 86,156,100; 89,166,800; 90,273,200; 87,639,200; 90,492,100; 88,762,100; 88,029,500; 91,125,500 | 88,762,100 |
+
+The median **88.7621 ms** and all nine retained samples are within the unchanged
+64–107 ms envelope on the same environment stated above. Every non-time field
+exactly matches the diagnostic table, including all byte counts, semantic
+counters and checksum `8c5b98c2c721c868`. The earlier checksum failures remain
+recorded above; these accepted runs follow the approved expectation correction,
+not retries of an unchanged failing gate. This test-only literal update adds
+no version or production behavior change. M3's earlier workspace/Windows evidence
+is retained separately; those suites were not repeated for this literal update.
 
 ## Approved output-color-guard envelope
 

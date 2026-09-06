@@ -20,6 +20,8 @@ use crate::{
     PixelFormat, StateId,
 };
 
+mod batch;
+
 /// Caller-lowerable resource envelope for one journal-to-fragment export query.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct InkScriptExportLimits {
@@ -236,6 +238,8 @@ pub fn export_inkscript_fragment_with_limits(
                 assets: &mut assets,
                 asset_bytes: &mut asset_bytes,
                 maximum_asset_bytes: limits.asset_bytes,
+                maximum_source_bytes: limits.source_bytes.saturating_sub(program.len()),
+                cancelled,
             },
         )?;
         let has_results = !commit.procedure().output_ids().is_empty();
@@ -251,6 +255,9 @@ pub fn export_inkscript_fragment_with_limits(
         program.push_str(" { ");
         program.push_str(&lifted.arguments);
         program.push_str(" }; }\n");
+        if program.len() > limits.source_bytes {
+            return Err(InkScriptExportError::ResourceLimit);
+        }
         commands.push(lifted.command);
         register_results(
             &catalog,
@@ -266,7 +273,7 @@ pub fn export_inkscript_fragment_with_limits(
     let strict_owners = augment_light_table_owner_bindings(&snapshot, &mut strict)?;
 
     let mut source = String::from(
-        "inkscript_fragment 2;\nrequires { procedure_catalog = 7; replay_epoch = 29; }\n",
+        "inkscript_fragment 2;\nrequires { procedure_catalog = 8; replay_epoch = 29; }\n",
     );
     if !strict.is_empty() {
         source.push_str("bindings {\n");
@@ -449,6 +456,8 @@ struct ExportLiftContext<'a> {
     assets: &'a mut BTreeMap<AssetId, ExportedAsset>,
     asset_bytes: &'a mut u64,
     maximum_asset_bytes: u64,
+    maximum_source_bytes: usize,
+    cancelled: &'a mut dyn FnMut() -> bool,
 }
 
 fn lift_procedure(
@@ -462,7 +471,37 @@ fn lift_procedure(
         assets,
         asset_bytes,
         maximum_asset_bytes,
+        maximum_source_bytes,
+        cancelled,
     } = context;
+    if procedure.primitive_id() == PrimitiveId::APPLY_BATCH_OPERATIONS {
+        let runtime = procedure
+            .runtime_invocation
+            .as_ref()
+            .ok_or(InkScriptExportError::MissingRuntimeInvocation)?;
+        let CanonicalInvocation::ApplyBatchOperations { operations } = runtime.invocation() else {
+            return Err(InkScriptExportError::InvalidSource);
+        };
+        if !procedure.output_ids().is_empty() || !procedure.asset_ids().is_empty() {
+            return Err(InkScriptExportError::InvalidSource);
+        }
+        let source_uuid = core
+            .document_info()
+            .map_err(|_| InkScriptExportError::InvalidSource)?
+            .document_uuid;
+        return Ok(LiftedProcedure {
+            command: "apply_batch_operations",
+            arguments: batch::arguments(
+                operations,
+                source_uuid,
+                produced,
+                strict,
+                maximum_source_bytes,
+                cancelled,
+            )?,
+            output_kinds: Vec::new(),
+        });
+    }
     let metadata = match procedure.primitive_id() {
         PrimitiveId::SET_MAIN_LINE_COLOR => Some(MetadataColorGuideInvocation::SetMainLineColor(
             decode_color(procedure.canonical_arguments())

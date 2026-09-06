@@ -58,7 +58,7 @@ mod operations;
 mod pairs;
 mod validation;
 
-pub(crate) use operations::apply_batch_operations_canonical;
+pub(crate) use operations::{apply_batch_operations_canonical, preflight_batch_operations};
 pub(crate) use operations::{apply_color_replacement, apply_separation};
 pub(crate) use validation::validate_operation;
 

@@ -77,6 +77,30 @@ pub struct InkScriptFieldSchema {
 }
 
 impl InkScriptFieldSchema {
+    /// Declares a conditionally present catalog field. `present-for:field=a,b` requires the
+    /// field for those discriminator values and forbids it for every other value.
+    pub const fn conditional(
+        name: &'static str,
+        type_name: &'static str,
+        canonical_order: u32,
+        constraints: &'static [&'static str],
+    ) -> Self {
+        Self {
+            name,
+            type_name,
+            required: false,
+            default: None,
+            canonical_order,
+            constraints,
+        }
+    }
+
+    /// Attaches bounded catalog validation to an existing field declaration.
+    pub const fn with_constraints(mut self, constraints: &'static [&'static str]) -> Self {
+        self.constraints = constraints;
+        self
+    }
+
     /// Declares a required field. Required fields are emitted even when their value resembles a
     /// schema default.
     pub const fn required(
@@ -622,7 +646,7 @@ pub const INKSCRIPT_REQUIRED_REPLAY_EPOCH: u32 = GENERATED_REQUIRED_REPLAY_EPOCH
 pub const INKSCRIPT_PRODUCTION_CATALOG_COMMAND_COUNT: usize =
     GENERATED_PRODUCTION_CATALOG_COMMAND_COUNT;
 
-/// FNV-1a drift fingerprint of the immutable `catalog-v7.json` bytes after CRLF normalization.
+/// FNV-1a drift fingerprint of the immutable `catalog-v8.json` bytes after CRLF normalization.
 ///
 /// This is a build/review sentinel rather than a security digest. A catalog change requires a new
 /// exact-current catalog version and a new versioned resource instead of editing the frozen v2

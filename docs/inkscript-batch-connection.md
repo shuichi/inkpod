@@ -1,8 +1,8 @@
 # InkScript と現行 Batch の接続契約
 
 本書は [INKSCRIPT M1](../INKSCRIPT.md#17-実装マイルストーン) で確定した後続実装契約である。
-**D1–D4の推奨案は2026-09-06に利用者承認済み**。現行 language/file v2、catalog v7 の受理範囲や
-製品挙動はまだ変更しない。対応する実装工程で SPEC・language・registry の正本へ反映する。
+**D1–D4の推奨案は2026-09-06に利用者承認済み**。D1 は M3 の catalog v8／file v2 の実装契約。
+D2–D4 の envelope・製品接続は後続工程で SPEC・language・registry の正本へ反映する。
 版番号は予約せず、各工程の実装時の exact-current から決める。
 実行結果・既知差分の記録先は [compatibility](compatibility.md) とする。
 
@@ -25,18 +25,16 @@ D1–D4 の承認は、下記 field、例、失敗条件、上限、変更先を
 | --- | --- |
 | 全処理列 | [batch/operations.rs](../rust/inkpod-core/src/batch/operations.rs) の `Core::apply_batch_operations` → `ApplyBatchOperations`。各処理を別々に commit しない。[Batch v5 public tests](../rust/inkpod-core/tests/contracts/batch_v5.rs) が全処理列、native depth、Undo/Redo、replay を検査 |
 | target | [batch/validation.rs](../rust/inkpod-core/src/batch/validation.rs)、[batch/operations.rs](../rust/inkpod-core/src/batch/operations.rs)。色置換だけが全 matching plane へ展開し、他三処理は最初の対象一つ。同一 selector の重複は invalid、異なる selector が同一 plane に重なる場合は一回だけ処理 |
-| export | [script/export.rs](../rust/inkpod-core/src/script/export.rs) は現在 `ApplyBatchOperations` を拒否。[public InkScript tests](../rust/inkpod-core/tests/inkscript_public.rs) と [registry tests](../rust/inkpod-core/tests/inkscript_registry.rs) は現行74 command・除外を検証している。M3 で変更前に公開契約 test を追加する |
+| export | [script/export.rs](../rust/inkpod-core/src/script/export.rs) は展開済み `ApplyBatchOperations` を一 command へ export。[公開 export 契約](../rust/inkpod-core/tests/inkscript_batch_export.rs) と [registry tests](../rust/inkpod-core/tests/inkscript_registry.rs) が catalog v8 の75 commandを検証する |
 | 入力・出力・preview | [batch/execute.rs](../rust/inkpod-core/src/batch/execute.rs)、[batch/model.rs](../rust/inkpod-core/src/batch/model.rs)、[Batch public tests](../rust/inkpod-core/tests/contracts/batch.rs)、[FFI Batch tests](../rust/inkpod-ffi/tests/unit/batch.rs)。active 一件制限、copy-before-processing、staged ownership を再利用 |
 | 一般 script | [envelope.rs](../rust/inkpod-format/src/inkscript/envelope.rs)、[plan.rs](../rust/inkpod-core/src/script/plan.rs)、[run.rs](../rust/inkpod-core/src/script/run.rs)。現在は native 入出力、全体自然順、完全な session snapshot、authority-bound plan と item 単位 install |
 | Windows | [batch_controller.cpp](../apps/windows/ui/batch_controller.cpp)、[batch_dialog.cpp](../apps/windows/ui/dialogs/batch_dialog.cpp)、[private engine](../apps/windows/app/inkscript_engine_route.cpp)、[authority](../apps/windows/app/inkscript_file_authority.cpp)。製品 owner と private owner の切替は M15 まで保留 |
 
 確認できた食い違いを、仕様優先という理由だけで成功済み parity に含めない。
 
-- **MainLine の fixed ID と `missing = skip`**：現行 target filter は MainLine を候補から外すため、
-  一部経路では欠落扱いで skip できる。SPEC 19 の fixed-ID 解決後も拒否する契約に対する既存不具合候補。
-  D1 は新 binder で UUID／owner／MainLine 違反を欠落と区別して拒否する案。
-  M3 で現行 public API の反例 test を先に固定し、既存経路の是正と native replay への影響を判定する。
-  旧挙動とのこの差を M9 で一致したと扱わない。
+- **MainLine の fixed ID と `missing = skip`**：M1で候補からの除外が欠落扱いになる既存不具合を確認した。
+  M3は公開反例を先に固定し、raw selector lowering前に拒否する。UUID／owner違反も新binderで
+  欠落と区別する。既存canonical payload／replay結果は変えず、この是正はM9で旧結果とのparityに数えない。
 - **既存 fill protection と raster 出力**：現在の graph 検査は enabled `Masking` の有無を判定し、
   入力に既にある mask を一律拒否する契約ではない。D3 はこの既存条件を保持する。
   「結果に mask があればすべて拒否」への強化を暗黙に加えない。
@@ -52,7 +50,7 @@ D1–D4 の承認は、下記 field、例、失敗条件、上限、変更先を
 
 ## D1：一 command の表現と実行
 
-提案 command 名は `apply_batch_operations`、引数は必須の
+command 名は `apply_batch_operations`、引数は必須の
 `operations: list<batch_operation>` 一つ、result は空とする。文書 ID を生成する command ではない。
 `editor_group` は表示 metadata のままであり transaction 境界に使わない。
 
@@ -296,8 +294,10 @@ engine queue を担当し、codec・selector・画像処理・第二の I/O engi
 
 ## 変更 owner と version impact
 
-本 M1 の変更は文書のみ。file **2**、catalog **7**、replay epoch **29**、native top-level **34**、
-C ABI **34**、registry schema **2**、`.inkbatch` **5**／operation **4** を変更しない。
+M3 の D1 実装は catalog／owner **8**、75 command を使用する。file **2**、replay epoch **29**、
+native top-level **34**、C ABI **34**、registry schema **2**、`.inkbatch` **5**／operation **4** は維持する。
+既存 record/list grammar と既存 registry の field constraint で表し、canonical payload/schema/semantics と
+native replay fingerprint を変更しない。MainLine の是正は raw selector lowering 前に限定する。
 
 | 工程／owner | 変更先・共有契約 | 版更新と受入 |
 | --- | --- | --- |

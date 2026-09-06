@@ -589,10 +589,11 @@ pixels elsewhere. NativeFile uses the normal atomic `.inkpod` batch output route
 and is invalid with ExplicitOverwrite.
 
 `ApplyBatchOperations/canonical-v3` has primitive ID `0x0005_0044`, semantics
-revision 1, and work-formula ID `0x0005_0044`. It is a private catalog entry:
-`.inkbatch` and the C ABI may construct its four typed operations, but InkScript
-catalog v7 does not expose it as a command. The canonical value is a nonempty
-bounded ordered sequence of enabled v3 operations. Every target, exact tagged
+revision 2, and work-formula ID `0x0005_0044`. Its existing private native catalog
+flag is retained as part of the replay fingerprint. InkScript catalog v8 exposes
+the same procedure as `apply_batch_operations`; this does not switch the Batch
+product route. The canonical value is a nonempty bounded ordered sequence of
+enabled operation-schema-v4 operations. Every target, exact tagged
 native-depth color, enabled replacement row, and operation kind is copied into
 the procedure; no external path, frontend command ID, session ID, generation,
 or pointer is retained.

@@ -2,7 +2,7 @@
   "kind": "inkpod.inkscript.catalog",
   "registry_schema_version": 2,
   "file_version": 2,
-  "catalog_version": 7,
+  "catalog_version": 8,
   "required_replay_epoch": 29,
   "production": true,
   "enums": [
@@ -278,6 +278,37 @@
       "members": [
         "round",
         "square"
+      ]
+    },
+    {
+      "name": "batch_operation_kind",
+      "members": [
+        "color_replace",
+        "move_to_color_plane",
+        "masking",
+        "erase"
+      ]
+    },
+    {
+      "name": "batch_target_kind",
+      "members": [
+        "role",
+        "strict",
+        "references"
+      ]
+    },
+    {
+      "name": "batch_plane_kind",
+      "members": [
+        "color",
+        "raster"
+      ]
+    },
+    {
+      "name": "batch_missing_policy",
+      "members": [
+        "error",
+        "skip"
       ]
     }
   ],
@@ -2822,6 +2853,184 @@
           "required": true,
           "default": null,
           "canonical_order": 5,
+          "constraints": []
+        }
+      ]
+    },
+    {
+      "name": "batch_operation",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "batch_operation_kind",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": []
+        },
+        {
+          "name": "enabled",
+          "type": "bool",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": []
+        },
+        {
+          "name": "targets",
+          "type": "list<batch_target>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "present-for:kind=color_replace",
+            "length:1..64"
+          ]
+        },
+        {
+          "name": "pairs",
+          "type": "list<batch_color_pair>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "present-for:kind=color_replace",
+            "length:1..4096"
+          ]
+        },
+        {
+          "name": "target",
+          "type": "batch_target",
+          "required": false,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "present-for:kind=move_to_color_plane,masking,erase"
+          ]
+        },
+        {
+          "name": "colors",
+          "type": "list<pixel_value>",
+          "required": false,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": [
+            "present-for:kind=move_to_color_plane,masking,erase",
+            "length:1..4096"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "batch_target",
+      "fields": [
+        {
+          "name": "kind",
+          "type": "batch_target_kind",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": []
+        },
+        {
+          "name": "source_document_uuid",
+          "type": "uuid",
+          "required": false,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": [
+            "present-for:kind=strict"
+          ]
+        },
+        {
+          "name": "persistent_layer_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 2,
+          "constraints": [
+            "present-for:kind=strict",
+            "nonzero"
+          ]
+        },
+        {
+          "name": "persistent_plane_id",
+          "type": "nullable<u64>",
+          "required": false,
+          "default": null,
+          "canonical_order": 3,
+          "constraints": [
+            "present-for:kind=strict",
+            "nonzero"
+          ]
+        },
+        {
+          "name": "plane_kind",
+          "type": "nullable<batch_plane_kind>",
+          "required": false,
+          "default": null,
+          "canonical_order": 4,
+          "constraints": [
+            "present-for:kind=role,strict"
+          ]
+        },
+        {
+          "name": "missing",
+          "type": "batch_missing_policy",
+          "required": false,
+          "default": null,
+          "canonical_order": 5,
+          "constraints": [
+            "present-for:kind=role,strict"
+          ]
+        },
+        {
+          "name": "layer",
+          "type": "nullable<layer_ref>",
+          "required": false,
+          "default": null,
+          "canonical_order": 6,
+          "constraints": [
+            "present-for:kind=references"
+          ]
+        },
+        {
+          "name": "plane",
+          "type": "plane_ref",
+          "required": false,
+          "default": null,
+          "canonical_order": 7,
+          "constraints": [
+            "present-for:kind=references"
+          ]
+        }
+      ]
+    },
+    {
+      "name": "batch_color_pair",
+      "fields": [
+        {
+          "name": "enabled",
+          "type": "bool",
+          "required": true,
+          "default": null,
+          "canonical_order": 0,
+          "constraints": []
+        },
+        {
+          "name": "old",
+          "type": "pixel_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 1,
+          "constraints": []
+        },
+        {
+          "name": "new",
+          "type": "pixel_value",
+          "required": true,
+          "default": null,
+          "canonical_order": 2,
           "constraints": []
         }
       ]
@@ -9303,6 +9512,92 @@
       },
       "owner_milestone": "M08",
       "equivalence_test": "INKS-EQ-0089"
+    },
+    {
+      "name": "apply_batch_operations",
+      "primitive_id": "0x00050044",
+      "primitive_schema_version": 3,
+      "replay_epoch": 29,
+      "semantics_revision": 2,
+      "arguments": [
+        {
+          "name": "operations",
+          "type": "list<batch_operation>",
+          "required": true,
+          "default": null,
+          "nullable": false,
+          "bound": [
+            "length:1..1024",
+            "expanded-operation-count<=1024",
+            "checked-expanded-pixel-sum<=67108864",
+            "at-least-one-enabled-for-execution",
+            "enabled-only-runtime-reference-dependencies",
+            "all-operation-fragment-dependency-closure",
+            "initial-input-role-and-strict-binding",
+            "strict-uuid-owner-mainline-errors-never-skip",
+            "native-depth-exact-no-conversion"
+          ],
+          "canonical_order": 0,
+          "stable_id_role": null,
+          "asset_role": null
+        }
+      ],
+      "results": [],
+      "portability": {
+        "rules": [],
+        "default": {
+          "required_preconditions": [
+            "semantic_target",
+            "state_coupled_raster",
+            "state_coupled_selection"
+          ],
+          "class": "requires_binding"
+        }
+      },
+      "work": {
+        "max_invocations": {
+          "op": "u64",
+          "value": 1
+        },
+        "max_output_ids": {
+          "op": "u64",
+          "value": 0
+        },
+        "max_asset_bytes": {
+          "op": "u64",
+          "value": 0
+        },
+        "max_work_units": {
+          "op": "min",
+          "left": {
+            "op": "u64",
+            "value": 67108864
+          },
+          "right": {
+            "op": "bounded_sum",
+            "path": [
+              "operations"
+            ],
+            "maximum_items": 1024,
+            "body": {
+              "op": "u64",
+              "value": 67108864
+            }
+          }
+        },
+        "max_output_growth": {
+          "op": "u64",
+          "value": 0
+        }
+      },
+      "cancellation_boundary": "bounded_work_chunk",
+      "editor": {
+        "family": "batch",
+        "legacy_projection": "apply_batch_operations",
+        "allow_skip_dependents": true
+      },
+      "owner_milestone": "M09",
+      "equivalence_test": "INKS-EQ-0090"
     }
   ]
 }

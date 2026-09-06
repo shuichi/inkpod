@@ -2,7 +2,7 @@ use super::*;
 
 fn source_text() -> &'static [u8] {
     br#"inkscript 2;
-requires { procedure_catalog = 7; replay_epoch = 29; }
+requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {
     step "Set grid" {
@@ -19,7 +19,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
 
 fn parameter_source_text() -> &'static [u8] {
     br#"inkscript 2;
-requires { procedure_catalog = 7; replay_epoch = 29; }
+requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 parameters {
     param spacing: u32 = 8 { ask = each_run; };
@@ -82,6 +82,67 @@ fn new_core() -> *mut InkpodCore {
 }
 
 fn assert_send_sync<T: Send + Sync>() {}
+
+#[test]
+fn inkscript_batch_catalog_compiles_with_owned_handles_and_rejects_catalog_seven() {
+    let batch = r#"invoke apply_batch_operations {
+        operations = [{ kind = erase; enabled = true;
+            target = { kind = role; plane_kind = color; missing = error; };
+            colors = [rgba8(255,0,0,255)]; }];
+    };"#;
+    let current = std::str::from_utf8(source_text())
+        .unwrap()
+        .replace(
+            "invoke set_grid {\n            grid = { origin_x = 1; origin_y = 2; spacing_x = 8; spacing_y = 9; subdivisions = 2; };\n        };",
+            batch,
+        );
+    assert!(current.contains(batch));
+    let previous = current.replace("procedure_catalog = 8;", "procedure_catalog = 7;");
+    let mut core = new_core();
+    for (text, expected) in [
+        (&current, INKPOD_STATUS_OK),
+        (&previous, INKPOD_STATUS_INVALID_ARGUMENT),
+    ] {
+        let input = source_input(text.as_bytes());
+        let mut source = ptr::null_mut();
+        let mut program = ptr::null_mut();
+        // SAFETY: All input buffers and unique handle slots live through their calls;
+        // the Core and resulting program are used and released on their owner thread.
+        unsafe {
+            assert_eq!(
+                inkpod_inkscript_source_parse(&input, &mut source),
+                INKPOD_STATUS_OK
+            );
+            assert_eq!(
+                inkpod_core_inkscript_compile(core, source, &compile_request(), &mut program),
+                expected,
+            );
+            assert_eq!(
+                inkpod_inkscript_source_release(&mut source),
+                INKPOD_STATUS_OK
+            );
+            assert!(source.is_null());
+            if expected == INKPOD_STATUS_OK {
+                let mut summary = InkpodInkScriptProgramSummary {
+                    struct_size: size_of::<InkpodInkScriptProgramSummary>() as u32,
+                    ..Default::default()
+                };
+                assert_eq!(
+                    inkpod_core_inkscript_program_summary(core, program, &mut summary),
+                    INKPOD_STATUS_OK
+                );
+                assert_eq!(summary.max_invocations, 1);
+                assert_eq!(
+                    inkpod_core_inkscript_program_release(core, &mut program),
+                    INKPOD_STATUS_OK
+                );
+            }
+            assert!(program.is_null());
+        }
+    }
+    // SAFETY: Every child handle has been released and this thread owns the Core.
+    assert_eq!(unsafe { inkpod_core_destroy(&mut core) }, INKPOD_STATUS_OK);
+}
 
 #[test]
 fn inkscript_source_parse_copies_diagnostics_and_text_in_batches() {

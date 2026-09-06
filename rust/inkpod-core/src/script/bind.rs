@@ -212,6 +212,14 @@ pub(crate) fn prepare_inkscript_initial_state_with_parameters(
                 }
                 InkScriptDependencyNodeKind::Step => {
                     if let Some(index) = edge.consumer().step_index() {
+                        if model.steps()[index as usize].command() == "apply_batch_operations"
+                            && !super::batch::uses_runtime_dependency(
+                                &frozen_arguments[index as usize],
+                                edge.dependency().name(),
+                            )
+                        {
+                            continue;
+                        }
                         skipped_steps.insert(index);
                     }
                 }
@@ -818,7 +826,7 @@ mod tests {
     fn one_first_all_and_ambiguity_use_initial_snapshot_order() {
         let declaration = model(
             r#"inkscript_fragment 2;
-requires { procedure_catalog = 7; replay_epoch = 29; }
+requires { procedure_catalog = 8; replay_epoch = 29; }
 bindings {
     let one_value = select layer { name = "A"; cardinality = one; };
     let first_value = select layer { name = "Duplicate"; cardinality = first; };
@@ -851,7 +859,7 @@ program { step "Independent" { enabled = true; invoke independent {}; } }
         ));
 
         let ambiguous = model(
-            r#"inkscript_fragment 2; requires { procedure_catalog = 7; replay_epoch = 29; }
+            r#"inkscript_fragment 2; requires { procedure_catalog = 8; replay_epoch = 29; }
 bindings { let target = select layer { name = "Duplicate"; cardinality = one; }; }
 program {}"#,
         );
@@ -865,7 +873,7 @@ program {}"#,
     #[test]
     fn skip_dependents_propagates_to_asserts_and_steps_but_not_static_disabled_state() {
         let declaration = model(
-            r#"inkscript_fragment 2; requires { procedure_catalog = 7; replay_epoch = 29; }
+            r#"inkscript_fragment 2; requires { procedure_catalog = 8; replay_epoch = 29; }
 bindings { let absent = select layer { name = "Absent"; missing = skip_dependents; }; }
 program {
     assert object { target = $absent; visible = true; };
@@ -896,7 +904,7 @@ program {
         let current = snapshot();
         let digest = id_allocation_digest(&schema(), &current.id_allocations).unwrap();
         let declaration = model(&format!(
-            r#"inkscript_fragment 2; requires {{ procedure_catalog = 7; replay_epoch = 29; }}
+            r#"inkscript_fragment 2; requires {{ procedure_catalog = 8; replay_epoch = 29; }}
 bindings {{ let target = select layer {{ source_document_uuid = uuid"00112233-4455-6677-8899-aabbccddeeff"; persistent_id = 1; }}; }}
 program {{
     assert document {{ source_document_uuid = uuid"00112233-4455-6677-8899-aabbccddeeff"; state_digest = blake3"1111111111111111111111111111111111111111111111111111111111111111"; id_allocation_digest = blake3"{digest}"; width = 1920; }};
@@ -967,7 +975,7 @@ program {{
     #[test]
     fn missing_and_owner_mismatch_fail_without_publishing_partial_bindings() {
         let missing = model(
-            r#"inkscript_fragment 2; requires { procedure_catalog = 7; replay_epoch = 29; }
+            r#"inkscript_fragment 2; requires { procedure_catalog = 8; replay_epoch = 29; }
 bindings { let target = select layer { name = "Absent"; missing = error; }; }
 program {}"#,
         );
@@ -990,7 +998,7 @@ program {}"#,
             properties: BTreeMap::new(),
         });
         let empty = model(
-            "inkscript_fragment 2; requires { procedure_catalog = 7; replay_epoch = 29; } program {}",
+            "inkscript_fragment 2; requires { procedure_catalog = 8; replay_epoch = 29; } program {}",
         );
         assert_eq!(
             prepare_inkscript_initial_state(&empty, &schema(), &catalog(), &invalid_owner)

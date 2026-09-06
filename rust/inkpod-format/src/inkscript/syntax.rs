@@ -791,6 +791,25 @@ pub(crate) fn normalize_record(
         }
     }
     for field in fields {
+        for constraint in field.constraints {
+            if let Some(condition) = constraint.strip_prefix("present-for:") {
+                let (discriminator, variants) = condition
+                    .split_once('=')
+                    .ok_or_else(|| error(InkScriptSemanticErrorCode::InvalidSchema, path))?;
+                let expected = enum_field(&record, discriminator)
+                    .is_some_and(|value| variants.split(',').any(|variant| variant == value));
+                if record.0.contains_key(field.name) != expected {
+                    return Err(error(
+                        if expected {
+                            InkScriptSemanticErrorCode::MissingRequiredField
+                        } else {
+                            InkScriptSemanticErrorCode::UnknownFieldSchema
+                        },
+                        format!("{path}.{}", field.name),
+                    ));
+                }
+            }
+        }
         match record.0.remove(field.name) {
             Some(value) => {
                 let value = normalize_value(value, field.type_name, schema)?;

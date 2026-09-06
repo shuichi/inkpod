@@ -573,6 +573,9 @@ composite は layer/plane 順、visibility、opacity、alpha を決定的に適�
 
 InkScript は [INKSCRIPT.md の適用範囲](INKSCRIPT.md)に従い、language core、schema registry、exact-source／rebound 等価性と、未解除の公開・cutover gate を規範とする。現行の Batch production contract は exact-current `.inkbatch` v5 とその UI／ABI である。批准済み catalog を使う Rust compile／bind／staged-run API は product から独立して公開できる。C ABI は対応する owner gate、`.inkscript` file filter、clipboard、Windows command／UI と Batch production executor は対応する owner gate と M34 cutover の条件を満たすまで公開経路へ接続しない。M29C の parity、M34 の明示 cutover、M35 の旧形式削除、承認済み性能 gate は保持する。工程ごとの停止・確認・再開手順は、その workflow をユーザーが明示的に依頼した場合だけ適用する。
 
+InkScript catalog v8 の `apply_batch_operations` は四処理の順序付き列を一 canonical invocation／一 Commit／一 Undo として実行する。Color／Raster の role、UUID 付き strict target、先行 result reference を型付きで検査し、MainLine は `missing=skip` でも拒否する。target は initial input へ固定し、全列の実行直前 preflight と既存 canonical executor を使用する。失敗・cancel・stale・resource 超過は staged state を公開しない。fragment は展開済み順序を保持し、元の UI grouping や disabled operation を復元したと表示しない。詳細は [D1 接続契約](docs/inkscript-batch-connection.md#d1一-command-の表現と実行)に従う。
+
+
 ### 20. 形式、白透過、一般画像入出力
 
 #### 現行 version と照合先
@@ -590,7 +593,7 @@ InkScript は [INKSCRIPT.md の適用範囲](INKSCRIPT.md)に従い、language c
 | `.inkbatch`／operation schema | 5／4 | [Batch format](rust/inkpod-format/src/batch.rs) の `BATCH_GRAPH_VERSION`／`BATCH_OPERATION_VERSION` |
 | InkScript registry schema | 2 | [registry schema](schemas/inkscript/registry-schema-v2.json) と各 registry の `registry_schema_version` |
 | InkScript language／file | 2 | [language](schemas/inkscript/language-v2.json) の `file_version`、[source](rust/inkpod-format/src/inkscript/source.rs) の `INKSCRIPT_FILE_VERSION` |
-| InkScript production catalog／owner manifest | v7、74 command | [catalog](schemas/inkscript/catalog-v7.json) の `catalog_version`／`entries`、[owner manifest v7](schemas/inkscript/owner-manifest-v7.json) の `replay_contract` |
+| InkScript production catalog／owner manifest | v8、75 command | [catalog](schemas/inkscript/catalog-v8.json) の `catalog_version`／`entries`、[owner manifest v8](schemas/inkscript/owner-manifest-v8.json) の `replay_contract` |
 | `EditShootingFrame` schema／semantics | 3／2 | [primitive catalog](rust/inkpod-core/src/primitive/catalog.rs) の `EDIT_SHOOTING_FRAME` |
 | `ApplyLineCorrection` schema／semantics | 2／1 | 同 catalog の `APPLY_LINE_CORRECTION` |
 | `ApplyDustRemoval` schema／semantics | 3／3 | 同 catalog の `APPLY_DUST_REMOVAL` |

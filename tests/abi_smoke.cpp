@@ -304,7 +304,7 @@ int InkpodRunAbiSmoke() {
         return 2;
     }
     constexpr char script_text[] = R"(inkscript 2;
-requires { procedure_catalog = 7; replay_epoch = 29; }
+requires { procedure_catalog = 8; replay_epoch = 29; }
 inputs { current_document; }
 program {
     step "Set grid" {

@@ -11,10 +11,10 @@ The JSON registries remain normative when this presentation differs.
 | --- | ---: |
 | Registry schema | 2 |
 | InkScript file | 2 |
-| Procedure catalog | 7 |
+| Procedure catalog | 8 |
 | Required replay epoch | 29 |
-| Commands | 74 |
-| Catalog FNV-1a drift fingerprint | `b1633b30813e7eff` |
+| Commands | 75 |
+| Catalog FNV-1a drift fingerprint | `ec655f3463bb293c` |
 
 ## Language selectors
 
@@ -76,6 +76,10 @@ The JSON registries remain normative when this presentation differs.
 - `line_background_mode`: `plane_default`, `transparent`, `transparent_or_color`
 - `line_correction_kind`: `dust`, `connect`, `thicken`, `thin`, `uniform`
 - `line_trace_shape`: `round`, `square`
+- `batch_operation_kind`: `color_replace`, `move_to_color_plane`, `masking`, `erase`
+- `batch_target_kind`: `role`, `strict`, `references`
+- `batch_plane_kind`: `color`, `raster`
+- `batch_missing_policy`: `error`, `skip`
 
 ## Catalog constructors
 
@@ -139,6 +143,9 @@ The JSON registries remain normative when this presentation differs.
 - `line_trace_options`: shape: line_trace_shape; pressure_size: bool; screen_size: bool; view_zoom: q16
 - `line_construction`: aspect_ratio_q16: u32; from_center: bool; constrain_rotation_45: bool; rotation_turns: u32; trace: line_trace_options
 - `line_correction`: kind: line_correction_kind; dust: nullable<dust_removal>; gap: u32; width: u32; amount: u32; background: line_background
+- `batch_operation`: kind: batch_operation_kind; enabled: bool; targets?: list<batch_target> [default=null; bound=present-for:kind=color_replace,length:1..64]; pairs?: list<batch_color_pair> [default=null; bound=present-for:kind=color_replace,length:1..4096]; target?: batch_target [default=null; bound=present-for:kind=move_to_color_plane,masking,erase]; colors?: list<pixel_value> [default=null; bound=present-for:kind=move_to_color_plane,masking,erase,length:1..4096]
+- `batch_target`: kind: batch_target_kind; source_document_uuid?: uuid [default=null; bound=present-for:kind=strict]; persistent_layer_id?: nullable<u64> [default=null; bound=present-for:kind=strict,nonzero]; persistent_plane_id?: nullable<u64> [default=null; bound=present-for:kind=strict,nonzero]; plane_kind?: nullable<batch_plane_kind> [default=null; bound=present-for:kind=role,strict]; missing?: batch_missing_policy [default=null; bound=present-for:kind=role,strict]; layer?: nullable<layer_ref> [default=null; bound=present-for:kind=references]; plane?: plane_ref [default=null; bound=present-for:kind=references]
+- `batch_color_pair`: enabled: bool; old: pixel_value; new: pixel_value
 
 ## Commands
 
@@ -881,3 +888,13 @@ The JSON registries remain normative when this presentation differs.
 - Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":0}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"op":"u64","value":1100000000}; max_output_growth={"op":"u64","value":0}; cancellation: `bounded_work_chunk`.
 - Editor: family `legacy_image`; legacy projection `line_correction`; skip dependents true.
 - Ownership: `M08`; equivalence `INKS-EQ-0089`.
+
+### `apply_batch_operations`
+
+- Primitive: `0x00050044`; schema 3; semantics 2; replay epoch 29.
+- Arguments: operations: list<batch_operation> [bound=length:1..1024,expanded-operation-count<=1024,checked-expanded-pixel-sum<=67108864,at-least-one-enabled-for-execution,enabled-only-runtime-reference-dependencies,all-operation-fragment-dependency-closure,initial-input-role-and-strict-binding,strict-uuid-owner-mainline-errors-never-skip,native-depth-exact-no-conversion].
+- Results: none.
+- Portability: requires_binding (semantic_target, state_coupled_raster, state_coupled_selection); ordered rules: 0 ([]).
+- Work: max_invocations={"op":"u64","value":1}; max_output_ids={"op":"u64","value":0}; max_asset_bytes={"op":"u64","value":0}; max_work_units={"left":{"op":"u64","value":67108864},"op":"min","right":{"body":{"op":"u64","value":67108864},"maximum_items":1024,"op":"bounded_sum","path":["operations"]}}; max_output_growth={"op":"u64","value":0}; cancellation: `bounded_work_chunk`.
+- Editor: family `batch`; legacy projection `apply_batch_operations`; skip dependents true.
+- Ownership: `M09`; equivalence `INKS-EQ-0090`.

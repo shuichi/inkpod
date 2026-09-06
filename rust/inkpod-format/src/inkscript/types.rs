@@ -2236,7 +2236,20 @@ fn validate_constraints(
         return Ok(());
     }
     for constraint in constraints {
-        let valid = if *constraint == "nonzero" || *constraint == "positive" {
+        let valid = if let Some(bounds) = constraint.strip_prefix("length:") {
+            let bounds = bounds.split_once("..").and_then(|(minimum, maximum)| {
+                Some((
+                    minimum.parse::<usize>().ok()?,
+                    maximum.parse::<usize>().ok()?,
+                ))
+            });
+            match (bounds, value.kind()) {
+                (Some((minimum, maximum)), InkScriptTypedValueKind::List(values)) => {
+                    (minimum..=maximum).contains(&values.len())
+                }
+                _ => false,
+            }
+        } else if *constraint == "nonzero" || *constraint == "positive" {
             integer_magnitude(value).is_some_and(|value| value > 0)
         } else if let Some(maximum) = constraint
             .strip_prefix("0..")

@@ -21,10 +21,10 @@ M1 から採番する。完了済み工程・旧版への更新経緯は Git 履
 新番号の対応、および registry owner ID を変更しない規則は 16.5 節に置く。
 
 現行の machine-readable contract は [registry schema v2](schemas/inkscript/registry-schema-v2.json)、
-[language v2](schemas/inkscript/language-v2.json)、[catalog v7](schemas/inkscript/catalog-v7.json)、
-[owner manifest v7](schemas/inkscript/owner-manifest-v7.json) である。language は command 非依存の
+[language v2](schemas/inkscript/language-v2.json)、[catalog v8](schemas/inkscript/catalog-v8.json)、
+[owner manifest v8](schemas/inkscript/owner-manifest-v8.json) である。language は command 非依存の
 type、section、selector、assert、asset の exact field、型、default、上限を固定し、catalog は
-74 command の閉じた集合を定義する。退役 primitive ID は tombstone として再利用しない。
+75 command の閉じた集合を定義する。退役 primitive ID は tombstone として再利用しない。
 production Rust compile／bind／staged-run API と、実装済みの source／export／execution C ABI、
 Windows private authority／engine route を再利用する。これらの存在は `.inkscript` の product
 file filter、clipboard、Batch pane への接続を意味しない。公開境界は 14–17 節に従う。
@@ -38,7 +38,7 @@ file filter、clipboard、Batch pane への接続を意味しない。公開境�
 | 項目                                |                                       現在値 |
 | ----------------------------------- | -------------------------------------------: |
 | InkScript file format version       |                                            2 |
-| InkScript procedure catalog version | 7（線補正追加、74 command） |
+| InkScript procedure catalog version | 8（四処理の一 command 追加、75 command） |
 | required replay epoch               | 29 |
 | native output                       |                      exact-current `.inkpod` |
 | native top-level format             | 34 |
@@ -58,19 +58,19 @@ exact-current version だけを受理する。grammar、serialized field、selec
 
 catalog versionは「そのbuildで実装済みのcommand集合」ではなく、批准済みの完全なclosed command
 contractを識別する。実装coverageは非永続の内部状態であり、file、clipboard、公開ABIへserializeしない。
-現行は`catalog-v7.json`だけを受理し、過去のcatalogをin-place変更して現行契約へ読み替えない。
+現行は`catalog-v8.json`だけを受理し、過去のcatalogをin-place変更して現行契約へ読み替えない。
 新entryやsignature変更ではcatalog versionを更新し、旧version拒否test、example、registry、生成referenceを同時更新する。
 
 ### 1.1 再開時の適用範囲
 
-4–13 節は現在の file v2／catalog v7 の language/runtime 契約を記す。clipboard と編集 UI の記述は
+4–13 節は現在の file v2／catalog v8 の language/runtime 契約を記す。clipboard と編集 UI の記述は
 未接続の受入契約であり、実装済みの主張ではない。現行 Batch の製品挙動は
 [SPEC 19 節](SPEC.md#19-バッチ処理)を正本とし、次の不足を M1–M5 で解決してから UI を接続する。
 本改訂だけで新 syntax、catalog entry、版番号、製品挙動を批准・変更しない。
 
 | 対象 | 現行 InkScript の境界 | 再開後に満たす契約 |
 | --- | --- | --- |
-| Batch program | 74 command に private `ApplyBatchOperations` は含まれず、その Commit の fragment export も未対応 | 四種類の処理と全 target を含む順序付き処理列の一 canonical invocation／一 transaction／一 Undo を維持する表現を確定する |
+| Batch program | catalog v8 の `apply_batch_operations` と展開済み Commit の fragment export | 四種類の処理と全 target を一 canonical invocation／一 transaction／一 Undo で実行し、M9 の製品 parity へ接続する |
 | 入力・出力 | native `.inkpod` 入力と native file 出力。`duplicate`／`new_save` は命名 policy | PNG/TIFF/TGA/BMP 入力・出力、bounded template、発行時 active document／新規 tab 出力と identity／savepoint 契約を満たす |
 | preview | immutable 実行計画と staged dry-run。製品の画像 preview とは別 | 全入力を隔離した temporary copy から処理する contact sheet と、preview tab の元 target 固定を維持する |
 | 編集 UI | lossless source と typed model の基盤。製品 editor は未接続 | 現行の固定 Input／Output、四種類の処理、set 保存、専用 Batch tab、三つの実行 button を出発点にする |
@@ -544,7 +544,7 @@ assetの全reference edgeを含む。fragment closure、`skip_dependents`、diag
 
 ```inkscript
 requires {
-    procedure_catalog = 7;
+    procedure_catalog = 8;
     replay_epoch = 29;
 }
 ```
@@ -762,7 +762,13 @@ seed-fill等、registryがlossless projectionを定義した場合だけ許可�
 
 この1:N契約を現行Batch v5の四処理へ流用しない。v5では全enabled処理と展開済みtargetを一つの
 `ApplyBatchOperations`へ渡し、一回だけcommitする。四処理を別々のstepへ展開したり、非意味的な
-`editor_group`でtransactionを合成したりして同等と扱わない。接続表現はM1で確定し、M3で実装する。
+`editor_group`でtransactionを合成したりして同等と扱わない。catalog v8 の
+`apply_batch_operations { operations: list<batch_operation>; }` が四 variant の順序付き列を表す。
+closed field、role／strict／references、disabled 参照、上限、export／rebind は
+[承認済み D1 契約](docs/inkscript-batch-connection.md#d1一-command-の表現と実行)に従う。
+既存 record/list grammar を使い、catalog-owned の conditional field と list bound を検証する。
+全 operation 無効の draft は保存可能だが実行不能。role／strict は initial input へ固定し、
+先行 producer の references と実行直前の dimensions／全列 resource を再検査する。
 
 新規 stable object を作成する command は typed result を返せる。
 
@@ -842,7 +848,9 @@ overflow、zero/overflow済みnext IDをdigest計算前に拒否する。
 
 現行のregistry schema／language／catalog／owner manifestは1節の参照先を正本とする。
 script公開対象のjournal-replayable `PrimitiveId`はowner manifestのちょうど一つのownerへ割り当て、
-対象外は理由付きで明示する。private `ApplyBatchOperations`は現時点では対象外であり、M1の公開契約判断を要する。
+対象外は理由付きで明示する。`ApplyBatchOperations` は catalog v8 の一 command として含む。
+native catalog の既存 private flag は保存済み replay fingerprint の一部として維持し、
+Script への公開集合は script registry／owner manifest で定義する。payload／replay semantics は変更しない。
 合成`SchemaView`はlanguage-core定義と全catalog entry定義を結合し、type/constructor名の重複を拒否する。
 全entry、実装、owner、equivalence evidenceの全単射を検証する。既存C ABIの所有権契約は維持し、
 製品file、clipboard、Windows commandへの接続はM15のcutoverまで行わない。
@@ -1247,7 +1255,7 @@ fragmentは完全fileとは別のheaderを持つ。
 inkscript_fragment 2;
 
 requires {
-    procedure_catalog = 7;
+    procedure_catalog = 8;
     replay_epoch = 29;
 }
 
@@ -1399,7 +1407,7 @@ queue saturation、shutdown raceをfault injectionで検証する。
 
 ## 13. 完全な例
 
-次は現行file v2／catalog v7のsyntaxと、`replace_raster_colors`、`resize_document`の規範的なfieldを示す。
+次は現行file v2／catalog v8のsyntaxと、`replace_raster_colors`、`resize_document`の規範的なfieldを示す。
 四種類に限定された製品Batchの作成例ではなく、公開Rust runtime用の一般script例である。
 他commandのfieldをこの例から類推して追加してはならず、procedure catalogのexact signatureに従う。
 
@@ -1407,7 +1415,7 @@ queue saturation、shutdown raceをfault injectionで検証する。
 inkscript 2;
 
 requires {
-    procedure_catalog = 7;
+    procedure_catalog = 8;
     replay_epoch = 29;
 }
 
@@ -1624,7 +1632,7 @@ markerは実装計画内の受入管理に限る。要件の状態、既知差�
 | 基盤 | code／代表test | 再開後の扱い |
 | --- | --- | --- |
 | UTF-8、lossless CST、typed AST、emitter、fragment closure | [format InkScript](rust/inkpod-format/src/inkscript/mod.rs)、[parser tests](rust/inkpod-format/tests/inkscript_parser.rs)、[program tests](rust/inkpod-format/tests/inkscript_program.rs) | 継続利用。source局所編集と承認されたenvelope拡張だけを追加する |
-| 74-command compile／bind／executeとcanonical exporter | [Core script](rust/inkpod-core/src/script/mod.rs)、[public contracts](rust/inkpod-core/tests/inkscript_public.rs)、[registry tests](rust/inkpod-core/tests/inkscript_registry.rs) | owner全単射とexact-source／rebound保証を維持。private Batch primitiveの不足をM3で扱う |
+| 75-command compile／bind／executeとcanonical exporter | [Core script](rust/inkpod-core/src/script/mod.rs)、[public contracts](rust/inkpod-core/tests/inkscript_public.rs)、[registry tests](rust/inkpod-core/tests/inkscript_registry.rs) | owner全単射とexact-source／rebound保証を維持。M3 の四処理 command／export を含む |
 | authority／PlanTask／RunTask／report | [plan](rust/inkpod-core/src/script/plan.rs)、[run](rust/inkpod-core/src/script/run.rs) | 現行native経路から製品I/O・preview・staged publicationへ接続する |
 | source／export／execution C ABI | [FFI source](rust/inkpod-ffi/src/inkscript.rs)、[FFI execution](rust/inkpod-ffi/src/inkscript_execution.rs)、[ABI tests](rust/inkpod-ffi/tests/unit/inkscript.rs) | 既存handleと失敗契約を再利用し、不足する境界だけを追加する |
 | Windows private authority／engine route | [authority tests](tests/windows_inkscript_file_authority.cpp)、[engine tests](tests/windows_inkscript_engine_route.cpp) | production公開済みとは扱わず、共有I/Oとstatus barへの接続を検証する |
@@ -1733,7 +1741,15 @@ full性能は未実装のままM17に残し、この作業ではM3へ進まな�
 - 承認済みx64 envelopeは該当環境で検証し、異なる環境の結果で代用しない。
 - 以後の版変更でも同じgateを維持する手順が明確で、full未実装をquick成功で完了扱いにしていない。
 
-### [ ] M3 — 四処理のcanonical catalog接続とfragment export
+### [x] M3 — 四処理のcanonical catalog接続とfragment export
+
+**完了**：四処理の Core／既存 ABI scope と fragment export を実装・検証した。
+catalog v8／75 command を使用し、file v2／epoch 29／native v34／ABI v34 は維持する。
+checksum 一 literal の更新は明示承認を得て適用し、[元の Release quick gate](docs/core-benchmark-baseline.md#m3-catalog-v8-checksum-decision)
+も独立検証で成立した。16.2 節の明示 Core／既存 ABI scope として公開契約を検証し、新しい製品 UI 操作を
+含まないため追加の手動 UI 受入は不要と判断する。既存製品 Batch の英日可視経路の検証とは区別する。
+後続 M4、製品 cutover、full 性能 gate へは進まない。代表検証と未検証範囲は
+[compatibility](docs/compatibility.md) に記載する。
 
 **範囲**
 

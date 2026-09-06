@@ -200,7 +200,7 @@ impl fmt::Debug for DecodedLease {
 
 /// Pathless immutable canonical pixels retained from one exact decoded image.
 ///
-/// Values can only be created by [`IoManager::retain_decoded_raster`] after the
+/// Values can only be created by [`crate::IoManager::retain_decoded_raster`] after the
 /// originating derived capability and a final [`LoadedImage`] prove the same
 /// manager, file stamp, cache generation, format, metadata, and allocation.
 /// Cloning shares the decoded allocation and its existing budget charge. No

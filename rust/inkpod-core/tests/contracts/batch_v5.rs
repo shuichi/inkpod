@@ -652,6 +652,40 @@ fn cancellation_hidden_targets_and_excluded_main_line_are_atomic() {
 }
 
 #[test]
+fn fixed_main_line_with_missing_skip_is_invalid_before_any_sibling_commits() {
+    let mut core = Core::new();
+    let document = core
+        .new_cell_with_uuid(2, 1, DEFAULT_DPI_MILLI, DEFAULT_DPI_MILLI, 0xb351)
+        .unwrap();
+    dot(&mut core, [3, 4, 5, 6], 0.0, 0.0);
+    let before = core.document_info().unwrap();
+    let digest = core.document_state_digest().unwrap();
+    let journal = core.journal_entries().to_vec();
+    let operations = [
+        operation(
+            PlaneType::Color,
+            BatchOperationKind::Erase(vec![PixelValue::Rgba([3, 4, 5, 6])]),
+        ),
+        BatchOperation {
+            version: BATCH_OPERATION_VERSION,
+            enabled: true,
+            target: BatchTargetSelector {
+                layer_id: Some(document.layer_id),
+                plane_id: Some(document.main_plane_id),
+                plane_kind: None,
+                missing_policy: BatchMissingTargetPolicy::Skip,
+            },
+            additional_targets: Vec::new(),
+            kind: BatchOperationKind::Erase(vec![PixelValue::Binary(0)]),
+        },
+    ];
+    assert!(core.apply_batch_operations(&operations, || false).is_err());
+    assert_eq!(core.document_info().unwrap(), before);
+    assert_eq!(core.document_state_digest().unwrap(), digest);
+    assert_eq!(core.journal_entries(), journal);
+}
+
+#[test]
 fn move_to_color_plane_moves_exact_pixels_and_preserves_other_destination_pixels() {
     for (index, (format, source_color, destination_color)) in [
         (

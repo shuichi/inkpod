@@ -252,6 +252,16 @@ pub fn compile_inkscript_with_limits(
     let asset_summaries = catalog_asset_summaries(&model)?;
     let mut budget = ScriptBudget::default();
     for (step, arguments) in model.steps().iter().zip(&frozen_arguments) {
+        if step.command() == "apply_batch_operations" {
+            super::batch::validate_source(arguments, step.enabled()).map_err(
+                |error| match error {
+                    super::execute::ScriptRunError::ResourceLimit => {
+                        ScriptCompileError::ResourceLimit
+                    }
+                    _ => ScriptCompileError::Catalog(CatalogError::TypeMismatch),
+                },
+            )?;
+        }
         if step.enabled() {
             add_budget(
                 &mut budget,
@@ -362,6 +372,7 @@ impl ScriptSchemas {
         let schemas = Self {
             enums: inkscript::LEGACY_SIMPLE_ENUMS
                 .iter()
+                .chain(super::batch::BATCH_ENUMS)
                 .chain(inkscript_batch::LEGACY_IMAGE_ENUMS)
                 .chain(inkscript_fill_gradient::FILL_GRADIENT_ENUMS)
                 .chain(inkscript_gesture_adjustment::GESTURE_ADJUSTMENT_ENUMS)
@@ -378,6 +389,7 @@ impl ScriptSchemas {
                 .collect(),
             records: inkscript::LEGACY_SIMPLE_RECORDS
                 .iter()
+                .chain(super::batch::BATCH_RECORDS)
                 .chain(inkscript_batch::LEGACY_IMAGE_RECORDS)
                 .chain(inkscript_document_tree::DOCUMENT_TREE_RECORDS)
                 .chain(inkscript_metadata::METADATA_COLOR_GUIDE_RECORDS)
@@ -391,6 +403,7 @@ impl ScriptSchemas {
                 .collect(),
             commands: inkscript::LEGACY_SIMPLE_COMMANDS
                 .iter()
+                .chain(super::batch::BATCH_COMMANDS)
                 .chain(inkscript_batch::LEGACY_IMAGE_COMMANDS)
                 .chain(inkscript_document_tree::DOCUMENT_TREE_COMMANDS)
                 .chain(inkscript_metadata::METADATA_COLOR_GUIDE_COMMANDS)
@@ -428,6 +441,32 @@ pub(super) fn catalog(
     let mut entries = Vec::with_capacity(schemas.len());
     for schema in schemas {
         let (class, preconditions, work, projection, skip, results, family) = match schema.name() {
+            "apply_batch_operations" => (
+                InkScriptPortabilityClass::RequiresBinding,
+                vec![
+                    "semantic_target",
+                    "state_coupled_raster",
+                    "state_coupled_selection",
+                ],
+                CatalogWorkFormula {
+                    max_invocations: CatalogNumericExpression::Literal(1),
+                    max_output_ids: CatalogNumericExpression::Literal(0),
+                    max_asset_bytes: CatalogNumericExpression::Literal(0),
+                    max_work_units: CatalogNumericExpression::Min(
+                        Box::new(CatalogNumericExpression::Literal(67_108_864)),
+                        Box::new(CatalogNumericExpression::BoundedSum {
+                            path: vec!["operations"],
+                            maximum_items: 1_024,
+                            body: Box::new(CatalogNumericExpression::Literal(67_108_864)),
+                        }),
+                    ),
+                    max_output_growth: CatalogNumericExpression::Literal(0),
+                },
+                Some("apply_batch_operations"),
+                true,
+                Vec::new(),
+                "batch",
+            ),
             "set_layer_properties" => tuple(1, true, Some("layer_property")),
             "set_plane_properties" => tuple(1, true, Some("plane_property")),
             "convert_plane" => tuple(16_777_216, true, Some("plane_conversion")),

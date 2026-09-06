@@ -6,6 +6,7 @@
 )]
 
 mod assets;
+mod batch;
 pub(crate) mod bind;
 mod catalog;
 mod compile;

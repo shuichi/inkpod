@@ -95,7 +95,7 @@ editor generation が新しければ、clean savepoint でも fresh source recov
 新規の `InkpodIoSequenceResidentInfo` は 72 bytes、`InkpodSequenceRenderPreparationInfo` は 24 bytes、`InkpodSnapshotSequenceSourceView` は 64 bytes である。旧サイズの構造体を渡してはならない。native v34、document replay epoch 29 と ABI v34 は完全一致が必要である。
 現行 native payload は `DocumentArchive` schema 7、必須 `DOCM` schema 9、document digest schema 13/domain 11、
 snapshot-composite schema 5であり、Batchはgraph v5/operation schema 4、
-InkScriptはcatalog/owner manifest v7の74 commandsである。canonical `revision-max` 式と既存 benchmark の
+InkScriptはcatalog/owner manifest v8の75 commandsである。canonical `revision-max` 式と既存 benchmark の
 workload/envelope は変更しない。Batch v5 multi-target API、共有 I/O manager、path-only job、進捗 polling、
 recovery metadata、非同期 Batch・連番切り替え・保存 API を保持する。既存の `_v3` 値／ID 専用プリミティブ制御 API、永続化 API、InkScript
 source/compiler/fragment APIを保持し、
@@ -333,7 +333,7 @@ manager を release する。manager release は worker の終了を待つため
 ## InkScript source／compiler／fragment（現行 ABI v34）
 
 ABI v15 で追加されたsource parse、diagnostic copy、static compile、journal fragment exportは、exact-current
-InkScript file v2／procedure catalog v7／replay epoch 29としてABI v34に保持される。`.inkscript` file filter、
+InkScript file v2／procedure catalog v8／replay epoch 29としてABI v34に保持される。`.inkscript` file filter、
 Windows command／UI、実Windows path authorityはまだ接続しない。
 
 `inkpod_inkscript_source_parse` は `InkpodInkScriptSourceInput` の UTF-8 span を呼出中だけ借用し、128 MiB

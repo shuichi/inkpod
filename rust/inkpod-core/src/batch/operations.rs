@@ -122,6 +122,92 @@ pub(crate) fn apply_batch_operations_canonical(
     core.commit_deferred_document_edit(before, after, base_revision, revision)
 }
 
+/// Checks an InkScript-resolved list in full before its first document edit.
+/// Targets are already fixed IDs; this never repeats semantic role resolution.
+pub(crate) fn preflight_batch_operations(
+    core: &Core,
+    operations: &[BatchOperation],
+) -> Result<(), CoreError> {
+    if operations.len() > MAX_BATCH_OPERATIONS {
+        return Err(CoreError::InvalidArgument(
+            "batch expanded operation count is outside bounds",
+        ));
+    }
+    let document = core.document.as_ref().ok_or(CoreError::NoDocument)?;
+    let mut work = 0_u64;
+    for operation in operations {
+        validate_operation(operation)?;
+        if !operation.enabled {
+            continue;
+        }
+        if !operation.additional_targets.is_empty() {
+            return Err(CoreError::InvalidArgument(
+                "batch preflight requires resolved targets",
+            ));
+        }
+        let plane_id = operation
+            .target
+            .plane_id
+            .filter(|id| *id != 0)
+            .map(PlaneId::from_raw)
+            .ok_or(CoreError::InvalidArgument(
+                "batch preflight requires a fixed plane ID",
+            ))?;
+        let layer = document
+            .layers
+            .iter()
+            .find(|layer| layer.planes.iter().any(|plane| plane.id == plane_id))
+            .ok_or(CoreError::InvalidArgument(
+                "batch stable target does not exist in this cell",
+            ))?;
+        if operation.target.layer_id != Some(layer.id.get()) {
+            return Err(CoreError::InvalidArgument(
+                "batch target owner does not match",
+            ));
+        }
+        validate_editable_source(document, plane_id)?;
+        let source = document
+            .plane_by_id(plane_id)
+            .ok_or(CoreError::InvalidState("batch target plane disappeared"))?;
+        if operation.target.plane_kind != Some(source.kind) {
+            return Err(CoreError::InvalidArgument(
+                "batch target role does not match",
+            ));
+        }
+        work = work
+            .checked_add(
+                u64::from(source.raster.width())
+                    .checked_mul(u64::from(source.raster.height()))
+                    .ok_or(CoreError::InvalidArgument("batch raster work overflows"))?,
+            )
+            .ok_or(CoreError::InvalidArgument("batch operation work overflows"))?;
+        if work > MAX_IMAGE_EDIT_PIXELS {
+            return Err(CoreError::InvalidArgument(
+                "batch operation list exceeds the bounded work limit",
+            ));
+        }
+        match &operation.kind {
+            BatchOperationKind::ColorReplace(pairs) => {
+                for pair in pairs.iter().filter(|pair| pair.enabled) {
+                    ensure_pixel_matches_format(pair.old, source.raster.format())?;
+                    ensure_pixel_matches_format(pair.new, source.raster.format())?;
+                }
+            }
+            BatchOperationKind::MoveToColorPlane(colors)
+            | BatchOperationKind::Masking(colors)
+            | BatchOperationKind::Erase(colors) => {
+                if matches!(operation.kind, BatchOperationKind::MoveToColorPlane(_)) {
+                    validate_move_destination(document, plane_id)?;
+                }
+                for color in colors {
+                    ensure_pixel_matches_format(*color, source.raster.format())?;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
 fn lower_batch_operations(
     document: &CellDocument,
     operations: &[BatchOperation],
@@ -159,6 +245,19 @@ fn resolve_targets_in_document(
     selector: &BatchTargetSelector,
     all_matches: bool,
 ) -> Result<Vec<BatchTargetSelector>, CoreError> {
+    // A fixed MainLine ID is a protected target, never a missing Color/Raster
+    // target. Reject it before role/owner filters can turn it into a skip.
+    // This check precedes canonical lowering; resolved journal payloads remain
+    // the same closed Color/Raster target set.
+    if selector
+        .plane_id
+        .and_then(|id| document.plane_by_id(PlaneId::from_raw(id)))
+        .is_some_and(|plane| plane.kind == PlaneType::MainLine)
+    {
+        return Err(CoreError::InvalidArgument(
+            "batch target plane must be Color or Raster",
+        ));
+    }
     let mut matches = Vec::new();
     for layer in document
         .layers
@@ -298,50 +397,9 @@ fn move_colors_to_color_plane(
     is_cancelled: &mut dyn FnMut() -> bool,
 ) -> Result<(), CoreError> {
     validate_editable_source(document, source_id)?;
-    let layer_index = document
-        .layers
-        .iter()
-        .position(|layer| layer.planes.iter().any(|plane| plane.id == source_id))
-        .ok_or(CoreError::InvalidArgument(
-            "batch move source plane does not exist",
-        ))?;
-    let source_index = document.layers[layer_index]
-        .planes
-        .iter()
-        .position(|plane| plane.id == source_id)
-        .ok_or(CoreError::InvalidState("batch move source disappeared"))?;
-    if document.layers[layer_index].planes[source_index].kind == PlaneType::MainLine {
-        return Err(CoreError::InvalidArgument(
-            "batch move cannot modify the protected main-line plane",
-        ));
-    }
-    let destination_index = document.layers[layer_index]
-        .planes
-        .iter()
-        .position(|plane| plane.kind == PlaneType::Color)
-        .ok_or(CoreError::InvalidArgument(
-            "batch move color-plane destination is missing",
-        ))?;
-    if source_index == destination_index {
-        return Err(CoreError::InvalidArgument(
-            "batch move source and destination must be different planes",
-        ));
-    }
+    let (layer_index, source_index, destination_index) =
+        validate_move_destination(document, source_id)?;
     let source = &document.layers[layer_index].planes[source_index];
-    let destination = &document.layers[layer_index].planes[destination_index];
-    if !destination.visible || !destination.editable {
-        return Err(CoreError::InvalidArgument(
-            "batch move destination is hidden or non-editable",
-        ));
-    }
-    if source.raster.format() != destination.raster.format()
-        || source.raster.width() != destination.raster.width()
-        || source.raster.height() != destination.raster.height()
-    {
-        return Err(CoreError::InvalidArgument(
-            "batch move source and destination raster contracts do not match",
-        ));
-    }
     for color in colors {
         ensure_pixel_matches_format(*color, source.raster.format())?;
     }
@@ -389,6 +447,57 @@ fn move_colors_to_color_plane(
         destination.raster.remove_tile_if_empty(coord);
     }
     Ok(())
+}
+
+fn validate_move_destination(
+    document: &CellDocument,
+    source_id: PlaneId,
+) -> Result<(usize, usize, usize), CoreError> {
+    let layer_index = document
+        .layers
+        .iter()
+        .position(|layer| layer.planes.iter().any(|plane| plane.id == source_id))
+        .ok_or(CoreError::InvalidArgument(
+            "batch move source plane does not exist",
+        ))?;
+    let source_index = document.layers[layer_index]
+        .planes
+        .iter()
+        .position(|plane| plane.id == source_id)
+        .ok_or(CoreError::InvalidState("batch move source disappeared"))?;
+    if document.layers[layer_index].planes[source_index].kind == PlaneType::MainLine {
+        return Err(CoreError::InvalidArgument(
+            "batch move cannot modify the protected main-line plane",
+        ));
+    }
+    let destination_index = document.layers[layer_index]
+        .planes
+        .iter()
+        .position(|plane| plane.kind == PlaneType::Color)
+        .ok_or(CoreError::InvalidArgument(
+            "batch move color-plane destination is missing",
+        ))?;
+    if source_index == destination_index {
+        return Err(CoreError::InvalidArgument(
+            "batch move source and destination must be different planes",
+        ));
+    }
+    let source = &document.layers[layer_index].planes[source_index];
+    let destination = &document.layers[layer_index].planes[destination_index];
+    if !destination.visible || !destination.editable {
+        return Err(CoreError::InvalidArgument(
+            "batch move destination is hidden or non-editable",
+        ));
+    }
+    if source.raster.format() != destination.raster.format()
+        || source.raster.width() != destination.raster.width()
+        || source.raster.height() != destination.raster.height()
+    {
+        return Err(CoreError::InvalidArgument(
+            "batch move source and destination raster contracts do not match",
+        ));
+    }
+    Ok((layer_index, source_index, destination_index))
 }
 
 fn replace_fill_protection_mask(

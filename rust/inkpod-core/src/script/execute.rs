@@ -219,6 +219,22 @@ pub(super) fn run_inkscript_on_staged_core(
     let mut statements = Vec::with_capacity(prepared.statements.len());
     let mut results = Vec::new();
     let mut runtime_references = initial_runtime_references(&prepared.bindings)?;
+    let mut batch_steps = BTreeMap::new();
+    for (node, statement) in program.model.program().iter().zip(&prepared.statements) {
+        if let (InkScriptTypedProgramNode::Step(index), InkScriptPreparedStatement::StepReady) =
+            (*node, *statement)
+            && program.model.steps()[index].command() == "apply_batch_operations"
+        {
+            batch_steps.insert(
+                index,
+                super::batch::bind(
+                    &program.frozen_arguments[index],
+                    &working,
+                    &runtime_references,
+                )?,
+            );
+        }
+    }
     let mut commits = 0_u64;
     let mut step_index = 0usize;
     if program.model.program().len() != prepared.statements.len() {
@@ -249,7 +265,13 @@ pub(super) fn run_inkscript_on_staged_core(
                 }
                 let step = &program.model.steps()[index];
                 let before_revision = working.document_info()?.document_revision;
-                let (result, output_kinds) = if is_simple(step.command()) {
+                let (result, output_kinds) = if step.command() == "apply_batch_operations" {
+                    let result = batch_steps
+                        .get(&index)
+                        .ok_or(ScriptRunError::InvalidStep)?
+                        .execute(&mut working, &runtime_references, cancelled)?;
+                    (Ok(result), Vec::new())
+                } else if is_simple(step.command()) {
                     let invocation = LegacySimpleScriptStep::from_compiled(
                         step,
                         program.frozen_arguments[index].clone(),
