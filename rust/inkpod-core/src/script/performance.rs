@@ -34,15 +34,62 @@ const ASSET_BYTES: u64 = 262_144;
 const EXPECTED_SOURCE_BYTES: usize = 371_176;
 const EXPECTED_TOKENS: usize = 7_965;
 const EXPECTED_CST_NODES: usize = 2_000;
-const EXPECTED_INPUT_NATIVE_BYTES: u64 = 23_872;
-const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 35_808;
+const EXPECTED_INPUT_NATIVE_BYTES: u64 = 24_768;
+const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 37_152;
 const EXPECTED_STATEMENTS: u64 = 774;
 const EXPECTED_INVOCATIONS: u64 = 768;
 const EXPECTED_COMMITS: u64 = 384;
 const EXPECTED_NO_OPS: u64 = 384;
-const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 90_688;
+const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 91_584;
 const EXPECTED_REPLAYED_COMMITS: u64 = 256;
-const EXPECTED_CHECKSUM: u64 = 0x1e41_e17e_8bda_22e3;
+const EXPECTED_CHECKSUM: u64 = 0x3568_e2ed_6fb8_03d5;
+
+// The normal gate uses a statically dispatched assertion-only observer. Diagnostic
+// collection is opt-in and never changes an expectation or an acceptance result.
+trait VersionChecks {
+    const OUTPUT_PREFIX: &'static str;
+
+    fn check(&mut self, field: &'static str, actual: u64, expected: u64);
+}
+
+struct EnforceExpected;
+
+impl VersionChecks for EnforceExpected {
+    const OUTPUT_PREFIX: &'static str = "inkpod-inkscript-performance";
+
+    fn check(&mut self, field: &'static str, actual: u64, expected: u64) {
+        assert_eq!(actual, expected, "InkScript {field} drift");
+    }
+}
+
+struct CollectVersionDrift {
+    mismatches: Vec<(&'static str, u64, u64)>,
+}
+
+impl VersionChecks for CollectVersionDrift {
+    const OUTPUT_PREFIX: &'static str = "inkpod-inkscript-diagnostic acceptance=false";
+
+    fn check(&mut self, field: &'static str, actual: u64, expected: u64) {
+        if actual != expected {
+            self.mismatches.push((field, actual, expected));
+        }
+    }
+}
+
+impl CollectVersionDrift {
+    fn finish(self) {
+        for (field, actual, expected) in &self.mismatches {
+            println!(
+                "inkpod-inkscript-drift field={field} actual={actual} expected={expected} actual_hex={actual:016x} expected_hex={expected:016x}"
+            );
+        }
+        assert!(
+            self.mismatches.is_empty(),
+            "InkScript diagnostic observed {} version-sensitive mismatches; the acceptance gate remains failed",
+            self.mismatches.len()
+        );
+    }
+}
 
 struct SourceFixture {
     source: InkScriptSource,
@@ -376,11 +423,26 @@ struct SemanticCounters {
 }
 
 pub(super) fn run_approved_quick() {
+    run_quick(&mut EnforceExpected);
+}
+
+pub(super) fn diagnose_current_quick() {
+    // Like the original ignored gate, this entry point is run in Release only.
+    // Reserve all four input checks plus five aggregate/hash checks before timing.
+    let mut checks = CollectVersionDrift {
+        mismatches: Vec::with_capacity(SUCCESS_ITEMS + 5),
+    };
+    run_quick(&mut checks);
+    checks.finish();
+}
+
+fn run_quick<C: VersionChecks>(checks: &mut C) {
     let source = build_source_fixture();
-    let inputs = build_inputs();
-    assert_eq!(
+    let inputs = build_inputs(checks);
+    checks.check(
+        "input_native_bytes",
         inputs.iter().map(|input| input.bytes.len()).sum::<usize>() as u64,
-        EXPECTED_INPUT_NATIVE_BYTES
+        EXPECTED_INPUT_NATIVE_BYTES,
     );
 
     let started = Instant::now();
@@ -393,7 +455,11 @@ pub(super) fn run_approved_quick() {
     let plan = build_plan(&program, &inputs);
     let usage = plan.performance_usage();
     let asset = usage.asset();
-    assert_eq!(usage.native_input_bytes(), EXPECTED_INPUT_NATIVE_BYTES);
+    checks.check(
+        "planned_input_native_bytes",
+        usage.native_input_bytes(),
+        EXPECTED_INPUT_NATIVE_BYTES,
+    );
     assert_eq!(asset.declaration_count, 1);
     assert_eq!(asset.unique_asset_count, 1);
     assert_eq!(asset.logical_payload_bytes, ASSET_BYTES);
@@ -447,9 +513,10 @@ pub(super) fn run_approved_quick() {
         .checked_add(failure_adapter.native_read_bytes)
         .and_then(|value| value.checked_add(cancel_adapter.native_read_bytes))
         .expect("native read count must fit");
-    assert_eq!(
+    checks.check(
+        "runner_native_read_bytes",
         counters.native_read_bytes,
-        EXPECTED_RUNNER_NATIVE_READ_BYTES
+        EXPECTED_RUNNER_NATIVE_READ_BYTES,
     );
 
     let mut hash = Fnv1a64::new();
@@ -464,7 +531,7 @@ pub(super) fn run_approved_quick() {
     hash_outputs_and_reopen(&mut hash, &success_adapter.outputs, &mut counters);
     assert!(failure_adapter.outputs.is_empty());
     assert!(cancel_adapter.outputs.is_empty());
-    assert_counters(&counters);
+    assert_counters(&counters, checks);
     hash_counters(
         &mut hash,
         &source,
@@ -474,14 +541,12 @@ pub(super) fn run_approved_quick() {
         &counters,
     );
     let checksum = hash.finish();
-    assert_eq!(
-        checksum, EXPECTED_CHECKSUM,
-        "InkScript semantic checksum drift"
-    );
+    checks.check("checksum", checksum, EXPECTED_CHECKSUM);
     let elapsed = started.elapsed();
 
     println!(
-        "inkpod-inkscript-performance profile=quick source_bytes={} tokens={} cst_nodes={} parameters={} bindings={} asserts={} steps={} dependency_edges={} catalog_invocations={} catalog_work_units={} asset_declarations={} unique_assets={} logical_asset_bytes={} unique_logical_asset_bytes={} inline_decoded_asset_bytes={} copied_asset_bytes={} authorized_asset_read_bytes={} input_native_bytes={} runner_native_read_bytes={} attempted_items={} binding_resolutions={} statement_evaluations={} invocations={} commits={} no_ops={} installed={} failed={} cancelled={} installed_output_bytes={} cache_free_reopens={} replayed_commits={} checksum={:016x} elapsed_ns={}",
+        "{} profile=quick source_bytes={} tokens={} cst_nodes={} parameters={} bindings={} asserts={} steps={} dependency_edges={} catalog_invocations={} catalog_work_units={} asset_declarations={} unique_assets={} logical_asset_bytes={} unique_logical_asset_bytes={} inline_decoded_asset_bytes={} copied_asset_bytes={} authorized_asset_read_bytes={} input_native_bytes={} runner_native_read_bytes={} attempted_items={} binding_resolutions={} statement_evaluations={} invocations={} commits={} no_ops={} installed={} failed={} cancelled={} installed_output_bytes={} cache_free_reopens={} replayed_commits={} checksum={:016x} elapsed_ns={}",
+        C::OUTPUT_PREFIX,
         source.source.bytes().len(),
         source.token_count,
         source.cst_node_count,
@@ -582,7 +647,7 @@ fn build_source_fixture() -> SourceFixture {
     }
 }
 
-fn build_inputs() -> Vec<InputFixture> {
+fn build_inputs(checks: &mut impl VersionChecks) -> Vec<InputFixture> {
     (0..SUCCESS_ITEMS)
         .map(|index| {
             let number = u32::try_from(index + 1).expect("quick item number must fit");
@@ -601,7 +666,7 @@ fn build_inputs() -> Vec<InputFixture> {
                 .build_procedure_file(Some(core.current_state), Some(editor))
                 .expect("quick input must encode");
             let bytes = encode_procedure_file(&file).expect("quick input bytes must encode");
-            assert_eq!(bytes.len(), 5_968);
+            checks.check("per_input_native_bytes", bytes.len() as u64, 6_192);
             let label = format!("cell{number}.inkpod");
             let path = existing(&format!("root:/in/{label}"), object, 40);
             let fingerprint = NativeInputFingerprint::new(
@@ -851,7 +916,7 @@ fn hash_outputs_and_reopen(
     }
 }
 
-fn assert_counters(counters: &SemanticCounters) {
+fn assert_counters(counters: &SemanticCounters, checks: &mut impl VersionChecks) {
     assert_eq!(counters.statement_evaluations, EXPECTED_STATEMENTS);
     assert_eq!(counters.invocations, EXPECTED_INVOCATIONS);
     assert_eq!(counters.commits, EXPECTED_COMMITS);
@@ -859,9 +924,10 @@ fn assert_counters(counters: &SemanticCounters) {
     assert_eq!(counters.installed, SUCCESS_ITEMS as u64);
     assert_eq!(counters.failed, 1);
     assert_eq!(counters.cancelled, 1);
-    assert_eq!(
+    checks.check(
+        "installed_output_bytes",
         counters.installed_output_bytes,
-        EXPECTED_INSTALLED_OUTPUT_BYTES
+        EXPECTED_INSTALLED_OUTPUT_BYTES,
     );
     assert_eq!(counters.cache_free_reopens, SUCCESS_ITEMS as u64);
     assert_eq!(counters.replayed_commits, EXPECTED_REPLAYED_COMMITS);

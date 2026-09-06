@@ -1679,11 +1679,18 @@ registryの`owner_milestone`、equivalence ID、既存test名に含まれるM07�
 
 ## 17. 実装マイルストーン
 
-次のM1が再開点である。M1–M5で現行契約との不足を解消し、M6–M14はprivate経路を完成させる。
+M1–M5で現行契約との不足を解消し、M6–M14はprivate経路を完成させる。
 M15だけが製品切替であり、M16–M18までを完了範囲とする。実装順序は番号順を基本とし、
 一工程内の独立調査・レビュー・検証は並列化する。
 
-### [ ] M1 — 現行Batchへの接続契約と版更新方針の確定
+### [x] M1 — 現行Batchへの接続契約と版更新方針の確定
+
+**利用者判断完了**：2026-09-06の「OK. 推奨案で実装してください。」により
+[接続契約](docs/inkscript-batch-connection.md) D1–D4の推奨案が承認された。
+source、typed command／target、input profile、output／preview、UI projection、版更新と後続testの
+実装契約とする。現行v2／v7の受理範囲と製品経路はまだ変更していない。
+性能基準変更・production cutover・旧形式削除はこの承認に含めない。代表検証と既知差分は
+[compatibility](docs/compatibility.md) を参照する。
 
 **範囲**
 
@@ -1704,7 +1711,14 @@ M15だけが製品切替であり、M16–M18までを完了範囲とする。�
 - 仕様、registry、test、各実装ownerへの変更一覧と、四処理の一transactionを含むparity条件が確定している。
 - 現行Batchは動作を維持し、`.inkscript`公開、旧形式削除、性能基準変更は承認に含めていない。
 
-### [ ] M2 — Release quick性能gateの現行版整合
+### [x] M2 — Release quick性能gateの現行版整合
+
+**利用者判断・検証完了**：private診断経路、5 literal更新、現行環境への同じ64–107 ms範囲の適用は
+それぞれ明示承認を得た。[承認済み基準](docs/core-benchmark-baseline.md#m2-approved-current-version-correction)に
+固定fixtureからの導出、元の失敗、全counter、診断sampleと独立した元gateの全sampleを保持する。
+元gateはwarm-up後9回すべて成功し、中央値86.8725 ms。実装はtest-onlyの診断と承認済み期待値更新で、
+製品経路・画素・形式・ABIを変更しないため追加の手動UI受入は不要。代表検証はcompatibilityに置く。
+full性能は未実装のままM17に残し、この作業ではM3へ進まない。
 
 **範囲**
 

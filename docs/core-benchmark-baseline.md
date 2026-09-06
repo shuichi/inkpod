@@ -210,12 +210,19 @@ and checksums above, so no independent regression-confirmation batch was needed.
 ## Approved InkScript quick envelope
 
 The active range ID is
-`windows-x64-ryzen-9-9950x3d-release-2026-08-15-inkscript-v1`. It applies only
-to Windows build 26200.9168 on the MSI MS-7E26 host with an AMD Ryzen 9
-9950X3D, 127.6 GiB memory, x86_64-pc-windows-msvc, Rust/Cargo 1.97.1, LLVM
-22.1.6, MSVC 19.51.36252.0, Release profile, and the Windows Balanced power
-scheme. A materially different host, target, toolchain, or power mode needs a
-separately approved range.
+`windows-x64-ryzen-9-9950x3d-release-2026-09-06-inkscript-current`. The user
+approved retaining the same **64–107 ms** bounds for Windows build 26200.9278
+on the MSI MS-7E26 host with an AMD Ryzen 9 9950X3D, x86_64-pc-windows-msvc,
+Rust/Cargo 1.98.1, LLVM 22.1.8, MSVC 19.51.36256, Release profile and Balanced
+power. The original gate's current samples are in the M2 section below.
+A materially different host, target, toolchain, or power mode needs a
+separately approved range; a new measured median does not recalculate its bounds.
+
+The earlier range ID
+`windows-x64-ryzen-9-9950x3d-release-2026-08-15-inkscript-v1` and its reference
+samples are retained below. They were approved for Windows 26200.9168,
+MS-7E26/Ryzen 9 9950X3D, 127.6 GiB, Rust/Cargo 1.97.1 / LLVM 22.1.6 /
+MSVC 19.51.36252.0, x64 Release, Balanced. They are not current-toolchain samples.
 
 The fixed quick fixture uses InkScript source ID 913, exact-current file v2/catalog v7 and replay
 epoch 29, 128 `set_plane_properties` steps, four successful 4-by-4 current-v34
@@ -227,16 +234,16 @@ public Rust API, feature, C ABI symbol, Windows route, or product file handling.
 
 | Protected score | Accepted range | Reference median | Interpretation |
 |---|---:|---:|---|
-| quick InkScript pipeline | 64–107 ms total | 85.3722 ms | compile + bind + asset freeze + six staged items + four cache-free reopens |
+| quick InkScript pipeline | 64–107 ms total | 86.8725 ms (current environment) | compile + bind + asset freeze + six staged items + four cache-free reopens |
 
 The semantic hard gates are source 371,176 bytes, 7,965 lexer tokens, 2,000 CST
 nodes, zero parameters, one binding/assert/asset, 128 steps/dependency edges/
 catalog invocations/work units, 262,144 logical/unique/inline-decoded/copied
-asset bytes, zero authorized reads, 23,872 planned input bytes, 35,808 runner
+asset bytes, zero authorized reads, 24,768 planned input bytes, 37,152 runner
 native-read bytes, six attempted items/binding resolutions, 774 statements, 768
 invocations, 384 Commit and 384 no-op outcomes, installed/failed/cancelled
-4/1/1, 90,688 installed bytes, four cache-free reopens, 256 replayed Commits,
-and checksum `1e41e17e8bda22e3`. The failure reason must be exactly Save; neither
+4/1/1, 91,584 installed bytes, four cache-free reopens, 256 replayed Commits,
+and checksum `3568e2ed6fb803d5`. The failure reason must be exactly Save; neither
 negative probe may publish an output.
 
 The counters and checksum above are the fixed assertions in the checked-in
@@ -258,6 +265,144 @@ automatically.
 
 The full fixture is reserved and is not an executable acceptance gate; see
 [Reserved InkScript full fixture](#reserved-inkscript-full-fixture).
+
+### M2 approved current-version correction
+
+M1's D1–D4 implementation contract was approved on 2026-09-06. That approval
+does not change this performance contract. The original Release quick test at
+source `1c65f9db029de56034e2a501c55ce472f708e28b` was rerun without harness or
+expectation changes. It exited **101**, with **6,192 actual / 5,968 expected**
+at `script/performance.rs:604`, before `Instant::now()`. There is no elapsed
+pipeline sample from this failed process; its test duration is not a sample.
+
+The current host is the same MS-7E26 / Ryzen 9 9950X3D family, using Balanced
+power, but Windows build **26200.9278**, Rust/Cargo **1.98.1**, LLVM **22.1.8**
+and MSVC **19.51.36256** differ from the original reference environment.
+Diagnostic observations were not counted as a pass against that environment.
+The user subsequently approved this current environment with the same
+64–107 ms bounds; no envelope was widened.
+
+The 224-byte increase comes from two persisted tools, `EffectLineConnect` and
+`EffectLineWidth`, in [`EditorTool::ALL`](../rust/inkpod-core/src/editor/model.rs).
+Each contributes **52 bytes** to the colors sequence and **60 bytes** to the
+diameters sequence, including sequence-element lengths and frame/field headers
+([editor codec](../rust/inkpod-core/src/editor/codec.rs)). Thus
+`2 × (52 + 60) = 224`. Each native file contains one EDIT record, and 224 is
+divisible by the container's 8-byte alignment. This is format-dependent state
+size, not an increase in the quick script's operations, images or asset payload.
+
+| Fixed assertion | Previous value | Approved current value | Derivation / evidence |
+| --- | ---: | ---: | --- |
+| Per-input native length | 5,968 | 6,192 | All four fixed UUID inputs encoded independently through the public save API |
+| Planned input bytes | 23,872 | 24,768 | Four × 6,192 |
+| Runner native-read bytes | 35,808 | 37,152 | Six attempts × 6,192; attempt count remains a separate hard assertion |
+| Installed output bytes | 90,688 | 91,584 | Four × 22,896, confirmed by public property calls and native save; one EDIT record per output |
+| Full pipeline checksum | `1e41e17e8bda22e3` | `3568e2ed6fb803d5` | All ten authorized diagnostic processes used the unchanged hash walk and agreed |
+
+Public fixture inspection used `new_cell_with_uuid(4, 4, DEFAULT_DPI_MILLI,
+DEFAULT_DPI_MILLI, 0x1001..0x1004)` followed by
+`capture_document_save().prepare_native_save(false, ...)` and the current encoder.
+This uses the same current-state/editor savepoint pair as `build_inputs`, without
+changing the benchmark. Each input is header 128 + directory 640 + META 648 +
+GENS 848 + EDIT 3,922 + alignment 6 = **6,192 bytes**. The plain BLAKE3 values
+below use the same hash as `NativeInputFingerprint` in the fixture.
+
+| Fixture UUID | Native bytes | BLAKE3 |
+| --- | ---: | --- |
+| `0x1001` | 6,192 | `45edce860e6270ea0d6b2e63f8690f9890edd65c7ecaf4e6e18a2c161cf7666e` |
+| `0x1002` | 6,192 | `f6c6312bfce7b24d9961e9e65b61446090b4beebacb627c256ee52dd66a726d3` |
+| `0x1003` | 6,192 | `61fbb27cb546819f50b261f54a35596f5019f158958fd972ecccc1acaa12a144` |
+| `0x1004` | 6,192 | `c97e147a3ac7ea4b78a404280db562d8317a9440d33570ef7837572e751ce476` |
+
+An independent public-API diagnostic then applied the same 128 property calls
+and `probe_name` sequence to each input. Every output had 64 changes, 64 no-ops,
+64 history entries/cursor, full cache-free replay, and clean document/editor
+savepoints after reopen. Each output adds 16,702 PROC bytes (64 records) and
+two alignment bytes to the input: **22,896 bytes**. This Debug fixture inspection
+is not Release timing evidence and does not cover the runner's Save/cancel probes.
+
+| Fixture UUID | Output bytes | Output BLAKE3 |
+| --- | ---: | --- |
+| `0x1001` | 22,896 | `2e962f1483909ed1d2faf39d1c52804c64e704e74e5c619f28384b4b0deccc04` |
+| `0x1002` | 22,896 | `4cf8a5abac15b208944d0ca584d05f7a66b0d6f24c68c0eccb2b5d1ba2396f90` |
+| `0x1003` | 22,896 | `3072ef891a980c500f8631fa7060b9cd22d7c170393cb9aca115386f5d81a7e5` |
+| `0x1004` | 22,896 | `dd6c8ba2ed5ad47b3192156ae6b507bde5abf770616a03b17427f2bbfa72ec69` |
+
+The checksum also includes the current static compilation digest, native bytes,
+document/editor digests, reports, history/IDs, savepoints and counters. Catalog,
+epoch, native format and editor/digest changes therefore affect more than byte
+lengths. The old checksum must not be retained through a hash adjustment, nor
+replaced with a value obtained after dropping any of those observations.
+
+**Diagnostic collection was explicitly authorized on 2026-09-06.** The existing
+fail-fast gate and all its expected values remain in place. The private
+`current_quick_performance_diagnostic` test reuses the existing execution and
+hash walk, records only the four version-dependent byte fields and checksum,
+and fails after reporting every mismatch. Its output is marked
+`inkpod-inkscript-diagnostic acceptance=false`; it is not a passing gate.
+Every non-byte assertion, Save/cancel classification, nonpublication check and
+cache-free reopen remains fail-fast. The observer reserves all nine mismatch
+slots before timing and prints after the original interval ends. No public
+API, feature, ABI, workload, source padding, hash algorithm, timed interval or
+acceptance envelope changed. Both ignored test entries remain Release-only
+execution procedures; Debug workspace success does not execute either one.
+
+One warm-up process measured **87,032,500 ns** and was discarded. All retained
+samples below are independent processes of the same Release test binary on
+the current configuration. Every process, including warm-up, exited **101**
+after all nine expected drift observations: four per-input lengths, summed
+input bytes, plan input bytes, runner read bytes, installed bytes and checksum.
+No non-byte assertion failed. The ordinary gate also independently retained
+its original 6,192/5,968 failure after the observer refactor.
+
+| Complete diagnostic samples in run order (ns) | Median (ns) |
+| --- | ---: |
+| 87,118,100; 86,392,200; 86,169,600; 86,796,100; 87,667,100; 86,374,300; 87,248,300; 86,735,000; 86,882,800 | 86,796,100 |
+
+Every sample had exactly the same non-time fields: source/token/CST
+371,176/7,965/2,000; parameters/bindings/asserts 0/1/1; steps/dependency edges/
+catalog invocations/catalog work units 128 each; asset declarations/unique
+assets 1/1; logical/unique/decoded/copied bytes 262,144 each; authorized asset
+read bytes 0; planned input/read bytes 24,768/37,152; attempted items/binding
+resolutions 6/6; statements/invocations 774/768; Commit/no-op 384/384;
+installed/failed/cancelled 4/1/1; installed bytes 91,584; cache-free reopens/
+replayed Commits 4/256; checksum `3568e2ed6fb803d5`.
+
+**The user approved these five literal changes in `performance.rs` on
+2026-09-06, after reviewing the diagnostic samples and counters.** They are
+applied; all remaining assertions and the diagnostic observer are unchanged:
+
+```diff
+-const EXPECTED_INPUT_NATIVE_BYTES: u64 = 23_872;
++const EXPECTED_INPUT_NATIVE_BYTES: u64 = 24_768;
+-const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 35_808;
++const EXPECTED_RUNNER_NATIVE_READ_BYTES: u64 = 37_152;
+-const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 90_688;
++const EXPECTED_INSTALLED_OUTPUT_BYTES: u64 = 91_584;
+-const EXPECTED_CHECKSUM: u64 = 0x1e41_e17e_8bda_22e3;
++const EXPECTED_CHECKSUM: u64 = 0x3568_e2ed_6fb8_03d5;
+-            checks.check("per_input_native_bytes", bytes.len() as u64, 5_968);
++            checks.check("per_input_native_bytes", bytes.len() as u64, 6_192);
+```
+
+The user separately approved the same **64–107 ms** numeric envelope on this
+current environment. After applying the five literals and rebuilding Release,
+the original `approved_quick_performance_contract` was run in ten independent
+processes: one discarded warm-up (**87,978,900 ns**) and the nine samples below.
+All ten exited **0**, with the exact current counters/checksum and no diagnostic
+observer. The retained median **86,872,500 ns** satisfies the approved envelope;
+there was no upper-bound breach requiring a confirmation batch.
+
+| Complete accepted current-environment samples in run order (ns) | Median (ns) |
+| --- | ---: |
+| 87,509,300; 86,171,500; 86,318,800; 86,199,500; 86,182,500; 86,872,500; 87,284,400; 88,070,600; 87,034,000 | 86,872,500 |
+
+The old reference samples remain unchanged. Diagnostic samples and their failed
+exits remain distinct from these successful original-gate samples. Future
+format changes follow the same order: preserve failure → derive version-only
+bytes → obtain any necessary diagnostic authorization → retain all counters
+and samples → approve exact expectations/environment → independently rerun.
+The full fixture remains reserved for M17; this correction cannot complete it.
 
 ## Approved output-color-guard envelope
 

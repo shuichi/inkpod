@@ -3446,6 +3446,12 @@ fn approved_quick_performance_contract() {
     super::performance::run_approved_quick();
 }
 
+#[test]
+#[ignore = "release-only InkScript diagnostic; version drift remains a failure"]
+fn current_quick_performance_diagnostic() {
+    super::performance::diagnose_current_quick();
+}
+
 fn light_table_properties(
     opacity_milli: u32,
     display_mode: LightTableDisplayMode,
