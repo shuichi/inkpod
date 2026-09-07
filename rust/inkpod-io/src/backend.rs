@@ -268,14 +268,14 @@ pub(crate) fn create_authority_child(
         Err(IoError::UnsupportedAtomicPublication)
     }
 }
-pub(crate) fn open_authority_source(path: &Path) -> IoResult<File> {
+pub(crate) fn open_authority_source(path: &Path, overwrite: bool) -> IoResult<File> {
     #[cfg(windows)]
     {
-        windows::open_authority_source(path)
+        windows::open_authority_source(path, overwrite)
     }
     #[cfg(not(windows))]
     {
-        let _ = path;
+        let _ = (path, overwrite);
         Err(IoError::InvalidInput("guarded publication is unsupported"))
     }
 }

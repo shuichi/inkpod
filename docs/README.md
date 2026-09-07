@@ -19,6 +19,7 @@
 | InkScript の言語・runtime・公開 gate | [INKSCRIPT.md](../INKSCRIPT.md): 現行契約と未解除の公開・cutover 条件。16–18 節の停止・確認・prompt は当該 milestone workflow の明示的な再開時だけ適用 |
 | InkScript の対応関係 | [inkscript-traceability.md](inkscript-traceability.md): 要件、registry、owner、証拠の対応 |
 | InkScript と現行 Batch の接続契約 | [inkscript-batch-connection.md](inkscript-batch-connection.md): M1で承認された後続実装契約、source例、入力profile、出力・編集導線、版更新と受入条件 |
+| InkScript の上書き保存 | [inkscript-overwrite-design.md](inkscript-overwrite-design.md): TxFを使わないatomic rename、保存直前の外部変更検出と検査後の競合保証の境界 |
 | InkScript command signature | [inkscript-command-reference.md](inkscript-command-reference.md): catalog からの生成物。手編集しない |
 | Windows release の実機確認 | [windows-release-checklist.md](windows-release-checklist.md): 再現可能な実機検証手順 |
 | 配布物の生成 | [windows-packaging.md](windows-packaging.md): package の生成・検証・公開手順 |

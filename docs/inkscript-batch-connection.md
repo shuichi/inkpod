@@ -270,8 +270,13 @@ renderer は immutable snapshot だけを所有する。
 
 I/O は既存共有 Rust manager／private platform backend へ統合する。Windows は authority UI と
 engine queue を担当し、codec・selector・画像処理・第二の I/O engine を持たない。
-同 volume atomic install、最終 identity/fingerprint 検証、lock、temporary guard、no-lost-update は
-既存 private Windows authority から移しても弱めない。unsupported filesystem は明示拒否する。
+同volume atomic install、最終identity/fingerprint検証、application内lock、temporary guardを共有する。
+overwriteではsourceの通常のwrite／truncateを排除するguardを最終fingerprint照合からreplaceまで保持する。
+WindowsではREAD／DELETE共有を許可し、WRITE共有を許可しない。destination pathのidentityもreplace直前に
+照合し、観測した変更はstaleとして拒否する。最終検査後の外部rename／delete／別objectへの置換は完全には
+検出せず、厳密なno-lost-updateは保証しない。公開後の無条件rollbackや自動上書きretryは行わない。
+詳細は[InkScript 7.9](../INKSCRIPT.md#79-output)と[上書き保存方式](inkscript-overwrite-design.md)に従う。
+書込み排除またはatomic installを提供できないfilesystemは明示拒否し、TxFには依存しない。
 
 ## D4：source と四処理 pane
 
@@ -326,7 +331,7 @@ M3→M4で別々のserialized変更が入れば各変更で版を更新し、計
 | --- | --- |
 | M3 | format program/types/fragment と Core `inkscript_public`／Batch public contracts。四処理単独・組合せと先行CreatePlane/Resize→Batchを direct/script/export→再実行で比較。前記独立期待pixel/mask、canonical列・一Commit・Undo/Redo、全namespace ID、dirty/revision、save/reopen、cache-free replay。missing/error/skip、全無効、全pair無効、disabled参照とmissing producer、UUID/owner違反とskip、duplicate/overlap、MainLine/hidden/non-editable、depth、cancel/stale/overflow/resource/allocation failure |
 | M4 | Batch/InkScript public I/O tests。両profileの順・range・重複・pathless・snapshot差、各codec、template/collision、active一件・複数step拒否、newtab容量、反復job/重複sourceでの新identity/path/savepoints、mask出力拒否。preview全copy後実行、失敗placeholder、cleanup-before-publication、元target固定、continue/stop/cancelと成功済みitem保持 |
-| M5 | FFI source/Batch/execution tests、C11/C++20 header/export、private Windows authority/engine tests。bounded copy/take/release、wrong-thread、stale generation、close/shutdown/queue saturation、save failure、path race、no-lost-update |
+| M5 | FFI source/Batch/execution tests、C11/C++20 header/export、private Windows authority/engine tests。bounded copy/take/release、wrong-thread、stale generation、close/shutdown/queue saturation、save failure、path race、最終fingerprint検証とsource書込み排除、検査後のname race境界 |
 | M7–M9 | lossless source↔工程UI↔save/reopen、pair extractionのUUID/generation・scalar/RGBA8/16・ambiguity・Cancel、日英/keyboard/layout。INKSCRIPT 16.4 のcanonical/state/composite/history/ID/mask/savepoint/report/work counter全比較 |
 
 上表は **実装時の検証要件**であり、本 M1 で新機能の成功を主張するものではない。

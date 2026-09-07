@@ -1011,13 +1011,15 @@ file v3 の `output` は policy ごとの closed variant とし、別 variant �
 source/destination identityとopen-session registry generationをplan時とinstall直前に再検査する。
 overwriteにはsource上のpolicyだけでなく、planへ一回限りで束縛したpreview/confirmation tokenが必須である。
 
-file identityだけの再検査では、同一identityのまま行われる外部writeを防げない。`explicit_overwrite`は、
-planned fingerprintに対するno-lost-update guardをOS adapterが提供できるfilesystemだけで許可する。guardは
-最終fingerprint検証からatomic replaceのlinearizationまで、同一identityへのcontent変更、truncate、rename、
-delete、置換を排他するか確実に検出しなければならない。RunTaskはguard取得後にvolume/file identity、length、
-content digest、native document UUID、利用可能なchange tokenを再検証し、planned値と違えば`stale_input`として
-installしない。単なるcheck-then-replaceしか提供できないfilesystemではPlanTaskが
-`unsupported_atomic_overwrite`として拒否する。raster input を native bytes で上書きしてはならない。
+`explicit_overwrite`は、保存直前の完全なfingerprint照合とatomic replaceを組み合わせる。
+RunTaskはsourceの通常のwrite／truncateを排除するguardを取得し、volume/file identity、length、content digest、
+native document UUID、利用可能なchange tokenをplanned値と照合する。guardは検証からreplaceのlinearizationまで
+保持し、WindowsではREAD共有とDELETE共有を許可してWRITE共有を許可しない。replace直前にdestination pathが
+指すidentityも再検査し、planned値との差を観測した場合は`stale_input`としてinstallしない。
+最終検査後の外部rename／delete／別objectへの置換は完全には検出しない。この競合では後から成功した置換が
+destination名に残る可能性があり、厳密なno-lost-updateは保証しない。公開後の再検査による無条件rollbackや
+最新fileへの自動上書きretryは行わない。通常の書込み排除とatomic replaceを提供できないfilesystemでは
+PlanTaskが`unsupported_atomic_overwrite`として拒否する。raster inputをnative bytesで上書きしてはならない。
 
 file v3 は M1 承認済みの次の三 variant も持つ。
 
@@ -1114,16 +1116,19 @@ RunTaskは作成直前にcancel、authority
 generation、confirmation tokenを再検査し、検証済みdestination parent handle配下へhandle-relative、
 no-follow、exclusive createで作る。名前衝突のretryはboundedとする。writer handleはwrite/flush後にcloseし、
 その後は検証済みparent-directory handle、temporaryのrelative component、file identityを保持する。installまたは
-cleanup直前にparent handle相対・no-followで非writing control handleを取得し直し、identityを照合して、
-外部write、delete、renameをlinearizationまたはcleanup完了まで排他または検出する。string absolute pathから再openしない。
+cleanup直前にno-followで非writing control handleを取得し直し、identityを照合して、
+外部write、delete、renameをlinearizationまたはcleanup完了まで排他または検出する。
+再openはparent handle相対を基本とするが、検証済みabsolute pathも許可する。その場合も親authorityと
+temporary identityを照合し、別objectへのwrite／install／cleanupを拒否する。absolute pathの一致だけを
+同一性の根拠にしない。この機構上の選択は、下記のatomic installと7.9のsource競合保証を変更しない。
 このguarded objectを条件にatomic install/cleanupできないfilesystemでは、adapterがtemporary作成前に
 `unsupported_atomic_install`として拒否する。parent identity変更、reparse化、authority失効、temporary identity
 不一致は`stale_destination`としてinstallせず、別identityをcleanupしない。
 
 まだ存在しないdestinationのplan identityは、handleで解決した最も近い既存parentのvolume/file identity、
 そこからの検証済みrelative component列、最終名、`expected_absent`を組にする。install直前に同じparent
-identityとabsenceを再検査し、non-overwriteはatomic create-if-absent、overwriteは検証済み同一fileへの
-atomic replaceだけを許可する。
+identityとabsenceを再検査し、non-overwriteはatomic create-if-absent、overwriteは直前にsourceと同一identityと
+確認したdestinationへのatomic replaceだけを許可する。最終検査後の名前の競合は7.9の保証境界に従う。
 
 missing intermediate componentは検証済みparent handleから一componentずつhandle-relative/no-followで
 openまたはcreateし、各componentのsymlink/reparse pointを拒否する。stringでabsolute pathを再結合して
@@ -1147,8 +1152,9 @@ identityを検証して再利用できる。外部主体が作成・置換した
 5. file出力は選択codecで完全encodeする。active／new_tabsは7.9のstaged resultを作る。
 6. file出力ではcancellation、authority、confirmation tokenを再検査し、検証済みdestination parent handle配下の
    同一volume exclusive temporary fileをwrite/flush/closeする。
-7. file出力のoverwriteではno-lost-update guard下の完全なsource fingerprint、全file policyではdestination identity、
-   open-session registry、authority、confirmation tokenを再検査してatomic installする。
+7. file出力のoverwriteでは7.9の書込み排除guard下で完全なsource fingerprintを照合し、全file policyでは
+   destination identity、open-session registry、authority、confirmation tokenを直前に再検査してatomic installする。
+   最終検査後の外部rename／別objectへの置換について、7.9を超える競合検出は保証しない。
 
 canonical profile の `CoreSessionSnapshot` は単なる`CellDocument` cloneから新Genesisを作らず、native open/cache-free replayと
 同じvalidation経路でstaged Coreへ復元する。既存journal/history/allocatorへscript Commitをappendし、
@@ -1813,17 +1819,18 @@ checksum 一 literal の更新は明示承認を得て適用し、[元の Releas
 - no-op、全無効、missing／hidden／non-editable、形式不一致、重複、cancel／overflowで部分commitしない。
 - 必要なfile／catalog／native／replay更新と旧版拒否が同じ変更で揃い、製品UIへはまだ接続しない。
 
-### [!] M4 — 製品入出力・画像previewのRust実行経路
+### [x] M4 — 製品入出力・画像previewのRust実行経路
 
-**未完了（修正が必要）**：承認済み D2/D3 の Core-only 入出力・staged result・画像preview を実装した。
+**Core-only実装・検証完了**：承認済み D2/D3 の入出力・staged result・画像preview を実装した。
 file／fragment v3、catalog v8／75 command、epoch 29／native v34／ABI v34 を使用する。
-共有 Windows I/O の guarded overwrite は、外部の write／rename を禁止した source handle と
-原子的置換の両立が未解決で、成功契約の test が失敗している。保護を外す fallback は追加せず、
-この工程の完了条件を満たしたとは扱わない。file v3 による Release quick の checksum 一値更新は
-明示承認を得て適用し、[元の gate の独立検証と全sample](docs/core-benchmark-baseline.md#m4-file-v3-checksum-decision)
-を記録した。性能基準は維持し、上書き処理の未解決事項と M4 の状態は変えない。
-代表検証・既知差分は [compatibility](docs/compatibility.md) に記録する。
-次回は M4 の修正と検証だけを行い、M5・製品 cutover へ進まない。
+共有 Windows I/O の上書きを、承認済みの保存直前fingerprint検査・sourceの通常の書込み排除・atomic renameへ
+修正し、成功・再open・cancel・外部変更検出・install失敗時の非公開をpublic APIから検証した。
+最終検査後の外部name差替えは7.9の保証外とし、[保存方式](docs/inkscript-overwrite-design.md)に従いTxFは使わない。
+file v3によるRelease quickの承認済みchecksum一値更新と
+[性能基準・全sample](docs/core-benchmark-baseline.md#m4-file-v3-checksum-decision)は維持する。
+保証範囲のユーザー判断は完了し、今回の変更はCore-onlyで新しい製品UIを含まないため、追加の手動UI受入は不要。
+代表検証・既存CoreHostの間欠失敗・未検証範囲は [compatibility](docs/compatibility.md) に記録する。
+M5・製品cutoverは未着手のままとする。
 
 **範囲**
 
@@ -1848,7 +1855,8 @@ file／fragment v3、catalog v8／75 command、epoch 29／native v34／ABI v34 �
 - M3–M4のsource／plan／report／staged resultを必要なbounded C ABIへ接続する。
   opaque handle、二段階copy、take／release、immutable cross-thread DTOとowner threadを固定する。
 - 既存private InkScript engineを拡張し、file identity・排他・原子的置換を共有Rust managerへ委譲する。
-  既存Windows private authority adapterの最終identity検証とno-lost-update／temporary guardを移管先でも満たす。
+  最終identity／fingerprint検証、sourceの通常の書込み排除、temporary guardを移管先でも満たし、
+  最終検査後の外部name差替えは7.9の保証境界に従う。
 - active／新規tab／previewのpublicationを発行時contextへ束縛し、status bar共通progress／cancelへ接続する。
   pane登録、製品file filter、公開commandの切替は行わない。
 

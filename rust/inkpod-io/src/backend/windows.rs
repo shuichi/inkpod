@@ -217,10 +217,14 @@ pub(super) fn open_authority_directory(path: &Path, write: bool) -> IoResult<Fil
     Ok(file)
 }
 
-pub(super) fn open_authority_source(path: &Path) -> IoResult<File> {
+pub(super) fn open_authority_source(path: &Path, overwrite: bool) -> IoResult<File> {
+    // Deny WRITE sharing through the final digest check and publication. Only
+    // overwrite allows DELETE sharing, which the POSIX rename needs while this
+    // source handle remains open. It also permits foreign name changes; the
+    // caller rechecks the path, but cannot exclude changes after that check.
     let file = OpenOptions::new()
         .read(true)
-        .share_mode(1)
+        .share_mode(if overwrite { 5 } else { 1 })
         .custom_flags(0x0020_0000)
         .open(path)?;
     object_identity(&file)?;
@@ -410,7 +414,7 @@ pub(super) fn rename_with_authority(
     // SAFETY: aligned storage has the exact header plus UTF-16 filename extent;
     // both owned File handles and all buffers outlive this synchronous NT call.
     let result = unsafe {
-        // Request POSIX replacement while retaining the deny-write/delete guard.
+        // Request POSIX replacement while retaining the source WRITE exclusion.
         // A sharing conflict fails closed; never release the guard and retry.
         (*record).flags = if overwrite { 3 } else { 0 };
         (*record).root_directory = parent.as_raw_handle();

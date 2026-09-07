@@ -155,7 +155,8 @@ fn shared_explicit_overwrite_remains_supported_and_aliases_fail_before_work() {
     }
     let root = Directory::new();
     let path = root.0.join("A001.inkpod");
-    core(902).save(&path).unwrap();
+    let mut input = core(902);
+    input.save(&path).unwrap();
     let program = program(
         "canonical",
         "file \"A001.inkpod\";",
@@ -168,6 +169,12 @@ fn shared_explicit_overwrite_remains_supported_and_aliases_fail_before_work() {
         report.items[0].outcome,
         ScriptItemOutcome::Installed,
         "{report:?}"
+    );
+    let mut reopened = Core::new();
+    reopened.open(&path).unwrap();
+    assert_eq!(
+        reopened.document_state_digest().unwrap(),
+        input.document_state_digest().unwrap()
     );
     fs::hard_link(&path, root.0.join("alias.inkpod")).unwrap();
     let duplicate = program_source_alias();

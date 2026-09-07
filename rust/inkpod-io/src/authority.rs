@@ -193,6 +193,11 @@ impl IoManager {
     /// the captured parent handle. No-replace installs never overwrite a race.
     /// Every file source is finally revalidated; overwrite requires the source
     /// path to equal destination. A snapshot-only input may omit file source.
+    /// Overwrite retains a guard against source write opens through installation,
+    /// but permits source rename/delete so the atomic replacement can succeed.
+    /// Name changes observed at the final authority check reject publication;
+    /// an external replacement after that check can still be overwritten. This
+    /// is an optimistic conflict check, not an atomic compare-and-replace.
     /// Cancellation before install deletes the temporary; successful publication
     /// is never reported as cancelled. Other items are outside this transaction.
     pub fn publish_guarded(
@@ -307,7 +312,7 @@ impl IoManager {
                 return Err(IoError::ConfirmationRequired);
             }
             let guard = if let Some(expected) = &source {
-                let mut file = backend::open_authority_source(&expected.path)?;
+                let mut file = backend::open_authority_source(&expected.path, overwrite)?;
                 if backend::stamp(&file)? != expected.stamp {
                     return Err(IoError::ConfirmationRequired);
                 }
@@ -340,7 +345,9 @@ impl IoManager {
             if self.observe_path_authority(&destination.path, context)? != *destination {
                 return Err(IoError::ConfirmationRequired);
             }
-            // Retain the source's OS writer/delete exclusion through rename.
+            // Retain source WRITE exclusion through rename. An overwrite source
+            // shares DELETE, so this final path check detects observed name
+            // changes but cannot exclude a later external name replacement.
             if let Some(expected) = &source {
                 if backend::stamp(&File::open(&expected.path)?)? != expected.stamp {
                     return Err(IoError::ConfirmationRequired);

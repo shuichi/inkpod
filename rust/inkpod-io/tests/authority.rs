@@ -122,6 +122,176 @@ fn guarded_publication_installs_once_and_rejects_collision_stale_digest_and_pare
 }
 
 #[test]
+fn guarded_overwrite_excludes_writers_and_cancels_without_publication() {
+    let manager = IoManager::new(IoConfig::default()).unwrap();
+    if !guarded_available(&manager) {
+        return;
+    }
+    for cancel_after_guard in [true, false] {
+        let context = JobContext::new();
+        let root = directory();
+        let path = root.join("original.inkpod");
+        let moved = root.join("foreign.inkpod");
+        fs::write(&path, b"original").unwrap();
+        let authority = manager.observe_path_authority(&path, &context).unwrap();
+        let loaded = manager.read_bytes(&path, 100, &context).unwrap();
+        let proof = PublishSource {
+            path: path.clone(),
+            stamp: loaded.stamp(),
+            digest: *blake3::hash(loaded.bytes()).as_bytes(),
+        };
+        let mut saw_guard = false;
+        let result = manager.publish_guarded(
+            &authority,
+            Some(proof),
+            b"replacement",
+            &context,
+            &mut || {
+                // A separate open is harmless before the guard is acquired:
+                // no truncate/write is requested. Once denied, the source
+                // content guard must stay held through cancellation or install.
+                if fs::OpenOptions::new().write(true).open(&path).is_err() {
+                    saw_guard = true;
+                    assert_eq!(fs::read(&path).unwrap(), b"original");
+                    cancel_after_guard
+                } else {
+                    false
+                }
+            },
+        );
+        assert!(saw_guard, "the final source validation must hold its guard");
+        assert_eq!(
+            result.unwrap(),
+            if cancel_after_guard {
+                GuardedPublishOutcome::CancelledBeforeInstall
+            } else {
+                GuardedPublishOutcome::Installed
+            }
+        );
+        assert_eq!(
+            fs::read(&path).unwrap(),
+            if cancel_after_guard {
+                &b"original"[..]
+            } else {
+                &b"replacement"[..]
+            }
+        );
+        let final_authority = manager.observe_path_authority(&path, &context).unwrap();
+        if cancel_after_guard {
+            assert_eq!(final_authority, authority);
+        } else {
+            assert_ne!(final_authority.object, authority.object);
+        }
+        assert!(!moved.exists());
+        assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+        // All guards must be released on both cancellation and success.
+        fs::write(&path, b"after publication").unwrap();
+        fs::rename(&path, &moved).unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn guarded_overwrite_rejects_name_changes_observed_before_install() {
+    let manager = IoManager::new(IoConfig::default()).unwrap();
+    if !guarded_available(&manager) {
+        return;
+    }
+    for replace_name in [false, true] {
+        let context = JobContext::new();
+        let root = directory();
+        let path = root.join("original.inkpod");
+        let moved = root.join("foreign.inkpod");
+        fs::write(&path, b"original").unwrap();
+        let authority = manager.observe_path_authority(&path, &context).unwrap();
+        let loaded = manager.read_bytes(&path, 100, &context).unwrap();
+        let proof = PublishSource {
+            path: path.clone(),
+            stamp: loaded.stamp(),
+            digest: *blake3::hash(loaded.bytes()).as_bytes(),
+        };
+        let mut changed = false;
+        let result = manager.publish_guarded(
+            &authority,
+            Some(proof),
+            b"must not install",
+            &context,
+            &mut || {
+                if !changed && fs::OpenOptions::new().write(true).open(&path).is_err() {
+                    // Overwrite permits DELETE sharing so its own atomic rename
+                    // can succeed. A foreign name change before the final path
+                    // check must be rejected, even though the open source's
+                    // identity and digest still match the planned bytes.
+                    fs::rename(&path, &moved).unwrap();
+                    if replace_name {
+                        fs::write(&path, b"external").unwrap();
+                    }
+                    changed = true;
+                }
+                false
+            },
+        );
+        assert!(changed);
+        assert!(matches!(
+            result,
+            Err(inkpod_io::IoError::ConfirmationRequired)
+        ));
+        assert_eq!(fs::read(&moved).unwrap(), b"original");
+        if replace_name {
+            assert_eq!(fs::read(&path).unwrap(), b"external");
+        } else {
+            assert!(!path.exists());
+        }
+        assert_eq!(
+            fs::read_dir(&root).unwrap().count(),
+            1 + usize::from(replace_name)
+        );
+        fs::write(&moved, b"guard released").unwrap();
+        fs::remove_dir_all(root).unwrap();
+    }
+}
+
+#[test]
+fn guarded_overwrite_install_failure_preserves_source_and_removes_temporary() {
+    let manager = IoManager::new(IoConfig::default()).unwrap();
+    if !guarded_available(&manager) {
+        return;
+    }
+    let context = JobContext::new();
+    let root = directory();
+    let path = root.join("readonly.inkpod");
+    fs::write(&path, b"original").unwrap();
+    let original_permissions = fs::metadata(&path).unwrap().permissions();
+    let mut permissions = original_permissions.clone();
+    permissions.set_readonly(true);
+    fs::set_permissions(&path, permissions).unwrap();
+    let authority = manager.observe_path_authority(&path, &context).unwrap();
+    let loaded = manager.read_bytes(&path, 100, &context).unwrap();
+    let result = manager.publish_guarded(
+        &authority,
+        Some(PublishSource {
+            path: path.clone(),
+            stamp: loaded.stamp(),
+            digest: *blake3::hash(loaded.bytes()).as_bytes(),
+        }),
+        b"must not install",
+        &context,
+        &mut || false,
+    );
+    let final_authority = manager.observe_path_authority(&path, &context).unwrap();
+    fs::set_permissions(&path, original_permissions).unwrap();
+    assert!(matches!(
+        result,
+        Err(inkpod_io::IoError::UnsupportedAtomicPublication)
+    ));
+    assert_eq!(final_authority, authority);
+    assert_eq!(fs::read(&path).unwrap(), b"original");
+    assert_eq!(fs::read_dir(&root).unwrap().count(), 1);
+    fs::write(&path, b"guard released").unwrap();
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
 fn folder_publication_revalidates_source_after_temporary_write() {
     let manager = IoManager::new(IoConfig::default()).unwrap();
     if !guarded_available(&manager) {
