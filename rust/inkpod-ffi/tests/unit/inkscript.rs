@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "inkscript_shared.rs"]
+mod shared;
+
 fn source_text() -> &'static [u8] {
     br#"inkscript 3;
 requires { procedure_catalog = 8; replay_epoch = 29; }
@@ -146,7 +149,7 @@ fn inkscript_batch_catalog_compiles_with_owned_handles_and_rejects_catalog_seven
 
 #[test]
 fn inkscript_source_parse_copies_diagnostics_and_text_in_batches() {
-    assert_eq!(INKPOD_ABI_VERSION, 34);
+    assert_eq!(INKPOD_ABI_VERSION, 35);
     assert_send_sync::<InkpodInkScriptSource>();
     assert_send_sync::<InkpodInkScriptProgram>();
     assert_send_sync::<InkpodInkScriptFragment>();

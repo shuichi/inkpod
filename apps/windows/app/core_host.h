@@ -221,6 +221,8 @@ public:
     // parse/compile/plan/run. PlanReady and terminal results are delivered as
     // pointer-free kCoreInkScriptNotification values.
     bool EnqueueInkScript(InkScriptEngineRequest request) noexcept;
+    [[nodiscard]] bool QueryInkScriptProgress(std::uint64_t job_id,
+        const CommandContext& context, InkpodTaskInfo& output) noexcept;
     bool ConfirmInkScript(
         std::uint64_t job_id,
         const CommandContext& context,

@@ -1224,8 +1224,9 @@ The current `.inkscript` file and `inkscript_fragment` header version is **3**.
 catalog/owner v8 (75 commands). Version 2 files and fragments are rejected;
 there is no migration reader. The approved input profile and closed output
 variants extend the file envelope without changing any canonical invocation,
-native payload, replay semantics or C ABI. Native v34, replay epoch 29 and
-ABI v34 therefore remain current. Catalog/owner metadata identifies file v3;
+native payload or replay semantics. Native v34 and replay epoch 29 remain current;
+ABI v35 connects the shared I/O and staged publication boundary separately.
+Catalog/owner metadata identifies file v3;
 the command contract and owner assignments remain unchanged.
 
 `inputs.profile` selects `canonical` by default or explicit `batch` ordering,

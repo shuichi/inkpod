@@ -1,6 +1,7 @@
 #include "inkscript_engine_smoke.h"
 
 #include <windows.h>
+#include <commctrl.h>
 
 #include <array>
 #include <chrono>
@@ -9,7 +10,9 @@
 #include <thread>
 
 #include "core_host.h"
+#include "application_host.h"
 #include "renderer/canvas.h"
+#include "ui/inkscript_progress.h"
 
 namespace inkpod::app {
 namespace {
@@ -60,7 +63,8 @@ bool WaitFor(
     CoreHost& host,
     std::uint64_t job_id,
     InkScriptEngineNotificationKind kind,
-    CoreNotification& output) noexcept {
+    CoreNotification& output,
+    windows::ui::InkScriptProgressPresentation& progress) noexcept {
     const auto deadline = std::chrono::steady_clock::now()
         + std::chrono::seconds(15);
     do {
@@ -82,6 +86,9 @@ bool WaitFor(
             if (notification.kind != CoreNotificationKind::InkScript
                 || notification.inkscript.job_id != job_id) {
                 continue;
+            }
+            if (!progress.Observe(notification)) {
+                return false;
             }
             if (notification.inkscript.kind == kind) {
                 output = notification;
@@ -105,7 +112,8 @@ bool WaitFor(
 
 }  // namespace
 
-int RunPrivateInkScriptEngineSmoke() noexcept {
+int RunPrivateInkScriptEngineSmoke(
+    HWND status_bar, windows::ui::JobProgressState& progress_state) noexcept {
     HWND owner = CreateWindowExW(
         0,
         L"STATIC",
@@ -131,6 +139,7 @@ int RunPrivateInkScriptEngineSmoke() noexcept {
 
     NullSnapshotSink sink;
     CoreHost host;
+    windows::ui::InkScriptProgressPresentation progress(host, status_bar, progress_state);
     constexpr DocumentSessionId session{UINT64_C(27001)};
     constexpr Generation generation{UINT64_C(27)};
     CommandContext context{};
@@ -213,9 +222,10 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
 )";
         request.authorized_paths.push_back(directory);
         request.export_event_ids.push_back(event_id);
-        if (!host.EnqueueInkScript(std::move(request))) {
+        if (!progress.Submit(std::move(request))) {
             result = 5;
         }
+        UpdateWindow(status_bar);
     }
     CoreNotification plan{};
     if (result == 0) {
@@ -224,7 +234,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
                 host,
                 UINT64_C(27001),
                 InkScriptEngineNotificationKind::PlanReady,
-                plan);
+                plan, progress);
         const bool confirmed = received && plan.status == INKPOD_STATUS_OK
             && plan.inkscript.total_items == 1U && host.ConfirmInkScript(
                 UINT64_C(27001),
@@ -244,7 +254,7 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
                 host,
                 UINT64_C(27001),
                 InkScriptEngineNotificationKind::Completed,
-                completed)
+                completed, progress)
             || completed.status != INKPOD_STATUS_OK
             || completed.inkscript.outcome != INKPOD_INKSCRIPT_OUTCOME_INSTALLED
             || completed.inkscript.failure != INKPOD_INKSCRIPT_FAILURE_NONE
@@ -253,6 +263,31 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
             || GetFileAttributesW(output.c_str()) == INVALID_FILE_ATTRIBUTES)) {
         result = 7;
     }
+    if (result == 0) {
+        InkScriptEngineRequest request{};
+        request.job_id = UINT64_C(27004);
+        request.controller_id = UINT64_C(27005);
+        request.source_id = UINT64_C(27006);
+        request.source_generation = 1U;
+        request.context = context;
+        request.source_utf8 = R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { current_document; }
+program { step "Guide" { enabled = true; invoke add_guide { axis = vertical; position = 3; }; } }
+output { policy = duplicate; format = inkpod; folder = "out"; cell_folder = false; basename = "cancelled"; start_number = 1; direction = ascending; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)";
+        request.authorized_paths.push_back(directory);
+        if (!progress.Submit(std::move(request))
+            || !WaitFor(owner, host, UINT64_C(27004), InkScriptEngineNotificationKind::PlanReady, plan, progress)
+            || !windows::ui::CancelJobProgress(status_bar, progress_state, progress_state.selected)
+            || !WaitFor(owner, host, UINT64_C(27004), InkScriptEngineNotificationKind::Completed, completed, progress)
+            || completed.status != INKPOD_STATUS_CANCELLED
+            || GetFileAttributesW((directory + L"\\cancelled_0001.inkpod").c_str()) != INVALID_FILE_ATTRIBUTES) {
+            result = 10;
+        }
+    }
+    progress.Clear();
     host.Stop();
     if (DeleteFileW(output.c_str()) == FALSE
         && GetLastError() != ERROR_FILE_NOT_FOUND) {
@@ -266,6 +301,97 @@ execution { failure = stop; wait_ms = 0; preview_before_save = false; }
         std::fprintf(stderr, "private InkScript engine smoke failed: %d\n", result);
     }
     return result;
+}
+
+int RunPrivateInkScriptEngineSmoke() noexcept {
+    const INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES | ICC_PROGRESS_CLASS};
+    if (!InitCommonControlsEx(&controls)) {
+        return 11;
+    }
+    HWND owner = CreateWindowExW(0U, L"STATIC", L"InkScript private status", 0U,
+        0, 0, 700, 50, HWND_MESSAGE, nullptr, GetModuleHandleW(nullptr), nullptr);
+    HWND status = owner == nullptr ? nullptr : CreateWindowExW(0U, STATUSCLASSNAMEW, L"", WS_CHILD,
+        0, 0, 700, 24, owner, nullptr, GetModuleHandleW(nullptr), nullptr);
+    windows::ui::JobProgressState progress{};
+    const int result = status != nullptr && windows::ui::InitializeJobProgress(status, progress, nullptr, nullptr)
+        ? RunPrivateInkScriptEngineSmoke(status, progress) : 12;
+    if (status != nullptr) DestroyWindow(status);
+    if (owner != nullptr) DestroyWindow(owner);
+    return result;
+}
+
+int RunPrivateInkScriptPublicationSmoke(ApplicationHost& application) noexcept {
+    if (application.engine == nullptr) return 20;
+    const auto original = application.routing.targets.Capture();
+    if (!original.document_view.has_value() || !original.editor_group.has_value()) return 21;
+    HWND owner = application.Workspace().windows.window;
+    HWND status = application.Workspace().windows.status_bar;
+    windows::ui::InkScriptProgressPresentation progress(*application.engine,
+        status, application.Workspace().job_progress_state);
+    for (const auto mode : {INKPOD_INKSCRIPT_RUN_INSTALL, INKPOD_INKSCRIPT_RUN_IMAGE_PREVIEW}) {
+        const auto target = application.PrepareDocumentSession();
+        if (!target.has_value()) return 22;
+        auto destination = original;
+        destination.document_session = target->session;
+        destination.document_view = target->view;
+        destination.generation = target->generation;
+        const std::uint64_t job = UINT64_C(27100) + mode;
+        InkScriptEngineRequest request{};
+        request.job_id = job;
+        request.controller_id = job + 100U;
+        request.source_id = job + 200U;
+        request.source_generation = 1U;
+        request.context = original;
+        request.publication_targets.push_back(destination);
+        request.run_mode = mode;
+        request.source_utf8 = R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { profile = batch; current_document; }
+program { step "Guide" { enabled = true; invoke add_guide { axis = vertical; position = 2; }; } }
+output { policy = new_tabs; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)";
+        CoreNotification notification{};
+        bool published{};
+        int failure{};
+        if (!progress.Submit(std::move(request))
+            || !WaitFor(owner, *application.engine, job, InkScriptEngineNotificationKind::PlanReady, notification, progress)
+            || !application.engine->ConfirmInkScript(job, original, INKPOD_INKSCRIPT_SCOPE_ALL)
+            || !WaitFor(owner, *application.engine, job, InkScriptEngineNotificationKind::Completed, notification, progress)
+            || notification.status != INKPOD_STATUS_OK || notification.context != original
+            || notification.inkscript.published_result_count != 1U
+            || application.routing.targets.Resolve(original, kDocumentSessionCommandScope) != CommandResolveStatus::Ok) {
+            failure = 23;
+        } else if (!application.PublishPreparedDocumentSession(*target, *original.editor_group)) {
+            failure = 24;
+        } else {
+            published = true;
+            auto* document = application.Documents().Find(target->session);
+            if (document == nullptr) {
+                failure = 25;
+            } else {
+                if (mode == INKPOD_INKSCRIPT_RUN_IMAGE_PREVIEW) {
+                    document->shell.batch_preview_source_context = original;
+                }
+                if (!application.ActivateDocumentView(target->view)
+                    || (mode == INKPOD_INKSCRIPT_RUN_IMAGE_PREVIEW
+                        && document->shell.batch_preview_source_context != original)) {
+                    failure = 26;
+                }
+            }
+        }
+        progress.Clear();
+        if (!application.ActivateDocumentView(*original.document_view)) failure = 27;
+        const bool removed = published
+            ? application.CloseDocumentSession(target->session)
+            : application.DiscardPreparedDocumentSession(*target);
+        if (!removed) failure = 28;
+        if (failure != 0) {
+            std::fprintf(stderr, "private InkScript tab publication failed: %d\n", failure);
+            return failure;
+        }
+    }
+    return 0;
 }
 
 }  // namespace inkpod::app

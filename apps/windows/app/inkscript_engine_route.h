@@ -3,6 +3,7 @@
 #include <array>
 #include <cstdint>
 #include <memory>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,14 @@ struct InkScriptEngineRequest final {
     std::string current_document_label_utf8{"current.inkpod"};
     std::vector<std::wstring> authorized_paths;
     std::vector<std::uint64_t> export_event_ids;
+    // Empty, unpublished sessions prepared on the issuing UI thread. Their
+    // contexts retain the original workspace/group; completion never resolves
+    // a later active tab. The caller discards unused reservations on failure.
+    std::vector<CommandContext> publication_targets;
+    // CoreHost fills these from its issue-time published cache. Caller values
+    // are ignored; the owner verifies them before capturing the plan snapshot.
+    InkpodDocumentInfo expected_document{};
+    InkpodEditorStateInfo expected_editor{};
     std::uint32_t run_mode{INKPOD_INKSCRIPT_RUN_INSTALL};
     std::uint64_t maximum_output_bytes{};
 };
@@ -71,6 +80,10 @@ struct InkScriptEngineResult final {
     std::array<std::uint8_t, 32U> final_state_digest{};
     std::uint64_t exported_commit_count{};
     std::uint64_t exported_text_bytes{};
+    std::uint64_t staged_result_count{};
+    std::uint64_t published_result_count{};
+    bool active_output{};
+    bool image_preview{};
     std::array<std::uint8_t, 512U> diagnostic_utf8{};
     std::uint64_t diagnostic_bytes{};
     std::uint32_t last_host_operation{};
@@ -105,7 +118,17 @@ public:
     [[nodiscard]] InkScriptEngineStep Advance(
         InkpodCore* core,
         bool cancel_requested,
-        std::uint32_t confirmation_scope) noexcept;
+        std::uint32_t confirmation_scope,
+        InkpodIoManager* manager = nullptr,
+        std::span<const InkpodInkScriptIoSession> sessions = {}) noexcept;
+    [[nodiscard]] const std::vector<CommandContext>& PublicationTargets() const noexcept;
+    void Cancel() noexcept;
+    [[nodiscard]] bool QueryProgress(InkpodTaskInfo& output) noexcept;
+    void InvalidateOpenSessions() noexcept;
+    // Called only on the engine owner after validating every reserved target.
+    // Output handles transfer once and are destroyed by CoreHost on rollback.
+    [[nodiscard]] InkpodStatus TakePublication(
+        InkpodCore* owner, std::vector<InkpodCore*>& output) noexcept;
 
 private:
     struct Impl;

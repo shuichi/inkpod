@@ -45,7 +45,7 @@ Core supplies owned detached work to its generic executor.
 | `inkpod-format` | Bounded procedure-authoritative `.inkpod` v34 Cell containers and `.inkbatch` v5 models, stream/byte encode/decode/validation, and PNG/TIFF/TGA/BMP codecs; existing synchronous path wrappers remain for Rust callers outside the migrated application routes |
 | `inkpod-io`     | Application-owned bounded workers, filesystem paths/identity/locks, encoded and decoded LRU leases, streaming file access, temporary-file publication/cleanup, recoverable native/raster pair installation, recovery artifacts, and polling progress |
 | `inkpod-core`   | Stable-ID document/layer/plane state, immutable Genesis/base surfaces, a content-addressed canonical asset registry, StateId savepoints, views, raster clipboard, previews, animation, effects/Batch commands, persistence mapping, immutable render snapshots, and canonical primitive execution plus append-only journal/cache-free replay and semantic document digests for the migrated Core slice |
-| `inkpod-ffi`    | ABI v34 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, bounded validated-sidecar-target cache control/telemetry, complete sequence-resident target transfer, render preparation telemetry, and immutable prepared-source snapshot accessors, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
+| `inkpod-ffi`    | ABI v35 fixed records and generation-tagged runtime IDs, opaque I/O manager/job handles and path submission/poll/apply/release, the common raster-pair open kind, issue-time sequence preservation fence, explicit current-document Revert flag, bounded validated-sidecar-target cache control/telemetry, complete sequence-resident target transfer, render preparation telemetry, and immutable prepared-source snapshot accessors, Batch v5 graph/staged-result handles, InkScript source/compiler/fragment plus authority/plan/run/report handles and fixed DTO host callbacks, persistence/compaction diagnostics, validation/conversion, panic containment, and ownership functions |
 
 Binary, grayscale, RGBA8/16, straight-alpha, premultiplied display data, and
 selection masks remain distinct types. Win32 may provide a
@@ -1349,6 +1349,34 @@ thumbnail. A child progress context shares cancellation but keeps those internal
 rereads separate from input-loaded counts. Cleanup must succeed before the
 single clean, pathless preview Core is returned; cancellation, stale target,
 or cleanup failure never publishes a preview tab or writes the real output folder.
+
+The private InkScript engine uses the same Rust I/O manager through ABI v35.
+Its Windows authority facade only converts explicitly approved paths and owns
+Rust handles; it contains no file-identity, codec, lock or atomic-install engine.
+Shared plans retain captured sessions and approved paths, and external assets
+use bounded, cancellable manager reads before the existing asset ingester.
+Core-owned raster/native aliases resolve to one captured session, including
+reserved missing pair members. Canonical inputs retain dirty snapshots; Batch
+inputs continue to read disk. Live edits are permitted after capture, while
+backing/identity replacement invalidates the shared authority.
+The canonical planner, executor and M4 preview implementation remain single owners.
+
+InkScript requests keep their issuing context when tabs change. New-tab and
+image-preview outputs reserve empty unpublished session contexts before the job;
+the CoreHost owner lane validates those reservations and adopts owned Rust results.
+After fallible Core preparation, the queue and published-state locks order the
+final preview-cancel/reservation checks with pointer swaps. Core calls, allocation,
+destruction and presentation refresh stay outside those locks. Earlier successful
+new-tab items remain publishable after a later cancellation. Detached fragment/report
+owners use RAII, and early task destruction releases all remaining handles on the owner lane.
+Notifications contain values only. Active output uses the original session's
+canonical transaction and verifies its complete persistence token immediately
+before publication. UI publication must resolve the original workspace/group and
+discard stale results instead of selecting a different active document.
+The private progress presentation registers with the existing status bar and
+forwards cancellation to task atomics without waiting for Core execution.
+This boundary adds no pane registration, file filter, clipboard route or product
+command; Batch v5 remains the production executor until the explicit M15 cutover.
 
 The canonical workspace is represented by an HWND-free, fixed-capacity
 `DockLayoutModel`. Its `PaneDescriptor` records give every surface a stable type

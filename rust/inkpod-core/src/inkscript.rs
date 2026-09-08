@@ -4,16 +4,18 @@
 //! [`ScriptIoAdapter`] delegates filesystem work to `inkpod-io`; image previews use temporary
 //! copies and clean them before returning. Active output requires an explicit owner-thread
 //! [`ScriptStagedResult::apply_active`] with the original session and complete persistence token.
-//! New staged-result C ABI/Windows integration and product cutover remain separate gates.
+//! [`ScriptIoAdapter::plan`] ingests approved external assets through the shared manager with
+//! bounded cancellation before freezing them for the existing canonical planner and executor.
+//! Product cutover remains a separate gate from the private staged-result integration.
 
 pub use crate::script::{
     CapturedScriptInput, CatalogError, InMemoryInputFingerprint, InkScriptBindingError,
     InkScriptExportError, InkScriptExportLimits, InkScriptExportPortability,
     InkScriptFragmentExport, ScriptAssetError, ScriptBudget, ScriptCompileError,
     ScriptCompileLimits, ScriptDryRunReport, ScriptDryRunResult, ScriptImagePreviewError,
-    ScriptImagePreviewLimits, ScriptImagePreviewResult, ScriptIoAdapter, ScriptPathIntentSubject,
-    ScriptResultValue, ScriptRunError, ScriptStagedResult, ScriptStagedResultKind,
-    ScriptStatementOutcome, ScriptStaticPathIntent, StaticScriptProgram,
+    ScriptImagePreviewLimits, ScriptImagePreviewResult, ScriptIoAdapter, ScriptIoSequenceInput,
+    ScriptPathIntentSubject, ScriptResultValue, ScriptRunError, ScriptStagedResult,
+    ScriptStagedResultKind, ScriptStatementOutcome, ScriptStaticPathIntent, StaticScriptProgram,
     capture_in_memory_fingerprint, capture_in_memory_input, capture_in_memory_input_at,
     compile_inkscript, compile_inkscript_with_limits, export_inkscript_fragment,
     export_inkscript_fragment_with_limits, native_script_input, preview_inkscript_images,

@@ -14,7 +14,7 @@ markers record implementation and acceptance within that workflow.
 ## Current contract
 
 - Registry schema v2, language/file v3, catalog/owner v8, replay epoch 29, native v34
-  and ABI v34 align. The public catalog contains 75 commands. Retired assignments
+  and ABI v35 align. The public catalog contains 75 commands. Retired assignments
   remain tombstones; older catalog/owner resources are rejected.
 - Grammar/section changes require an explicit file-version decision. Closed
   semantic entities and references require an explicit catalog/replay rebaseline.
@@ -29,8 +29,9 @@ markers record implementation and acceptance within that workflow.
 - Input profile, common codecs, closed folder/active/new-tab output and isolated
   image preview follow [the approved D2/D3 contract](inkscript-batch-connection.md).
   File v3 changes the orchestration envelope only. Canonical invocation semantics,
-  catalog membership, native replay and ABI v34 remain unchanged. Core-only plan,
-  run, staged ownership and image-preview APIs precede ABI/Windows integration.
+  catalog membership and native replay remain unchanged. ABI v35 connects the
+  shared Rust I/O adapter, staged ownership and image-preview APIs to the private
+  Windows engine; it does not authorize product cutover.
 - `.inkbatch` v5 remains an independent closed product format. No `.inkscript`
   product filter, clipboard, command or authoring UI is implied by private APIs.
   Future exposure requires the existing owner gates and explicit production

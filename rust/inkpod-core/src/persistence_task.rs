@@ -114,6 +114,17 @@ pub struct DocumentSaveToken {
 }
 
 impl DocumentSaveToken {
+    /// Tests only runtime file ownership for an immutable InkScript input.
+    /// Ordinary document/editor changes remain permitted for frozen input; active
+    /// publication uses the separate complete save-stamp validation instead.
+    pub(crate) fn matches_inkscript_backing(&self, core: &Core) -> bool {
+        self.stamp.authority == core.persistence_state
+            && self.stamp.document_uuid == core.document.as_ref().map(|document| document.uuid)
+            && self.stamp.current_path == core.current_path
+            && self.stamp.pair_authority.as_deref() == core.io_pair_authority.as_ref()
+            && self.stamp.pair_plan.as_deref() == core.io_pair_plan.as_ref()
+    }
+
     pub(crate) fn document_uuid(&self) -> Result<u128, CoreError> {
         self.stamp.document_uuid.ok_or(CoreError::NoDocument)
     }

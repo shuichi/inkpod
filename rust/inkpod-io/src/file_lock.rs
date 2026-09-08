@@ -29,12 +29,16 @@ impl FileLocks {
     }
 }
 
-pub(crate) fn lock_cancel<'a>(
+pub(crate) fn lock_cancel_with<'a>(
     lock: &'a Mutex<()>,
     context: &JobContext,
+    cancelled: &mut dyn FnMut() -> bool,
 ) -> IoResult<MutexGuard<'a, ()>> {
     loop {
         context.check_cancelled()?;
+        if cancelled() {
+            return Err(IoError::Cancelled);
+        }
         match lock.try_lock() {
             Ok(guard) => return Ok(guard),
             Err(TryLockError::Poisoned(_)) => return Err(IoError::WorkerPanicked),

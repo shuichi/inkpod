@@ -2498,7 +2498,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     assert_eq!(number(member(contract, "procedure_catalog_version")), 8);
     assert_eq!(number(member(contract, "replay_epoch")), 29);
     assert_eq!(number(member(contract, "inkpod_top_level_version")), 34);
-    assert_eq!(number(member(contract, "c_abi_version")), 34);
+    assert_eq!(number(member(contract, "c_abi_version")), 35);
 
     let repository = repository();
     let model = fs::read_to_string(repository.join("rust/inkpod-core/src/primitive/model.rs"))
@@ -2510,7 +2510,7 @@ fn inkscript_versions_and_traceability_match_repository_contracts() {
     assert!(model.contains("pub const CURRENT: Self = Self(29);"));
     assert!(model.contains("pub const PROCEDURE_FORMAT_VERSION: u32 = 34;"));
     assert!(format.contains("pub const FORMAT_VERSION: u32 = 34;"));
-    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(34)"));
+    assert!(header.contains("#define INKPOD_ABI_VERSION UINT32_C(35)"));
 
     let spec = fs::read_to_string(repository.join("SPEC.md")).expect("SPEC must be readable");
     let compatibility = fs::read_to_string(repository.join("docs/compatibility.md"))

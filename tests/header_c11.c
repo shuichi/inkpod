@@ -2,7 +2,7 @@
 
 #include <stdint.h>
 
-_Static_assert(INKPOD_ABI_VERSION == 34U, "unexpected ABI version");
+_Static_assert(INKPOD_ABI_VERSION == 35U, "unexpected ABI version");
 _Static_assert(sizeof(InkpodIoConfig) == 48U, "I/O config layout drift");
 _Static_assert(sizeof(InkpodIoPath) == 24U, "I/O path layout drift");
 _Static_assert(sizeof(InkpodIoRequest) == 72U, "I/O request layout drift");
@@ -101,6 +101,13 @@ _Static_assert(sizeof(InkpodInkScriptProgramSummary) == 152U, "InkScript program
 _Static_assert(sizeof(InkpodInkScriptJournalEvent) == 24U, "InkScript event layout drift");
 _Static_assert(sizeof(InkpodInkScriptExportRequest) == 96U, "InkScript export request layout drift");
 _Static_assert(sizeof(InkpodInkScriptFragmentSummary) == 88U, "InkScript fragment summary layout drift");
+_Static_assert(sizeof(InkpodInkScriptApprovedPath) == 40U, "InkScript approved path layout drift");
+_Static_assert(sizeof(InkpodInkScriptIoRequest) == 48U, "InkScript shared I/O request layout drift");
+_Static_assert(sizeof(InkpodInkScriptIoSession) == 88U, "InkScript captured session layout drift");
+_Static_assert(sizeof(InkpodInkScriptSharedPlanRequest) == 64U, "InkScript shared plan layout drift");
+_Static_assert(sizeof(InkpodInkScriptStagedInfo) == 56U, "InkScript staged result layout drift");
+_Static_assert(sizeof(InkpodInkScriptIoSequenceMember) == 56U, "InkScript sequence member layout drift");
+_Static_assert(sizeof(InkpodInkScriptIoSequenceRequest) == 56U, "InkScript sequence request layout drift");
 _Static_assert(INKPOD_EDITOR_TOOL_GEOMETRY_LINE == 1011U, "geometry line tool code drift");
 _Static_assert(INKPOD_EDITOR_TOOL_GEOMETRY_CURVE == 1012U, "geometry curve tool code drift");
 _Static_assert(INKPOD_EDITOR_TOOL_GEOMETRY_RECTANGLE == 1013U, "geometry rectangle tool code drift");

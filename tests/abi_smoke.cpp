@@ -12,7 +12,7 @@
 #include <type_traits>
 #include <vector>
 
-static_assert(INKPOD_ABI_VERSION == UINT32_C(34));
+static_assert(INKPOD_ABI_VERSION == UINT32_C(35));
 static_assert(std::is_standard_layout_v<InkpodCoreConfig>);
 static_assert(std::is_standard_layout_v<InkpodSnapshotView>);
 static_assert(sizeof(InkpodCoreConfig) == 16U);
@@ -181,6 +181,20 @@ static_assert(sizeof(InkpodInkScriptTaskEvent) == 64U);
 static_assert(sizeof(InkpodInkScriptReportSummary) == 40U);
 static_assert(sizeof(InkpodInkScriptReportItem) == 120U);
 static_assert(sizeof(InkpodInkScriptReportBuffer) == 96U);
+static_assert(std::is_standard_layout_v<InkpodInkScriptApprovedPath>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptIoRequest>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptIoSession>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptSharedPlanRequest>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptStagedInfo>);
+static_assert(sizeof(InkpodInkScriptApprovedPath) == 40U);
+static_assert(sizeof(InkpodInkScriptIoRequest) == 48U);
+static_assert(sizeof(InkpodInkScriptIoSession) == 88U);
+static_assert(sizeof(InkpodInkScriptSharedPlanRequest) == 64U);
+static_assert(sizeof(InkpodInkScriptStagedInfo) == 56U);
+static_assert(std::is_standard_layout_v<InkpodInkScriptIoSequenceMember>);
+static_assert(std::is_standard_layout_v<InkpodInkScriptIoSequenceRequest>);
+static_assert(sizeof(InkpodInkScriptIoSequenceMember) == 56U);
+static_assert(sizeof(InkpodInkScriptIoSequenceRequest) == 56U);
 static_assert(sizeof(InkpodSubpaletteSourceInput) == 32U);
 static_assert(sizeof(InkpodSubpaletteRasterInput) == 32U);
 static_assert(sizeof(InkpodSubpaletteInfo) == 32U);
@@ -287,13 +301,15 @@ int InkpodRunAbiSmoke() {
     if (inkpod::app::RunPrivateInkScriptEngineSmoke() != 0) {
         return 162;
     }
-    InkpodCoreConfig previous_config{
-        sizeof(InkpodCoreConfig), 29U, INKPOD_FEATURE_NONE};
-    InkpodCore* previous_core = nullptr;
-    if (inkpod_core_create(&previous_config, &previous_core)
-            != INKPOD_STATUS_INCOMPATIBLE_ABI
-        || previous_core != nullptr) {
-        return 138;
+    for (const std::uint32_t previous_version : {29U, 34U}) {
+        InkpodCoreConfig previous_config{
+            sizeof(InkpodCoreConfig), previous_version, INKPOD_FEATURE_NONE};
+        InkpodCore* previous_core = nullptr;
+        if (inkpod_core_create(&previous_config, &previous_core)
+                != INKPOD_STATUS_INCOMPATIBLE_ABI
+            || previous_core != nullptr) {
+            return 138;
+        }
     }
 
     InkpodCoreConfig config{

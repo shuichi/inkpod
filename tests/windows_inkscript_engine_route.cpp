@@ -5,16 +5,36 @@
 #include <atomic>
 #include <chrono>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <future>
+#include <new>
 #include <string>
 #include <thread>
 #include <type_traits>
 #include <vector>
+#include <utility>
+#include <commctrl.h>
 
 #include "app/core_host.h"
 #include "renderer/canvas.h"
+#include "ui/inkscript_progress.h"
+
+// A real allocator failure on the issuing test thread, consumed exactly once.
+// Engine/renderer allocation is unaffected; no production fault hook is added.
+thread_local bool fail_next_inkscript_allocation{};
+thread_local std::size_t fail_inkscript_allocation_countdown{};
+
+void* operator new(std::size_t size) {
+    if (std::exchange(fail_next_inkscript_allocation, false)
+        || (fail_inkscript_allocation_countdown != 0U
+            && --fail_inkscript_allocation_countdown == 0U)) throw std::bad_alloc{};
+    if (void* value = std::malloc(size == 0U ? 1U : size)) return value;
+    throw std::bad_alloc{};
+}
+void operator delete(void* value) noexcept { std::free(value); }
+void operator delete(void* value, std::size_t) noexcept { std::free(value); }
 
 namespace {
 
@@ -1028,13 +1048,485 @@ int TestQueueSaturation() {
 
 }  // namespace
 
+int TestStagedPublicationAndCapturedTarget() {
+    Fixture fixture(80U);
+    if (!fixture.Ready()) {
+        return 801;
+    }
+    const auto target = Context(DocumentSessionId(8001U), Generation(8002U));
+    if (fixture.Host().CreateSession(*target.document_session, *target.generation)
+        != INKPOD_STATUS_OK) {
+        return 802;
+    }
+    auto request = Request(800U, fixture.Command(),
+        R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { profile = batch; current_document; }
+program { step "Guide" { enabled = true; invoke add_guide { axis = vertical; position = 3; }; } }
+output { policy = new_tabs; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)", {});
+    request.publication_targets.push_back(target);
+    DocumentState original{};
+    if (!fixture.Capture(original)
+        || !fixture.Host().EnqueueInkScript(std::move(request))) {
+        return 803;
+    }
+    CoreNotification notification{};
+    if (!WaitForNotification(fixture.Owner(), fixture.Host(), 800U,
+            InkScriptEngineNotificationKind::PlanReady, notification)
+        || !fixture.Host().SetActiveSession(*target.document_session, *target.generation)
+        || !fixture.Host().ConfirmInkScript(800U, fixture.Command(),
+            INKPOD_INKSCRIPT_SCOPE_ALL)
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 800U,
+            InkScriptEngineNotificationKind::Completed, notification)
+        || notification.status != INKPOD_STATUS_OK
+        || notification.context != fixture.Command()
+        || notification.inkscript.published_result_count != 1U) {
+        return 804;
+    }
+    InkpodDocumentInfo installed{};
+    installed.struct_size = sizeof(installed);
+    if (fixture.Host().Invoke(*target.document_session, *target.generation,
+            [&installed](InkpodCore* core) {
+                return inkpod_core_get_document_info(core, &installed);
+            }, false, false) != INKPOD_STATUS_OK
+        || installed.document_uuid_low == original.document.document_uuid_low) {
+        return 805;
+    }
+    DocumentState after{};
+    if (!fixture.Capture(after) || !SameState(original, after)) return 806;
+
+    // A cancelled later item must retain the report and publish the preceding
+    // successful new-tab result, while its unused reservation stays empty.
+    std::wstring input_directory;
+    if (!fixture.MakeDirectory(L"cancel-staged", input_directory)
+        || !CreateNative(input_directory + L"\\a.inkpod", 8011U)
+        || !CreateNative(input_directory + L"\\b.inkpod", 8012U)) return 807;
+    const auto first = Context(DocumentSessionId(8011U), Generation(8011U));
+    const auto second = Context(DocumentSessionId(8012U), Generation(8012U));
+    if (fixture.Host().CreateSession(*first.document_session, *first.generation) != INKPOD_STATUS_OK
+        || fixture.Host().CreateSession(*second.document_session, *second.generation) != INKPOD_STATUS_OK)
+        return 808;
+    auto cancelled_request = Request(801U, fixture.Command(),
+        R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { profile = batch; folder "in"; }
+program { step "Guide" { enabled = true; invoke add_guide { axis = vertical; position = 3; }; } }
+output { policy = new_tabs; }
+execution { failure = stop; wait_ms = 5000; preview_before_save = false; }
+)", {input_directory});
+    cancelled_request.publication_targets = {first, second};
+    if (!fixture.Host().EnqueueInkScript(std::move(cancelled_request))
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 801U,
+            InkScriptEngineNotificationKind::PlanReady, notification)
+        || !fixture.Host().ConfirmInkScript(801U, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+        || !WaitForProgressEvent(fixture.Owner(), fixture.Host(), 801U,
+            INKPOD_INKSCRIPT_EVENT_WAIT_REQUESTED, notification)
+        || notification.inkscript.completed_items != 1U
+        || !fixture.Host().CancelInkScript(801U, fixture.Command())
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 801U,
+            InkScriptEngineNotificationKind::Completed, notification)
+        || notification.status != INKPOD_STATUS_CANCELLED
+        || notification.context != fixture.Command()
+        || notification.inkscript.report_item_count != 2U
+        || (notification.inkscript.report_flags & INKPOD_INKSCRIPT_REPORT_CANCELLED) == 0U
+        || notification.inkscript.staged_result_count != 1U
+        || notification.inkscript.published_result_count != 1U) return 809;
+    const auto inspect = [&fixture](const CommandContext& destination) {
+        return fixture.Host().Invoke(*destination.document_session, *destination.generation,
+            [](InkpodCore* core) {
+                InkpodDocumentInfo info{};
+                info.struct_size = sizeof(info);
+                return inkpod_core_get_document_info(core, &info);
+            }, false, false);
+    };
+    return inspect(first) == INKPOD_STATUS_OK && inspect(second) == INKPOD_STATUS_NO_DOCUMENT
+        && fixture.Capture(after) && SameState(original, after) ? 0 : 8010;
+}
+
+std::string ActiveSource() {
+    return R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { profile = batch; current_document; }
+program { step "Paint" { enabled = true; invoke apply_batch_operations { operations = [
+{ kind = color_replace; enabled = true; targets = [{ kind = role; plane_kind = color; missing = error; }];
+pairs = [{ enabled = true; old = rgba8(0,0,0,0); new = rgba8(255,0,0,255); }]; }
+]; }; } }
+output { policy = active_document; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)";
+}
+
+int TestActivePublicationUndoAndStale() {
+    Fixture fixture(81U);
+    if (!fixture.Ready()) return 811;
+    DocumentState before{};
+    if (!fixture.Capture(before)
+        || !fixture.Host().EnqueueInkScript(Request(810U, fixture.Command(), ActiveSource(), {}))) return 812;
+    CoreNotification result{};
+    if (!WaitForNotification(fixture.Owner(), fixture.Host(), 810U,
+            InkScriptEngineNotificationKind::PlanReady, result)
+        || !fixture.Host().ConfirmInkScript(810U, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 810U,
+            InkScriptEngineNotificationKind::Completed, result)
+        || result.status != INKPOD_STATUS_OK || !result.inkscript.active_output
+        || result.inkscript.published_result_count != 1U) return 813;
+    DocumentState after{};
+    if (!fixture.Capture(after) || after.digest == before.digest
+        || after.document.document_revision != before.document.document_revision + 1U
+        || after.history.item_count != before.history.item_count + 1U
+        || after.document.document_uuid_low != before.document.document_uuid_low) return 814;
+    if (fixture.Host().Invoke(fixture.Session(), fixture.SessionGeneration(), [](InkpodCore* core) {
+            InkpodDispatchResult info{};
+            info.struct_size = sizeof(info);
+            return inkpod_core_undo(core, &info);
+        }, false, true) != INKPOD_STATUS_OK) return 815;
+    DocumentState undo{};
+    if (!fixture.Capture(undo) || undo.digest != before.digest) return 816;
+    if (fixture.Host().Invoke(fixture.Session(), fixture.SessionGeneration(), [](InkpodCore* core) {
+            InkpodDispatchResult info{};
+            info.struct_size = sizeof(info);
+            return inkpod_core_redo(core, &info);
+        }, false, true) != INKPOD_STATUS_OK) return 817;
+    DocumentState redo{};
+    if (!fixture.Capture(redo) || redo.digest != after.digest) return 818;
+    if (!fixture.Host().EnqueueInkScript(Request(811U, fixture.Command(), ActiveSource(), {}))
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 811U,
+            InkScriptEngineNotificationKind::PlanReady, result)) return 819;
+    // Editing the live source after snapshot capture remains legal, but active
+    // publication must reject its stale fingerprint rather than overwrite it.
+    std::uint64_t event{};
+    DocumentState edited{};
+    if (!fixture.AddGuideAndCaptureLastEvent(event, edited)
+        || !fixture.Host().ConfirmInkScript(811U, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 811U,
+            InkScriptEngineNotificationKind::Completed, result)
+        || result.status == INKPOD_STATUS_OK || result.inkscript.published_result_count != 0U) return 820;
+    DocumentState retained{};
+    return fixture.Capture(retained) && SameState(edited, retained) ? 0 : 821;
+}
+
+int TestImagePreviewAndClosedReservation() {
+    Fixture fixture(82U);
+    if (!fixture.Ready()) return 831;
+    const auto target = Context(DocumentSessionId(8201U), Generation(8202U));
+    if (fixture.Host().CreateSession(*target.document_session, *target.generation) != INKPOD_STATUS_OK) return 832;
+    const auto make_request = [&] (std::uint64_t job) {
+        auto request = Request(job, fixture.Command(), CurrentDocumentSource(0U, "preview"), {fixture.Directory()});
+        request.run_mode = INKPOD_INKSCRIPT_RUN_IMAGE_PREVIEW;
+        request.publication_targets.push_back(target);
+        return request;
+    };
+    DocumentState before{};
+    CoreNotification result{};
+    if (!fixture.Capture(before) || !fixture.Host().EnqueueInkScript(make_request(820U))
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 820U,
+            InkScriptEngineNotificationKind::PlanReady, result)
+        || !fixture.Host().ConfirmInkScript(820U, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 820U,
+            InkScriptEngineNotificationKind::Completed, result)
+        || result.status != INKPOD_STATUS_OK || !result.inkscript.image_preview
+        || result.inkscript.published_result_count != 1U) return 833;
+    InkpodDocumentInfo preview{};
+    preview.struct_size = sizeof(preview);
+    if (fixture.Host().Invoke(*target.document_session, *target.generation, [&preview](InkpodCore* core) {
+            return inkpod_core_get_document_info(core, &preview);
+        }, false, false) != INKPOD_STATUS_OK
+        || (preview.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
+        || GetFileAttributesW((fixture.Directory() + L"\\preview_0001.inkpod").c_str()) != INVALID_FILE_ATTRIBUTES) return 834;
+    DocumentState after{};
+    if (!fixture.Capture(after) || !SameState(before, after)) return 835;
+    if (fixture.Host().CloseSession(*target.document_session, *target.generation) != INKPOD_STATUS_OK
+        || fixture.Host().CreateSession(*target.document_session, *target.generation) != INKPOD_STATUS_OK
+        || !fixture.Host().EnqueueInkScript(make_request(821U))
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 821U,
+            InkScriptEngineNotificationKind::PlanReady, result)
+        || fixture.Host().CloseSession(*target.document_session, *target.generation) != INKPOD_STATUS_OK
+        || !fixture.Host().ConfirmInkScript(821U, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 821U,
+            InkScriptEngineNotificationKind::Completed, result)
+        || result.status == INKPOD_STATUS_OK || result.inkscript.published_result_count != 0U) return 836;
+    // The terminal report does not end preview cancellation. Its staged owner
+    // must still reject a cancellation accepted before publication transfer.
+    if (fixture.Host().Invoke(fixture.Session(), fixture.SessionGeneration(),
+            [&](InkpodCore* core) {
+                auto request = make_request(822U);
+                request.expected_document = before.document;
+                request.expected_editor = before.editor;
+                inkpod::app::InkScriptEngineTask task(std::move(request));
+                InkpodInkScriptIoSession session{};
+                session.struct_size = sizeof(session);
+                session.version = INKPOD_INKSCRIPT_RECORD_VERSION;
+                session.session_id = fixture.Session().Value();
+                session.session_generation = fixture.SessionGeneration().Value();
+                session.session_core = core;
+                const std::span<const InkpodInkScriptIoSession> sessions(&session, 1U);
+                inkpod::app::InkScriptEngineStep step{};
+                for (unsigned advance = 0U; advance < 32U; ++advance) {
+                    step = task.Advance(core, false, INKPOD_INKSCRIPT_SCOPE_ALL, nullptr, sessions);
+                    if (step.kind == inkpod::app::InkScriptEngineStepKind::Completed) break;
+                }
+                if (step.kind != inkpod::app::InkScriptEngineStepKind::Completed
+                    || step.notification.status != INKPOD_STATUS_OK
+                    || !step.notification.image_preview || step.notification.staged_result_count != 1U)
+                    return INKPOD_STATUS_INVALID_STATE;
+                task.Cancel();
+                std::vector<InkpodCore*> output;
+                const auto publication = task.TakePublication(core, output);
+                const bool rejected = publication == INKPOD_STATUS_CANCELLED && output.empty();
+                for (auto*& value : output) (void)inkpod_core_destroy(&value);
+                return rejected ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+            }, false, false) != INKPOD_STATUS_OK
+        || !fixture.Capture(after) || !SameState(before, after)) return 837;
+    return 0;
+}
+
+int TestCommonStatusProgressAndCancel() {
+    using namespace inkpod::windows::ui;
+    const INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_BAR_CLASSES | ICC_PROGRESS_CLASS};
+    if (!InitCommonControlsEx(&controls)) return 841;
+    Fixture fixture(84U);
+    if (!fixture.Ready()) return 842;
+    HWND status = CreateWindowExW(0U, STATUSCLASSNAMEW, L"", WS_CHILD,
+        0, 0, 700, 24, fixture.Owner(), nullptr, GetModuleHandleW(nullptr), nullptr);
+    JobProgressState state{};
+    if (status == nullptr || !InitializeJobProgress(status, state, nullptr, nullptr)) return 843;
+    int failure{};
+    {
+        InkScriptProgressPresentation progress(fixture.Host(), status, state);
+        CoreNotification result{};
+        if (!progress.Submit(Request(840U, fixture.Command(), CurrentDocumentSource(0U, "cancel"), {fixture.Directory()}))
+            || !WaitForNotification(fixture.Owner(), fixture.Host(), 840U,
+                InkScriptEngineNotificationKind::PlanReady, result)
+            || !progress.Observe(result) || !state.visible || state.item_count != 1U) failure = 844;
+        const auto original = state.selected;
+        if (failure == 0 && (!CancelJobProgress(status, state, original)
+            || !WaitForNotification(fixture.Owner(), fixture.Host(), 840U,
+                InkScriptEngineNotificationKind::Completed, result)
+            || result.status != INKPOD_STATUS_CANCELLED || !progress.Observe(result)
+            || state.item_count != 0U || CancelJobProgress(status, state, original))) failure = 845;
+    }
+    DestroyWindow(status);
+    return failure;
+}
+
+int TestSharedCodecsAndDryPublication() {
+    Fixture fixture(85U);
+    if (!fixture.Ready()) return 851;
+    const std::array<const char*, 4U> codecs{"png", "tiff", "tga", "bmp"};
+    std::uint64_t job = 850U;
+    for (const auto* codec : codecs) {
+        const std::string text = std::string(R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { profile = batch; current_document; }
+program { step "Guide" { enabled = true; invoke add_guide { axis = vertical; position = 3; }; } }
+output { policy = folder; format = )") + codec + R"(; folder = "out"; naming_template = "codec"; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)";
+        CoreNotification result{};
+        if (!fixture.Host().EnqueueInkScript(Request(job, fixture.Command(), text, {fixture.Directory()}))
+            || !WaitForNotification(fixture.Owner(), fixture.Host(), job,
+                InkScriptEngineNotificationKind::PlanReady, result)
+            || !fixture.Host().ConfirmInkScript(job, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+            || !WaitForNotification(fixture.Owner(), fixture.Host(), job,
+                InkScriptEngineNotificationKind::Completed, result)
+            || result.status != INKPOD_STATUS_OK) return 852;
+        std::wstring extension;
+        for (const char* value = codec; *value != '\0'; ++value) extension.push_back(static_cast<wchar_t>(*value));
+        const auto path = fixture.Directory() + L"\\codec." + extension;
+        if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return 853;
+        const auto target = Context(DocumentSessionId(8500U + job), Generation(85U));
+        if (fixture.Host().CreateSession(*target.document_session, *target.generation) != INKPOD_STATUS_OK) return 854;
+        const std::string input = std::string(R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { profile = batch; file "input.)") + codec + R"("; }
+program { step "Guide" { enabled = true; invoke add_guide { axis = vertical; position = 4; }; } }
+output { policy = new_tabs; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)";
+        auto request = Request(++job, fixture.Command(), input, {path});
+        request.publication_targets.push_back(target);
+        if (!fixture.Host().EnqueueInkScript(std::move(request))
+            || !WaitForNotification(fixture.Owner(), fixture.Host(), job,
+                InkScriptEngineNotificationKind::PlanReady, result)
+            || !fixture.Host().ConfirmInkScript(job, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+            || !WaitForNotification(fixture.Owner(), fixture.Host(), job,
+                InkScriptEngineNotificationKind::Completed, result)
+            || result.status != INKPOD_STATUS_OK || result.inkscript.published_result_count != 1U) return 855;
+        InkpodDocumentInfo info{};
+        info.struct_size = sizeof(info);
+        if (fixture.Host().Invoke(*target.document_session, *target.generation, [&info](InkpodCore* core) {
+                return inkpod_core_get_document_info(core, &info);
+            }, false, false) != INKPOD_STATUS_OK || info.width != 16U || info.height != 16U) return 856;
+        ++job;
+    }
+    const auto target = Context(DocumentSessionId(8599U), Generation(85U));
+    if (fixture.Host().CreateSession(*target.document_session, *target.generation) != INKPOD_STATUS_OK) return 857;
+    auto request = Request(859U, fixture.Command(), R"(inkscript 3;
+requires { procedure_catalog = 8; replay_epoch = 29; }
+inputs { profile = batch; current_document; }
+program { step "Guide" { enabled = true; invoke add_guide { axis = vertical; position = 4; }; } }
+output { policy = new_tabs; }
+execution { failure = stop; wait_ms = 0; preview_before_save = false; }
+)", {});
+    request.run_mode = INKPOD_INKSCRIPT_RUN_DRY;
+    request.publication_targets.push_back(target);
+    CoreNotification result{};
+    if (!fixture.Host().EnqueueInkScript(std::move(request))
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 859U,
+            InkScriptEngineNotificationKind::PlanReady, result)
+        || !fixture.Host().ConfirmInkScript(859U, fixture.Command(), INKPOD_INKSCRIPT_SCOPE_ALL)
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 859U,
+            InkScriptEngineNotificationKind::Completed, result)
+        || result.status != INKPOD_STATUS_OK || result.inkscript.staged_result_count != 0U
+        || result.inkscript.published_result_count != 0U) return 858;
+    return 0;
+}
+
+int TestEnqueueAllocationFailure() {
+    Fixture fixture(86U);
+    if (!fixture.Ready()) return 861;
+    DocumentState before{};
+    if (!fixture.Capture(before)) return 862;
+    auto request = Request(860U, fixture.Command(), CurrentDocumentSource(0U, "allocation"), {fixture.Directory()});
+    fail_next_inkscript_allocation = true;
+    const bool accepted = fixture.Host().EnqueueInkScript(std::move(request));
+    const bool injected = !std::exchange(fail_next_inkscript_allocation, false);
+    if (accepted || !injected || fixture.Host().CancelInkScript(860U, fixture.Command())) return 863;
+    DocumentState after{};
+    if (!(fixture.Capture(after) && SameState(before, after)
+        && GetFileAttributesW((fixture.Directory() + L"\\allocation_0001.inkpod").c_str()) == INVALID_FILE_ATTRIBUTES
+        )) return 864;
+
+    std::uint64_t event_id{};
+    if (!fixture.AddGuideAndCaptureLastEvent(event_id, before)) return 865;
+    // Exercise the private engine boundary on its actual Core owner. The
+    // allocations are C++ export text and detached-report copy buffers; Rust
+    // owners must unwind before the next job reuses the same Core.
+    const auto fault_status = fixture.Host().Invoke(fixture.Session(), fixture.SessionGeneration(),
+        [&fixture, &before, event_id](InkpodCore* core) {
+            const auto exercise = [&](bool exporting, std::size_t failure,
+                inkpod::app::InkScriptEngineStepKind abandon = inkpod::app::InkScriptEngineStepKind::Completed) {
+                auto local = Request(861U, fixture.Command(), CurrentDocumentSource(0U, "allocation-detached"),
+                    {fixture.Directory()});
+                local.run_mode = INKPOD_INKSCRIPT_RUN_DRY;
+                local.expected_document = before.document;
+                local.expected_editor = before.editor;
+                if (exporting) local.export_event_ids.push_back(event_id);
+                inkpod::app::InkScriptEngineTask task(std::move(local));
+                InkpodInkScriptIoSession session{};
+                session.struct_size = sizeof(session);
+                session.version = INKPOD_INKSCRIPT_RECORD_VERSION;
+                session.session_id = fixture.Session().Value();
+                session.session_generation = fixture.SessionGeneration().Value();
+                session.session_core = core;
+                const std::span<const InkpodInkScriptIoSession> sessions(&session, 1U);
+                inkpod::app::InkScriptEngineStep step{};
+                bool armed{};
+                for (unsigned advance = 0U; advance < 32U; ++advance) {
+                    if (failure != 0U && !armed && (exporting || (step.has_notification
+                        && step.notification.event_kind == INKPOD_INKSCRIPT_EVENT_ITEM_COMPLETE))) {
+                        // Initial export allocates the event vector, then text.
+                        // Terminal dry-run allocates report records, then UTF-8.
+                        fail_inkscript_allocation_countdown = failure;
+                        armed = true;
+                    }
+                    step = task.Advance(core, false, INKPOD_INKSCRIPT_SCOPE_ALL, nullptr, sessions);
+                    if (abandon != inkpod::app::InkScriptEngineStepKind::Completed && step.kind == abandon)
+                        return true;
+                    if (step.kind == inkpod::app::InkScriptEngineStepKind::Completed) break;
+                }
+                const bool consumed = fail_inkscript_allocation_countdown == 0U;
+                fail_inkscript_allocation_countdown = 0U;
+                if (step.kind != inkpod::app::InkScriptEngineStepKind::Completed) return false;
+                if (failure != 0U) {
+                    return armed && consumed && step.notification.status == INKPOD_STATUS_INVALID_STATE
+                        && step.notification.phase == (exporting
+                            ? inkpod::app::InkScriptEnginePhase::ExportFragment
+                            : inkpod::app::InkScriptEnginePhase::Running)
+                        && step.notification.exported_commit_count == 0U
+                        && step.notification.report_item_count == (exporting ? 0U : 1U);
+                }
+                return step.notification.status == INKPOD_STATUS_OK
+                    && step.notification.outcome == INKPOD_INKSCRIPT_OUTCOME_DRY_RUN
+                    && step.notification.report_item_count == 1U
+                    && (!exporting || (step.notification.exported_commit_count == 1U
+                        && step.notification.exported_text_bytes != 0U));
+            };
+            if (!exercise(false, 0U, inkpod::app::InkScriptEngineStepKind::Continue)
+                || !exercise(false, 0U, inkpod::app::InkScriptEngineStepKind::PlanReady)
+                || !exercise(true, 2U) || !exercise(true, 0U)
+                || !exercise(false, 1U) || !exercise(false, 0U)
+                || !exercise(false, 2U) || !exercise(false, 0U)) return INKPOD_STATUS_INVALID_STATE;
+            DocumentState after_faults{};
+            return CaptureCoreState(core, after_faults) == INKPOD_STATUS_OK && SameState(before, after_faults)
+                ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
+        }, false, false);
+    return fault_status == INKPOD_STATUS_OK
+        && GetFileAttributesW((fixture.Directory() + L"\\allocation-detached_0001.inkpod").c_str()) == INVALID_FILE_ATTRIBUTES
+        ? 0 : 866;
+}
+
+int TestOpenSessionOwnershipAndIssueTimeStale() {
+    Fixture fixture(87U);
+    if (!fixture.Ready()) return 871;
+    const auto path = fixture.Directory() + L"\\owned.inkpod";
+    if (!CreateNative(path, 870U)) return 872;
+    const auto sibling = Context(DocumentSessionId(8701U), Generation(87U));
+    if (fixture.Host().CreateSession(*sibling.document_session, *sibling.generation) != INKPOD_STATUS_OK) return 873;
+    std::vector<std::uint8_t> utf8;
+    if (!WideToUtf8(path, utf8)
+        || fixture.Host().Invoke(*sibling.document_session, *sibling.generation, [&utf8](InkpodCore* core) {
+            InkpodDocumentInfo info{};
+            info.struct_size = sizeof(info);
+            return inkpod_core_open(core, utf8.data(), utf8.size(), &info);
+        }, false, true) != INKPOD_STATUS_OK) return 874;
+    CoreNotification result{};
+    if (!fixture.Host().EnqueueInkScript(Request(870U, fixture.Command(), OverwriteFolderSource(), {path, path}))
+        || !WaitForNotification(fixture.Owner(), fixture.Host(), 870U,
+            InkScriptEngineNotificationKind::Completed, result)
+        || result.status == INKPOD_STATUS_OK) return 875;
+    std::promise<void> started;
+    std::promise<void> release;
+    auto released = release.get_future().share();
+    auto entered = started.get_future();
+    if (!fixture.Host().Enqueue(fixture.Command(), [&started, released](InkpodCore* core) {
+            started.set_value();
+            released.wait();
+            InkpodDispatchResult dispatch{};
+            dispatch.struct_size = sizeof(dispatch);
+            std::uint64_t id{};
+            return inkpod_core_guide_add(core, INKPOD_GUIDE_HORIZONTAL, 7, &dispatch, &id);
+        }, false, true, false)) return 876;
+    if (entered.wait_for(std::chrono::seconds(2)) != std::future_status::ready) {
+        release.set_value();
+        return 877;
+    }
+    const bool accepted = fixture.Host().EnqueueInkScript(Request(871U, fixture.Command(),
+        CurrentDocumentSource(0U, "stale-before-snapshot"), {fixture.Directory()}));
+    release.set_value();
+    if (!accepted || !WaitForNotification(fixture.Owner(), fixture.Host(), 871U,
+            InkScriptEngineNotificationKind::Completed, result)
+        || result.status != INKPOD_STATUS_INVALID_STATE
+        || GetFileAttributesW((fixture.Directory() + L"\\stale-before-snapshot_0001.inkpod").c_str()) != INVALID_FILE_ATTRIBUTES) return 878;
+    return 0;
+}
+
 int wmain() {
     for (const auto test : {
              &TestSuccessAndNativeContracts,
              &TestInvalidCancelResourceAndSaveFailure,
              &TestOverflowWaitAndClose,
              &TestShutdownRace,
-             &TestQueueSaturation}) {
+             &TestQueueSaturation,
+             &TestStagedPublicationAndCapturedTarget,
+             &TestActivePublicationUndoAndStale,
+             &TestImagePreviewAndClosedReservation,
+             &TestCommonStatusProgressAndCancel,
+             &TestSharedCodecsAndDryPublication,
+             &TestEnqueueAllocationFailure,
+             &TestOpenSessionOwnershipAndIssueTimeStale}) {
         const int result = test();
         if (result != 0) {
             std::fprintf(

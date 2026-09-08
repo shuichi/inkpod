@@ -100,11 +100,11 @@ impl ScriptRunAdapter for ScriptIoAdapter {
             return Err(ScriptRunAdapterError::Cancelled);
         }
         let path = self.known_path(expected.path())?;
-        let (before, bytes) = self.read_fingerprint(&path)?;
+        let (before, bytes) = self.read_fingerprint_cancellable(&path, cancelled)?;
         if cancelled() {
             return Err(ScriptRunAdapterError::Cancelled);
         }
-        let after = self.read_fingerprint(&path)?.0;
+        let after = self.read_fingerprint_cancellable(&path, cancelled)?.0;
         Ok(ScriptNativeRead::new(bytes, before, after))
     }
     fn fingerprint_native(

@@ -1,5 +1,5 @@
 use crate::backend;
-use crate::file_lock::{LockKey, lock_cancel};
+use crate::file_lock::{LockKey, lock_cancel_with};
 use crate::{FileStamp, IoError, IoManager, IoResult, JobContext, JobPhase, LoadedBytes};
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{File, OpenOptions};
@@ -26,7 +26,20 @@ impl IoManager {
         context: &JobContext,
         action: impl FnOnce(&LockedFiles<'_>) -> IoResult<T>,
     ) -> IoResult<T> {
+        self.with_file_locks_cancellable(paths, context, &mut || false, |files, _| action(files))
+    }
+
+    pub(crate) fn with_file_locks_cancellable<T>(
+        &self,
+        paths: &[PathBuf],
+        context: &JobContext,
+        cancelled: &mut dyn FnMut() -> bool,
+        action: impl FnOnce(&LockedFiles<'_>, &mut dyn FnMut() -> bool) -> IoResult<T>,
+    ) -> IoResult<T> {
         self.check_running(context)?;
+        if cancelled() {
+            return Err(IoError::Cancelled);
+        }
         if paths.is_empty() || paths.len() > 16_384 {
             return Err(IoError::LimitExceeded(
                 "file transaction target count is invalid",
@@ -48,7 +61,7 @@ impl IoManager {
             .collect();
         let mut path_guards = Vec::with_capacity(path_owners.len());
         for owner in &path_owners {
-            path_guards.push(lock_cancel(owner, context)?);
+            path_guards.push(lock_cancel_with(owner, context, cancelled)?);
         }
         let mut identities = BTreeSet::new();
         for path in &normalized {
@@ -66,14 +79,17 @@ impl IoManager {
             .collect();
         let mut identity_guards = Vec::with_capacity(identity_owners.len());
         for owner in &identity_owners {
-            identity_guards.push(lock_cancel(owner, context)?);
+            identity_guards.push(lock_cancel_with(owner, context, cancelled)?);
         }
         context.check_cancelled()?;
-        action(&LockedFiles {
-            manager: self,
-            context,
-            members,
-        })
+        action(
+            &LockedFiles {
+                manager: self,
+                context,
+                members,
+            },
+            cancelled,
+        )
     }
 
     /// Provides a bounded, locked streaming reader. Native codec resource bounds
@@ -215,11 +231,26 @@ impl LockedFiles<'_> {
     }
 
     pub fn read_bytes(&self, path: &Path, maximum_bytes: u64) -> IoResult<LoadedBytes> {
+        self.read_bytes_cancellable(path, maximum_bytes, &mut || false)
+    }
+
+    pub(crate) fn read_bytes_cancellable(
+        &self,
+        path: &Path,
+        maximum_bytes: u64,
+        cancelled: &mut dyn FnMut() -> bool,
+    ) -> IoResult<LoadedBytes> {
         let path = self.resolve_member(path)?;
         let mut file = File::open(&path)?;
         let stamp = backend::stamp(&file)?;
-        self.manager
-            .read_open_file(&mut file, path, stamp, maximum_bytes, self.context)
+        self.manager.read_open_file_cancellable(
+            &mut file,
+            path,
+            stamp,
+            maximum_bytes,
+            self.context,
+            cancelled,
+        )
     }
 
     pub fn with_reader<T>(

@@ -441,6 +441,10 @@ impl ScriptSessionSnapshot {
     pub(super) fn publication_token(&self) -> crate::DocumentSaveToken {
         self.publication_token.as_ref().clone()
     }
+
+    pub(super) fn backing_matches(&self, core: &Core) -> bool {
+        self.publication_token.matches_inkscript_backing(core)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -677,6 +681,15 @@ impl ScriptCommandContext {
         self.current_document.as_ref()
     }
 
+    /// Returns the captured `(session_id, session_generation, source_generation)`
+    /// for issue-time publication. Absence grants no active-document authority.
+    pub const fn current_session_identity(&self) -> Option<(u64, u64, u64)> {
+        match &self.current_document {
+            Some(expected) => Some(expected.session_identity()),
+            None => None,
+        }
+    }
+
     pub const fn current_sequence(&self) -> Option<&ScriptSequenceExpectation> {
         self.current_sequence.as_ref()
     }
@@ -767,6 +780,9 @@ pub struct OpenSessionRecord {
     session_generation: u64,
     document_uuid: u128,
     backing_path: ValidatedPathIdentity,
+    // The other member of one Core-owned pair, possibly a reserved missing path.
+    // This is runtime authority only and never creates a second session snapshot.
+    pair_alias: Option<ValidatedPathIdentity>,
 }
 
 impl OpenSessionRecord {
@@ -788,7 +804,30 @@ impl OpenSessionRecord {
             session_generation,
             document_uuid,
             backing_path,
+            pair_alias: None,
         })
+    }
+
+    pub(super) fn with_pair_alias(
+        mut self,
+        alias: Option<ValidatedPathIdentity>,
+    ) -> Result<Self, ScriptPlanError> {
+        if let Some(path) = &alias {
+            path.validate()?;
+            if self.backing_path.aliases(path) {
+                return Err(ScriptPlanError::InvalidInput);
+            }
+        }
+        self.pair_alias = alias;
+        Ok(self)
+    }
+
+    fn owns_path(&self, path: &ValidatedPathIdentity) -> bool {
+        self.backing_path.aliases(path)
+            || self
+                .pair_alias
+                .as_ref()
+                .is_some_and(|alias| alias.aliases(path))
     }
 
     pub const fn session_id(&self) -> u64 {
@@ -823,9 +862,13 @@ impl OpenSessionSetSnapshot {
         let mut session_ids = BTreeSet::new();
         for (index, session) in sessions.iter().enumerate() {
             if !session_ids.insert(session.session_id)
-                || sessions[..index]
-                    .iter()
-                    .any(|other| other.backing_path.aliases(&session.backing_path))
+                || sessions[..index].iter().any(|other| {
+                    other.owns_path(&session.backing_path)
+                        || session
+                            .pair_alias
+                            .as_ref()
+                            .is_some_and(|path| other.owns_path(path))
+                })
             {
                 return Err(ScriptPlanError::InvalidInput);
             }
@@ -1741,7 +1784,7 @@ fn file_to_planned(
     if let Some(open) = session_set
         .sessions
         .iter()
-        .find(|session| session.backing_path.aliases(&fingerprint.path))
+        .find(|session| session.owns_path(&fingerprint.path))
     {
         if overwrite {
             return Err(ScriptPlanError::OpenSessionOverwrite);
@@ -1755,7 +1798,7 @@ fn file_to_planned(
                 || snapshot
                     .backing_path
                     .as_ref()
-                    .is_none_or(|path| !path.aliases(&fingerprint.path))
+                    .is_none_or(|path| !path.aliases(&open.backing_path))
             {
                 return Err(ScriptPlanError::StaleInput);
             }
@@ -2130,7 +2173,7 @@ fn resolve_destinations(
             if session_set
                 .sessions
                 .iter()
-                .any(|session| session.backing_path.aliases(&destination))
+                .any(|session| session.owns_path(&destination))
             {
                 return Err(ScriptPlanError::OpenSessionOverwrite);
             }
@@ -2141,7 +2184,7 @@ fn resolve_destinations(
             || session_set
                 .sessions
                 .iter()
-                .any(|session| session.backing_path.aliases(&destination))
+                .any(|session| session.owns_path(&destination))
             || authority
                 .script_path
                 .as_ref()

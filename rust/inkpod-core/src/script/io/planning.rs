@@ -31,6 +31,7 @@ impl ScriptPlanAdapter for ScriptIoAdapter {
                         session.uuid,
                         path.clone(),
                     )
+                    .and_then(|record| record.with_pair_alias(session.pair_alias.clone()))
                     .map_err(|_| ScriptPlanAdapterError::InvalidData)?,
                 );
             }
@@ -52,7 +53,7 @@ impl ScriptPlanAdapter for ScriptIoAdapter {
             .get(&intent_id)
             .cloned()
             .ok_or(ScriptPlanAdapterError::InvalidData)?;
-        self.read_fingerprint(&path)
+        self.read_fingerprint_cancellable(&path, cancelled)
             .map(|value| value.0)
             .map_err(plan_error)
     }
@@ -94,7 +95,11 @@ impl ScriptPlanAdapter for ScriptIoAdapter {
                             extension.as_str(),
                             "inkpod" | "png" | "tif" | "tiff" | "tga" | "bmp"
                         ) {
-                            matching.push(self.read_fingerprint(&path).map_err(plan_error)?.0);
+                            matching.push(
+                                self.read_fingerprint_cancellable(&path, cancelled)
+                                    .map_err(plan_error)?
+                                    .0,
+                            );
                             if matching.len() > 16_384 {
                                 return Err(ScriptPlanAdapterError::Failure);
                             }

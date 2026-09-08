@@ -48,6 +48,7 @@ const wchar_t* TaskName(JobProgressSlot slot) noexcept {
         case JobProgressSlot::Effect: return UiText(UiStringId::Text0806);
         case JobProgressSlot::Batch: return UiText(UiStringId::Text0255);
         case JobProgressSlot::ColorChart: return UiText(UiStringId::Text0053);
+        case JobProgressSlot::InkScript: return L"InkScript";
         default: return UiText(UiStringId::Text0511);
     }
 }

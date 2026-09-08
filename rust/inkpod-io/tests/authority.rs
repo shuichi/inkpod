@@ -280,10 +280,9 @@ fn guarded_overwrite_install_failure_preserves_source_and_removes_temporary() {
     );
     let final_authority = manager.observe_path_authority(&path, &context).unwrap();
     fs::set_permissions(&path, original_permissions).unwrap();
-    assert!(matches!(
-        result,
-        Err(inkpod_io::IoError::UnsupportedAtomicPublication)
-    ));
+    // Guarded rename is available here. A particular readonly destination is a
+    // save failure, not evidence that this filesystem lacks atomic publication.
+    assert!(matches!(result, Err(inkpod_io::IoError::Io(_))));
     assert_eq!(final_authority, authority);
     assert_eq!(fs::read(&path).unwrap(), b"original");
     assert_eq!(fs::read_dir(&root).unwrap().count(), 1);

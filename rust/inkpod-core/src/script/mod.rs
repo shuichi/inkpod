@@ -14,7 +14,7 @@ mod execute;
 mod export;
 mod identity;
 mod io;
-pub use io::ScriptIoAdapter;
+pub use io::{ScriptIoAdapter, ScriptIoSequenceInput};
 mod output;
 pub use output::{ScriptStagedResult, ScriptStagedResultKind};
 mod preview;

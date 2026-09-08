@@ -66,7 +66,7 @@
 extern "C" {
 #endif
 
-#define INKPOD_ABI_VERSION UINT32_C(34)
+#define INKPOD_ABI_VERSION UINT32_C(35)
 #define INKPOD_SNAPSHOT_SOURCE_SEQUENCE_PRISTINE UINT32_C(1)
 #define INKPOD_FEATURE_NONE UINT64_C(0)
 
@@ -6628,7 +6628,9 @@ InkpodStatus inkpod_core_inkscript_run_task_event_take(
     InkpodCore* core,
     InkpodInkScriptRunTask* task,
     InkpodInkScriptTaskEvent* output);
-/** Transfers one immutable terminal report out of a completed RunTask exactly once. */
+/** Transfers one immutable terminal report out of a completed RunTask exactly once.
+ * IMAGE_PREVIEW cancellation/resource/I/O/cleanup/stale failure still emits a terminal event,
+ * but owns no report or staged result; take_report returns INVALID_STATE in those cases. */
 InkpodStatus inkpod_core_inkscript_run_task_take_report(
     InkpodCore* core,
     InkpodInkScriptRunTask* task,
@@ -6994,6 +6996,137 @@ InkpodStatus inkpod_subpalette_io_job_apply(InkpodSubpalette* subpalette, Inkpod
 /** Changes only the default used by subsequent blank-document creation; no document mutation. */
 InkpodStatus inkpod_core_set_new_cell_raster_format(InkpodCore* core, uint32_t format);
 InkpodStatus inkpod_core_get_raster_file_format(InkpodCore* core, uint32_t* out_format);
+
+/* Private InkScript shared-manager execution. No product command/filter cutover. */
+#define INKPOD_INKSCRIPT_RUN_IMAGE_PREVIEW UINT32_C(3)
+#define INKPOD_INKSCRIPT_STAGED_ACTIVE_DOCUMENT UINT32_C(1)
+#define INKPOD_INKSCRIPT_STAGED_NEW_TAB UINT32_C(2)
+#define INKPOD_INKSCRIPT_STAGED_IMAGE_PREVIEW UINT32_C(3)
+#define INKPOD_INKSCRIPT_OUTCOME_STAGED UINT32_C(6)
+#define INKPOD_INKSCRIPT_SESSION_USE_CORE_BACKING UINT64_C(1)
+typedef struct InkpodInkScriptIo InkpodInkScriptIo;
+typedef struct InkpodInkScriptStagedResult InkpodInkScriptStagedResult;
+typedef struct InkpodInkScriptApprovedPath {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t intent_id;
+    InkpodInkScriptUtf8Span path;
+} InkpodInkScriptApprovedPath;
+typedef struct InkpodInkScriptIoRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    const InkpodInkScriptApprovedPath* approved_paths;
+    uint64_t path_count;
+    uint64_t path_stride_bytes;
+    uint64_t new_tab_capacity;
+} InkpodInkScriptIoRequest;
+typedef struct InkpodInkScriptIoSession {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t session_id;
+    uint64_t session_generation;
+    uint64_t source_generation;
+    InkpodCore* session_core;
+    InkpodInkScriptUtf8Span label;
+    InkpodInkScriptUtf8Span backing_path;
+    uint32_t display_number;
+    uint32_t reserved;
+} InkpodInkScriptIoSession;
+typedef struct InkpodInkScriptIoSequenceMember {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t kind;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t session_id;
+    uint64_t source_generation;
+    InkpodInkScriptUtf8Span path;
+} InkpodInkScriptIoSequenceMember;
+typedef struct InkpodInkScriptIoSequenceRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t sequence_id;
+    uint64_t generation;
+    const InkpodInkScriptIoSequenceMember* members;
+    uint64_t member_count;
+    uint64_t member_stride_bytes;
+} InkpodInkScriptIoSequenceRequest;
+typedef struct InkpodInkScriptSharedPlanRequest {
+    uint32_t struct_size;
+    uint32_t version;
+    uint64_t feature_flags;
+    uint64_t controller_id;
+    uint64_t session_generation;
+    uint64_t current_session_id;
+    InkpodInkScriptUtf8Span script_path;
+    uint64_t maximum_folder_entries;
+} InkpodInkScriptSharedPlanRequest;
+typedef struct InkpodInkScriptStagedInfo {
+    uint32_t struct_size;
+    uint32_t version;
+    uint32_t kind;
+    uint32_t reserved;
+    uint64_t feature_flags;
+    uint64_t ordinal;
+    uint64_t session_id;
+    uint64_t session_generation;
+    uint64_t source_generation;
+} InkpodInkScriptStagedInfo;
+/** Owner-thread only. Copies bounded approved absolute paths; null manager owns a default shared
+ * service. No source string receives cwd authority. Path count <= 98,305; sequence/session count
+ * <= 16,384; each UTF-8 path <= 32 KiB; aggregate path bytes <= 128 MiB. Empty strided spans use
+ * null pointer/count/stride zero. Empty optional UTF-8 spans ignore their pointer. Nonempty records
+ * require initialized size/version/zero flags/reserved; no partial owner on validation failure. */
+InkpodStatus inkpod_core_inkscript_io_create(InkpodCore* core, InkpodIoManager* manager, const InkpodInkScriptIoRequest* request, InkpodInkScriptIo** output);
+/** Captures immutable history/editor/savepoint state now. label is a supported native/raster
+ * filename. USE_CORE_BACKING reads the Core-owned path and requires empty request.backing_path;
+ * when backed, label and display_number are derived from that path. Caller label/display_number
+ * are used only for pathless captures. Without the flag, backing_path is the explicit captured
+ * host association and caller label/display_number are retained. */
+InkpodStatus inkpod_core_inkscript_io_capture_session(InkpodCore* core, InkpodInkScriptIo* io, const InkpodInkScriptIoSession* request);
+/** Copies approved sequence member declarations. SESSION_MEMBER uses session_id and zero source
+ * generation/empty path; FILE_MEMBER uses explicit absolute path/nonzero source_generation and
+ * session_id zero. PlanTask.advance captures file fingerprints under its atomic cancellation.
+ * Replacing a sequence invalidates older authority. Actual capture errors never publish a plan. */
+InkpodStatus inkpod_core_inkscript_io_capture_sequence(InkpodCore* core, InkpodInkScriptIo* io, const InkpodInkScriptIoSequenceRequest* request);
+/** session_id zero revokes path authority; otherwise invalidates a closed/replaced session or
+ * revoked backing. Ordinary document/editor edits keep already captured immutable input valid.
+ * Existing plan/run/result clones share this invalidation state and never retarget another tab. */
+InkpodStatus inkpod_core_inkscript_io_invalidate(InkpodCore* core, InkpodInkScriptIo* io, uint64_t session_id);
+/** Checks Core-owned document UUID/native+raster backing authority, without recomputing a snapshot.
+ * Ordinary document/editor edits, history, and savepoints do not invalidate frozen inputs.
+ * A changed backing returns INVALID_STATE and invalidates the captured session in all clones.
+ * Frontend validates every still-open captured Core before advance and staged publication. */
+InkpodStatus inkpod_core_inkscript_io_validate_session(InkpodCore* core, InkpodInkScriptIo* io, uint64_t session_id, InkpodCore* session);
+/** Owner-thread release clears the pointer. NULL owner value is a successful no-op.
+ * Task/plan/result clones retain their service; release every child before destroying parent Core. */
+InkpodStatus inkpod_core_inkscript_io_release(InkpodCore* core, InkpodInkScriptIo** owner);
+/** Existing task query/cancel and one-event backpressure apply. Shared plan owns a frozen adapter;
+ * existing run-create transfers plan+confirmation atomically, ignores no user callbacks, and
+ * requires host.context/call/flags zero. IMAGE_PREVIEW is valid only on this shared path.
+ * Its maximum_output_bytes lowers the 4-GiB aggregate preview temporary bound when nonzero. */
+InkpodStatus inkpod_core_inkscript_shared_plan_task_create(InkpodCore* core, const InkpodInkScriptProgram* program, InkpodInkScriptIo* io, const InkpodInkScriptSharedPlanRequest* request, InkpodInkScriptPlanTask** output);
+/** Results are owner-thread only. Reports remain detached immutable DTOs. dry-run has zero
+ * publication results; successful slots keep stable indices after take. Invalid output/index/route
+ * preserves the caller's empty owner and does not consume a slot. A slot transfers only once;
+ * later take returns INVALID_STATE. Later cancellation retains successful NEW_TAB items, while
+ * active and preview publication is rejected after terminal cancellation. */
+InkpodStatus inkpod_core_inkscript_run_task_result_count(InkpodCore* core, InkpodInkScriptRunTask* task, uint64_t* output);
+InkpodStatus inkpod_core_inkscript_run_task_take_staged_result(InkpodCore* core, InkpodInkScriptRunTask* task, uint64_t index, InkpodInkScriptStagedResult** output, InkpodInkScriptStagedInfo* info);
+/** Apply preserves the exact original active session's authority/view/savepoints. cancelled is
+ * 0 or 1. The staged result also retains the original task's atomic cancel signal; retain that
+ * task while publication is pending to cancel during final fingerprint validation. Validation
+ * failure keeps ownership; after Core apply begins result is always consumed.
+ * NEW_TAB/IMAGE_PREVIEW cannot be applied as active. */
+InkpodStatus inkpod_core_inkscript_staged_result_apply_active(InkpodCore* core, InkpodInkScriptStagedResult** owner, InkpodCore* target, uint64_t session_id, uint64_t session_generation, uint64_t source_generation, uint32_t cancelled);
+/** Only NEW_TAB/IMAGE_PREVIEW may transfer into a new Core. Preview is clean/pathless and retains
+ * the original session tuple in StagedInfo; frontend must keep that context for subsequent jobs. */
+InkpodStatus inkpod_core_inkscript_staged_result_take_core(InkpodCore* core, InkpodInkScriptStagedResult** owner, InkpodCore** output);
+InkpodStatus inkpod_core_inkscript_staged_result_release(InkpodCore* core, InkpodInkScriptStagedResult** owner);
 
 #ifdef __cplusplus
 } /* extern "C" */

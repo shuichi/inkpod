@@ -433,7 +433,18 @@ pub(super) fn rename_with_authority(
         )
     };
     if result < 0 {
-        if overwrite {
+        // FileRenameInformationEx capability failures are distinct from a
+        // supported rename refused by this file's access/sharing permissions.
+        // Keep either failure closed; never drop the guard or retry a weaker rename.
+        const STATUS_NOT_IMPLEMENTED: u32 = 0xc0000002;
+        const STATUS_INVALID_INFO_CLASS: u32 = 0xc0000003;
+        const STATUS_NOT_SUPPORTED: u32 = 0xc00000bb;
+        if overwrite
+            && matches!(
+                result as u32,
+                STATUS_NOT_IMPLEMENTED | STATUS_INVALID_INFO_CLASS | STATUS_NOT_SUPPORTED
+            )
+        {
             return Err(IoError::UnsupportedAtomicPublication);
         }
         return Err(IoError::Io(std::io::Error::other(format!(

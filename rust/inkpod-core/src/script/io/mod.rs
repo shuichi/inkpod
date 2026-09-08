@@ -13,8 +13,11 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+mod assets;
 mod planning;
 mod running;
+mod sequence;
+pub use sequence::ScriptIoSequenceInput;
 
 const MAX_APPROVED_PATHS: usize = 2 * MAX_INKSCRIPT_INPUTS + MAX_INKSCRIPT_CONTAINER_ELEMENTS + 1;
 
@@ -22,6 +25,7 @@ const MAX_APPROVED_PATHS: usize = 2 * MAX_INKSCRIPT_INPUTS + MAX_INKSCRIPT_CONTA
 struct Session {
     snapshot: ScriptSessionSnapshot,
     backing: Option<ValidatedPathIdentity>,
+    pair_alias: Option<ValidatedPathIdentity>,
     uuid: u128,
 }
 #[derive(Default)]
@@ -35,7 +39,7 @@ struct LiveState {
 /// Core-only shared-manager implementation of the existing plan/run adapters.
 /// Construction grants no authority: callers explicitly map every path intent to
 /// an approved absolute path. Clones share invalidation state, so owner-thread
-/// close/edit notifications invalidate an in-flight adapter without OS handles.
+/// close/source-replacement notifications invalidate a run without OS handles.
 #[derive(Clone)]
 pub struct ScriptIoAdapter {
     manager: IoManager,
@@ -103,8 +107,66 @@ impl ScriptIoAdapter {
         &self.manager
     }
 
+    /// Captures an owned host session using the Core's current native backing
+    /// path, or the observed raster of a planned pair. Both pair members remain
+    /// one session identity, including a missing member reserved for normal Save.
+    /// Backed sessions derive their display name and cell number from that path;
+    /// `label` and `display_number` are fallbacks only for a pathless session.
+    /// Core state without native or planned pair authority remains pathless; no
+    /// backing authority is inferred from the label. Failure semantics match
+    /// [`Self::capture_session`], which remains available for explicit captures.
+    #[allow(clippy::too_many_arguments)]
+    pub fn capture_session_from_core(
+        &mut self,
+        session_id: u64,
+        session_generation: u64,
+        source_generation: u64,
+        label: String,
+        display_number: u32,
+        core: &Core,
+    ) -> Result<(), ScriptPlanError> {
+        let (backing, pair_alias) = if let Some(pair) = &core.io_pair_authority {
+            (
+                Some(pair.native_path.clone()),
+                Some(pair.raster_path.clone()),
+            )
+        } else if let Some(pair) = &core.io_pair_plan {
+            (
+                Some(pair.raster_path.clone()),
+                Some(pair.native_path.clone()),
+            )
+        } else {
+            (core.current_path.clone(), None)
+        };
+        let (label, display_number) = match &backing {
+            Some(path) => {
+                let label = path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .ok_or(ScriptPlanError::InvalidInput)?
+                    .to_owned();
+                let number = self::display_number(&label);
+                (label, number)
+            }
+            None => (label, display_number),
+        };
+        self.capture_session_with_alias(
+            session_id,
+            session_generation,
+            source_generation,
+            label,
+            display_number,
+            backing,
+            pair_alias,
+            core,
+        )
+    }
+
     /// Captures the issuing Core, including history and both savepoints. Caller
-    /// supplies a nonzero view/session generation and invalidates it on edits.
+    /// supplies a nonzero view/session generation and invalidates it on source
+    /// replacement, view replacement, close or explicit authority revocation.
+    /// Ordinary document edits do not invalidate the immutable captured input;
+    /// active publication separately validates its exact document-save token.
     #[allow(clippy::too_many_arguments)]
     pub fn capture_session(
         &mut self,
@@ -114,6 +176,30 @@ impl ScriptIoAdapter {
         label: String,
         display_number: u32,
         backing_path: Option<PathBuf>,
+        core: &Core,
+    ) -> Result<(), ScriptPlanError> {
+        self.capture_session_with_alias(
+            session_id,
+            session_generation,
+            source_generation,
+            label,
+            display_number,
+            backing_path,
+            None,
+            core,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn capture_session_with_alias(
+        &mut self,
+        session_id: u64,
+        session_generation: u64,
+        source_generation: u64,
+        label: String,
+        display_number: u32,
+        backing_path: Option<PathBuf>,
+        pair_alias: Option<PathBuf>,
         core: &Core,
     ) -> Result<(), ScriptPlanError> {
         if self.sessions.len() >= MAX_INKSCRIPT_INPUTS && !self.sessions.contains_key(&session_id) {
@@ -131,6 +217,11 @@ impl ScriptIoAdapter {
             }
         }
         let backing = backing_path
+            .as_ref()
+            .map(|path| self.observe(path))
+            .transpose()
+            .map_err(|_| ScriptPlanError::InvalidPathIdentity)?;
+        let pair_alias = pair_alias
             .as_ref()
             .map(|path| self.observe(path))
             .transpose()
@@ -168,14 +259,17 @@ impl ScriptIoAdapter {
             Session {
                 snapshot,
                 backing,
+                pair_alias,
                 uuid,
             },
         );
         Ok(())
     }
 
-    /// Invalidates previously captured session results after an edit, close, or
-    /// issue-time view replacement. Does not change any document or filesystem.
+    /// Invalidates captured results after source/view replacement, close, or
+    /// explicit authority revocation. Ordinary live document edits may retain the
+    /// frozen input; exact active application checks them separately. This call
+    /// does not change any document or filesystem.
     pub fn invalidate_session(&self, session_id: u64) -> Result<(), ScriptPlanError> {
         let mut state = self
             .state
@@ -188,6 +282,32 @@ impl ScriptIoAdapter {
         state.sessions.remove(&session_id);
         state.sessions_generation = generation;
         Ok(())
+    }
+
+    /// Tests whether a captured session still belongs to the same Core lifetime,
+    /// document UUID and native/pair file authority. Ordinary document/editor
+    /// edits and history moves do not invalidate immutable inputs; active apply
+    /// separately checks the complete persistence token. This query performs no
+    /// allocation, file I/O, encoding or invalidation; absent/stale sessions return
+    /// `false`. The host explicitly invalidates a rejected capture before use.
+    pub fn validate_captured_session_backing(
+        &self,
+        session_id: u64,
+        core: &Core,
+    ) -> Result<bool, ScriptPlanError> {
+        let Some(session) = self.sessions.get(&session_id) else {
+            return Ok(false);
+        };
+        let state = self
+            .state
+            .lock()
+            .map_err(|_| ScriptPlanError::StaleAuthority)?;
+        Ok(state.sessions.get(&session_id)
+            == Some(&(
+                session.snapshot.session_generation(),
+                session.snapshot.source_generation(),
+            ))
+            && session.snapshot.backing_matches(core))
     }
 
     /// Invalidates all grants when the owner revokes filesystem authority.
@@ -209,10 +329,23 @@ impl ScriptIoAdapter {
         &mut self,
         sequence: ScriptSequenceSnapshot,
     ) -> Result<(), ScriptPlanError> {
+        self.capture_sequence_if_current(sequence, None)
+    }
+
+    fn capture_sequence_if_current(
+        &mut self,
+        sequence: ScriptSequenceSnapshot,
+        expected_generations: Option<(u64, u64)>,
+    ) -> Result<(), ScriptPlanError> {
         let mut state = self
             .state
             .lock()
             .map_err(|_| ScriptPlanError::StaleAuthority)?;
+        if expected_generations.is_some_and(|expected| {
+            expected != (state.authority_generation, state.sessions_generation)
+        }) {
+            return Err(ScriptPlanError::StaleAuthority);
+        }
         let sessions_generation = state
             .sessions_generation
             .checked_add(1)
@@ -342,10 +475,18 @@ impl ScriptIoAdapter {
         &mut self,
         path: &Path,
     ) -> Result<(NativeInputFingerprint, Vec<u8>), ScriptRunAdapterError> {
+        self.read_fingerprint_cancellable(path, &mut || false)
+    }
+
+    fn read_fingerprint_cancellable(
+        &mut self,
+        path: &Path,
+        cancelled: &mut dyn FnMut() -> bool,
+    ) -> Result<(NativeInputFingerprint, Vec<u8>), ScriptRunAdapterError> {
         let observed = self.observe(path)?;
         let loaded = self
             .manager
-            .read_bytes(path, 1024 * 1024 * 1024, &self.context)
+            .read_bytes_cancellable(path, 1024 * 1024 * 1024, &self.context, cancelled)
             .map_err(run_error)?;
         if observed.object_id() != Some(object_id(loaded.identity())) {
             return Err(ScriptRunAdapterError::InvalidData);

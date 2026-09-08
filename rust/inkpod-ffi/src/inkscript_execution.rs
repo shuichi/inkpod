@@ -6,6 +6,14 @@ use inkpod_format::{InkScriptPathIntentAccess, MAX_INKSCRIPT_INPUTS, MAX_INKSCRI
 use std::cell::UnsafeCell;
 use std::mem::size_of;
 
+mod publication;
+mod shared;
+use inkpod_core::inkscript::ScriptIoAdapter;
+pub use publication::*;
+use publication::{PreviewWork, PublicationGuard, StagedPayload};
+use shared::SequenceCapture;
+pub use shared::*;
+
 const MAX_HOST_RECORDS: u64 = MAX_INKSCRIPT_INPUTS as u64;
 
 #[derive(Clone, Copy)]
@@ -1193,7 +1201,9 @@ pub struct InkpodInkScriptPlanTask {
     grants: Vec<AuthorityGrant>,
     script_path: Option<ValidatedPathIdentity>,
     maximum_folder_entries: u64,
-    host: HostBridge,
+    host: Option<HostBridge>,
+    current_session: Option<u64>,
+    shared_script_path: Option<std::path::PathBuf>,
     state: AtomicU32,
     cancelled: AtomicBool,
     completed_work: AtomicU64,
@@ -1205,6 +1215,8 @@ struct PlanTaskOwnerData {
     terminal_status: u32,
     pending_event: Option<TaskEventData>,
     plan: Option<ScriptExecutionPlan>,
+    shared_io: Option<ScriptIoAdapter>,
+    sequence: Option<SequenceCapture>,
 }
 
 // SAFETY: Immutable route data and progress/cancellation atomics may be read concurrently.
@@ -1218,6 +1230,7 @@ pub struct InkpodInkScriptPlan {
     controller_id: u64,
     session_generation: u64,
     plan: ScriptExecutionPlan,
+    shared_io: Option<ScriptIoAdapter>,
 }
 
 pub struct InkpodInkScriptConfirmation {
@@ -1233,7 +1246,7 @@ pub struct InkpodInkScriptRunTask {
     owner_thread: ThreadId,
     core_generation: u64,
     state: AtomicU32,
-    cancelled: AtomicBool,
+    cancelled: std::sync::Arc<AtomicBool>,
     completed_work: AtomicU64,
     total_work: AtomicU64,
     owner_data: UnsafeCell<RunTaskOwnerData>,
@@ -1242,8 +1255,14 @@ pub struct InkpodInkScriptRunTask {
 struct RunTaskOwnerData {
     terminal_status: u32,
     pending_event: Option<TaskEventData>,
-    task: ScriptRunTask,
-    adapter: HostRunAdapter,
+    task: Option<ScriptRunTask>,
+    preview: Option<PreviewWork>,
+    adapter: Box<dyn ScriptRunAdapter>,
+    shared_io: Option<ScriptIoAdapter>,
+    results: Option<Vec<Option<StagedPayload>>>,
+    result_count: u64,
+    publication_guard: Option<PublicationGuard>,
+    origin: ScriptCommandContext,
     report: Option<ScriptRunReport>,
 }
 
@@ -1361,12 +1380,39 @@ fn optional_sequence(host: HostBridge) -> Result<Option<ScriptSequenceSnapshot>,
     unsafe { sequence_from_response(&response) }.map(Some)
 }
 
-fn plan_once(task: &InkpodInkScriptPlanTask) -> Result<ScriptExecutionPlan, u32> {
+fn plan_once(
+    task: &InkpodInkScriptPlanTask,
+    owner_data: &mut PlanTaskOwnerData,
+) -> Result<ScriptExecutionPlan, u32> {
     if task.cancelled.load(Ordering::Acquire) {
         return Err(INKPOD_STATUS_CANCELLED);
     }
-    let current_document = optional_session(task.host, INKPOD_INKSCRIPT_HOST_CURRENT_DOCUMENT)?;
-    let current_sequence = optional_sequence(task.host)?;
+    let limits = if task.maximum_folder_entries == 0 {
+        ScriptPlanLimits::exact_current()
+    } else {
+        ScriptPlanLimits::exact_current().with_folder_entries(task.maximum_folder_entries)
+    };
+    if let Some(adapter) = &mut owner_data.shared_io {
+        if let Some(sequence) = &owner_data.sequence {
+            adapter
+                .capture_sequence_inputs(sequence.0, sequence.1, &sequence.2, &mut || {
+                    task.cancelled.load(Ordering::Acquire)
+                })
+                .map_err(map_plan_error)?;
+        }
+        return adapter
+            .plan(
+                &task.program,
+                task.current_session,
+                task.shared_script_path.clone(),
+                limits,
+                &mut || task.cancelled.load(Ordering::Acquire),
+            )
+            .map_err(map_plan_error);
+    }
+    let host = task.host.ok_or(INKPOD_STATUS_INVALID_STATE)?;
+    let current_document = optional_session(host, INKPOD_INKSCRIPT_HOST_CURRENT_DOCUMENT)?;
+    let current_sequence = optional_sequence(host)?;
     let command_context = ScriptCommandContext::new(
         current_document
             .as_ref()
@@ -1402,7 +1448,7 @@ fn plan_once(task: &InkpodInkScriptPlanTask) -> Result<ScriptExecutionPlan, u32>
     let mut readers = symbols
         .iter()
         .map(|symbol| HostAssetReader {
-            host: task.host,
+            host,
             symbol: symbol.clone().into_boxed_str(),
             offset: 0,
         })
@@ -1425,7 +1471,7 @@ fn plan_once(task: &InkpodInkScriptPlanTask) -> Result<ScriptExecutionPlan, u32>
             AuthorizedAssetStream::new(symbol.as_str(), identity, reader)
         })
         .collect::<Vec<_>>();
-    let mut adapter = HostPlanAdapter { host: task.host };
+    let mut adapter = HostPlanAdapter { host };
     let mut cancelled = || task.cancelled.load(Ordering::Acquire);
     let limits = if task.maximum_folder_entries == 0 {
         ScriptPlanLimits::exact_current()
@@ -1778,7 +1824,9 @@ pub unsafe extern "C" fn inkpod_core_inkscript_plan_task_create(
             grants,
             script_path,
             maximum_folder_entries: request.maximum_folder_entries,
-            host,
+            host: Some(host),
+            current_session: None,
+            shared_script_path: None,
             state: AtomicU32::new(INKPOD_TASK_READY),
             cancelled: AtomicBool::new(false),
             completed_work: AtomicU64::new(0),
@@ -1787,6 +1835,8 @@ pub unsafe extern "C" fn inkpod_core_inkscript_plan_task_create(
                 terminal_status: INKPOD_STATUS_INVALID_STATE,
                 pending_event: None,
                 plan: None,
+                shared_io: None,
+                sequence: None,
             }),
         });
         // SAFETY: Output storage is unique and currently null.
@@ -1879,7 +1929,7 @@ pub unsafe extern "C" fn inkpod_core_inkscript_plan_task_advance(
             );
         }
         task.state.store(INKPOD_TASK_RUNNING, Ordering::Release);
-        let result = plan_once(task);
+        let result = plan_once(task, owner_data);
         let status = match result {
             Ok(plan) => {
                 owner_data.plan = Some(plan);
@@ -2014,6 +2064,7 @@ pub unsafe extern "C" fn inkpod_core_inkscript_plan_task_take_plan(
             controller_id: task.controller_id,
             session_generation: task.session_generation,
             plan,
+            shared_io: owner_data.shared_io.take(),
         });
         // SAFETY: Output owner is unique and null.
         unsafe { out_plan.write(Box::into_raw(plan)) };
@@ -2489,12 +2540,7 @@ pub unsafe extern "C" fn inkpod_core_inkscript_confirmation_release(
 
 fn outcome_to_abi(value: &ScriptItemOutcome) -> (u32, u32) {
     match value {
-        // ABI v34 adapters cannot pass staged-output preflight. Fail closed if
-        // an unsupported Core-only result ever crosses this boundary.
-        ScriptItemOutcome::Staged => (
-            INKPOD_INKSCRIPT_OUTCOME_FAILED,
-            INKPOD_INKSCRIPT_FAILURE_ADAPTER,
-        ),
+        ScriptItemOutcome::Staged => (INKPOD_INKSCRIPT_OUTCOME_STAGED, 0),
         ScriptItemOutcome::NotStarted => (INKPOD_INKSCRIPT_OUTCOME_NOT_STARTED, 0),
         ScriptItemOutcome::Installed => (INKPOD_INKSCRIPT_OUTCOME_INSTALLED, 0),
         ScriptItemOutcome::DryRun => (INKPOD_INKSCRIPT_OUTCOME_DRY_RUN, 0),
@@ -2622,6 +2668,7 @@ pub unsafe extern "C" fn inkpod_core_inkscript_run_task_create(
         let mode = match request.mode {
             INKPOD_INKSCRIPT_RUN_DRY => ScriptRunMode::DryRun,
             INKPOD_INKSCRIPT_RUN_INSTALL => ScriptRunMode::Install,
+            INKPOD_INKSCRIPT_RUN_IMAGE_PREVIEW if plan.shared_io.is_some() => ScriptRunMode::DryRun,
             _ => {
                 return fail(
                     INKPOD_STATUS_INVALID_ARGUMENT,
@@ -2629,9 +2676,33 @@ pub unsafe extern "C" fn inkpod_core_inkscript_run_task_create(
                 );
             }
         };
-        let host = match HostBridge::from_record(&request.host) {
-            Ok(host) => host,
-            Err(status) => return status,
+        let adapter: Box<dyn ScriptRunAdapter> = if let Some(shared) = &plan.shared_io {
+            if (request.host.struct_size != 0
+                && request.host.struct_size < size_of::<InkpodInkScriptHostAdapter>() as u32)
+                || (request.host.version != 0
+                    && request.host.version != INKPOD_INKSCRIPT_RECORD_VERSION)
+            {
+                return fail(
+                    INKPOD_STATUS_INCOMPATIBLE_ABI,
+                    "shared InkScript host record is not exact-current",
+                );
+            }
+            if request.host.feature_flags != 0
+                || !request.host.context.is_null()
+                || request.host.call.is_some()
+            {
+                return fail(
+                    INKPOD_STATUS_INVALID_ARGUMENT,
+                    "shared InkScript run must not supply a host callback",
+                );
+            }
+            Box::new(shared.clone())
+        } else {
+            let host = match HostBridge::from_record(&request.host) {
+                Ok(host) => host,
+                Err(status) => return status,
+            };
+            Box::new(HostRunAdapter { host })
         };
         let mut token = confirmation.token.clone();
         let limits = if request.maximum_output_bytes == 0 {
@@ -2655,18 +2726,39 @@ pub unsafe extern "C" fn inkpod_core_inkscript_run_task_create(
             }
         };
         let total = inner.total_items() as u64;
+        let preview = (request.mode == INKPOD_INKSCRIPT_RUN_IMAGE_PREVIEW).then(|| PreviewWork {
+            program: program.program.clone(),
+            plan: plan.plan.clone(),
+            confirmation: confirmation.token.clone(),
+            maximum_bytes: request.maximum_output_bytes,
+        });
+        let publication_guard = match plan
+            .shared_io
+            .clone()
+            .map(|io| PublicationGuard::new(io, plan.plan.command_context()))
+            .transpose()
+        {
+            Ok(guard) => guard,
+            Err(status) => return status,
+        };
         let task = Box::new(InkpodInkScriptRunTask {
             owner_thread: plan.owner_thread,
             core_generation: plan.core_generation,
             state: AtomicU32::new(INKPOD_TASK_READY),
-            cancelled: AtomicBool::new(false),
+            cancelled: std::sync::Arc::new(AtomicBool::new(false)),
             completed_work: AtomicU64::new(0),
             total_work: AtomicU64::new(total),
             owner_data: UnsafeCell::new(RunTaskOwnerData {
                 terminal_status: INKPOD_STATUS_INVALID_STATE,
                 pending_event: None,
-                task: inner,
-                adapter: HostRunAdapter { host },
+                task: if preview.is_some() { None } else { Some(inner) },
+                preview,
+                adapter,
+                shared_io: plan.shared_io.clone(),
+                results: None,
+                result_count: 0,
+                publication_guard,
+                origin: plan.plan.command_context().clone(),
                 report: None,
             }),
         });
@@ -2772,7 +2864,16 @@ pub unsafe extern "C" fn inkpod_core_inkscript_run_task_advance(
         task.state.store(INKPOD_TASK_RUNNING, Ordering::Release);
         let cancelled = &task.cancelled;
         let mut poll = || cancelled.load(Ordering::Acquire);
-        match owner_data.task.advance(&mut owner_data.adapter, &mut poll) {
+        if owner_data.preview.is_some() {
+            return publication::advance_preview(task, owner_data);
+        }
+        let Some(inner) = owner_data.task.as_mut() else {
+            return fail(
+                INKPOD_STATUS_INVALID_STATE,
+                "InkScript run has no pending execution",
+            );
+        };
+        match inner.advance(owner_data.adapter.as_mut(), &mut poll) {
             ScriptRunAdvance::ItemCompleted {
                 ordinal,
                 completed,
@@ -2808,7 +2909,7 @@ pub unsafe extern "C" fn inkpod_core_inkscript_run_task_advance(
                 INKPOD_STATUS_OK
             }
             ScriptRunAdvance::Complete => {
-                let report = match owner_data.task.finish() {
+                let report = match inner.finish() {
                     Ok(report) => report,
                     Err(_) => {
                         task.state.store(INKPOD_TASK_FAILED, Ordering::Release);
@@ -2837,6 +2938,11 @@ pub unsafe extern "C" fn inkpod_core_inkscript_run_task_advance(
                         .count() as u64,
                     Ordering::Release,
                 );
+                owner_data.result_count = report
+                    .items
+                    .iter()
+                    .filter(|item| matches!(item.outcome, ScriptItemOutcome::Staged))
+                    .count() as u64;
                 owner_data.report = Some(report);
                 owner_data.terminal_status = status;
                 task.state.store(terminal_state, Ordering::Release);

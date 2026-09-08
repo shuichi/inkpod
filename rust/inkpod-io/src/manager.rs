@@ -409,6 +409,26 @@ impl IoManager {
         })
     }
 
+    /// Reads immutable bytes with the same identity, cache and allocation bounds as
+    /// [`Self::read_bytes`]. Polls cancellation while waiting for shared file locks,
+    /// before each 64 KiB read and verification chunk, and before returning bytes.
+    /// Cancellation releases transient allocations and never modifies the source.
+    /// The callback runs synchronously on the caller's thread; its panic unwinds.
+    pub fn read_bytes_cancellable(
+        &self,
+        path: &Path,
+        maximum_bytes: u64,
+        context: &JobContext,
+        cancelled: &mut dyn FnMut() -> bool,
+    ) -> IoResult<LoadedBytes> {
+        self.with_file_locks_cancellable(
+            &[path.to_path_buf()],
+            context,
+            cancelled,
+            |files, cancelled| files.read_bytes_cancellable(path, maximum_bytes, cancelled),
+        )
+    }
+
     pub(crate) fn read_open_file(
         &self,
         file: &mut File,
@@ -417,6 +437,19 @@ impl IoManager {
         maximum_bytes: u64,
         context: &JobContext,
     ) -> IoResult<LoadedBytes> {
+        self.read_open_file_cancellable(file, path, stamp, maximum_bytes, context, &mut || false)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn read_open_file_cancellable(
+        &self,
+        file: &mut File,
+        path: PathBuf,
+        stamp: FileStamp,
+        maximum_bytes: u64,
+        context: &JobContext,
+        cancelled: &mut dyn FnMut() -> bool,
+    ) -> IoResult<LoadedBytes> {
         let maximum_bytes = maximum_bytes.min(self.inner.config.max_file_bytes);
         if stamp.length > maximum_bytes {
             return Err(IoError::LimitExceeded(
@@ -424,6 +457,9 @@ impl IoManager {
             ));
         }
         context.check_cancelled()?;
+        if cancelled() {
+            return Err(IoError::Cancelled);
+        }
         if let Some((lease, generation)) = self.inner.cache.bytes(stamp) {
             return Ok(LoadedBytes {
                 path,
@@ -452,14 +488,22 @@ impl IoManager {
         context.set_phase(JobPhase::Reading);
         for chunk in bytes.chunks_mut(64 * 1024) {
             context.check_cancelled()?;
+            if cancelled() {
+                return Err(IoError::Cancelled);
+            }
             file.read_exact(chunk)?;
             context.update(|progress| {
                 progress.completed_bytes =
                     progress.completed_bytes.saturating_add(chunk.len() as u64)
             });
         }
-        let final_stamp = validate_or_retry_buffered_read(file, &path, stamp, &bytes, context)?;
+        let final_stamp = validate_or_retry_buffered_read_cancellable(
+            file, &path, stamp, &bytes, context, cancelled,
+        )?;
         context.check_cancelled()?;
+        if cancelled() {
+            return Err(IoError::Cancelled);
+        }
         self.inner
             .cache
             .counters
@@ -480,12 +524,31 @@ impl IoManager {
     }
 }
 
+#[cfg(test)]
 fn validate_or_retry_buffered_read(
     first_file: &File,
     path: &Path,
     initial_stamp: FileStamp,
     bytes: &[u8],
     context: &JobContext,
+) -> IoResult<FileStamp> {
+    validate_or_retry_buffered_read_cancellable(
+        first_file,
+        path,
+        initial_stamp,
+        bytes,
+        context,
+        &mut || false,
+    )
+}
+
+fn validate_or_retry_buffered_read_cancellable(
+    first_file: &File,
+    path: &Path,
+    initial_stamp: FileStamp,
+    bytes: &[u8],
+    context: &JobContext,
+    cancelled: &mut dyn FnMut() -> bool,
 ) -> IoResult<FileStamp> {
     let first_final_stamp = backend::stamp(first_file)?;
     if first_final_stamp == initial_stamp {
@@ -507,6 +570,9 @@ fn validate_or_retry_buffered_read(
     let mut verification = [0_u8; 64 * 1024];
     for expected in bytes.chunks(verification.len()) {
         context.check_cancelled()?;
+        if cancelled() {
+            return Err(IoError::Cancelled);
+        }
         let actual = &mut verification[..expected.len()];
         retry.read_exact(actual)?;
         if actual != expected {

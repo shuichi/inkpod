@@ -13,11 +13,17 @@
 #include <utility>
 #include <vector>
 
+#include "core_host_diagnostics.h"
 #include "app/core_host.h"
 #include "renderer/canvas.h"
 
 namespace {
 
+using inkpod::tests::core_host_diagnostics;
+
+// Keep each condition lazy: its original short-circuit/order is unchanged.
+#define CORE_HOST_FAILURE(...) \
+    core_host_diagnostics.FailureCondition([&] { return (__VA_ARGS__); })
 using inkpod::app::CommandContext;
 using inkpod::app::CanvasId;
 using inkpod::app::CoreHost;
@@ -248,15 +254,23 @@ bool WaitForPendingOperations(
     DocumentSessionId session,
     Generation generation,
     std::uint64_t minimum) noexcept {
-    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+    const auto started = std::chrono::steady_clock::now();
+    const auto deadline = started + std::chrono::seconds(2);
+    std::uint64_t attempts{};
+    std::uint64_t observed{};
     do {
+        ++attempts;
         CoreSessionState state{};
         if (host.GetSessionState(session, generation, state)
             && state.pending_operations >= minimum) {
+            core_host_diagnostics.Poll("pending-operations", started,
+                attempts, true, state.pending_operations);
             return true;
         }
+        observed = state.pending_operations;
         std::this_thread::yield();
     } while (std::chrono::steady_clock::now() < deadline);
+    core_host_diagnostics.Poll("pending-operations", started, attempts, false, observed);
     return false;
 }
 
@@ -299,15 +313,15 @@ bool SnapshotPublicationKeepsInputResponsive(
                     input_completed.set_value(status);
                 });
     });
-    const bool responsive = ui.wait_for(std::chrono::seconds(2))
-        == std::future_status::ready;
+    const bool responsive = core_host_diagnostics.WaitMatches(
+        ui, std::chrono::seconds(2), std::future_status::ready);
     // Unregistration is the distinct lifetime barrier and must still wait for
     // the pinned sink to finish before its caller could destroy the Canvas.
     auto unregister = std::async(std::launch::async, [&] {
         return host.UnregisterSnapshotSink(&sink);
     });
-    const bool lifetime_pinned = unregister.wait_for(std::chrono::milliseconds(25))
-        == std::future_status::timeout;
+    const bool lifetime_pinned = core_host_diagnostics.WaitMatches(
+        unregister, std::chrono::milliseconds(25), std::future_status::timeout);
     release_submission.set_value();
     const auto publication_status = publication_completed.get_future().get();
     const bool input_accepted = ui.get();
@@ -352,8 +366,8 @@ bool SnapshotPublicationKeepsInputResponsive(
     auto invalidation = std::async(std::launch::async, [&] {
         return host.InvalidateViewPublication(session, generation);
     });
-    const bool invalidation_responsive = invalidation.wait_for(std::chrono::seconds(2))
-        == std::future_status::ready;
+    const bool invalidation_responsive = core_host_diagnostics.WaitMatches(
+        invalidation, std::chrono::seconds(2), std::future_status::ready);
     release_old_submission.set_value();
     const bool invalidated = invalidation.get();
     const auto old_publication_status = old_publication_completed.get_future().get();
@@ -466,13 +480,15 @@ bool FileIoPollingAndInstallFence(HWND owner) {
             });
     }
     if (passed) {
-        passed = reading.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+        passed = core_host_diagnostics.WaitMatches(
+            reading, std::chrono::seconds(5), std::future_status::ready)
             && host.Invoke(first, generation, [](InkpodCore*) { return INKPOD_STATUS_OK; },
                 false, false) == INKPOD_STATUS_OK;
     }
     if (passed) {
         probe->phase.store(1U, std::memory_order_release);
-        passed = installing.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+        passed = core_host_diagnostics.WaitMatches(
+            installing, std::chrono::seconds(5), std::future_status::ready);
     }
     std::promise<InkpodStatus> delayed;
     auto delayed_result = delayed.get_future();
@@ -482,13 +498,16 @@ bool FileIoPollingAndInstallFence(HWND owner) {
             [&delayed](InkpodStatus status) { delayed.set_value(status); })
             && host.Invoke(second, generation, [](InkpodCore*) { return INKPOD_STATUS_OK; },
                 false, false) == INKPOD_STATUS_OK
-            && delayed_result.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout;
+            && core_host_diagnostics.WaitMatches(
+                delayed_result, std::chrono::milliseconds(0), std::future_status::timeout);
     }
     probe->phase.store(2U, std::memory_order_release);
     if (passed) {
-        passed = completed.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+        passed = core_host_diagnostics.WaitMatches(
+            completed, std::chrono::seconds(5), std::future_status::ready)
             && completed.get() == INKPOD_STATUS_OK
-            && delayed_result.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+            && core_host_diagnostics.WaitMatches(
+                delayed_result, std::chrono::seconds(5), std::future_status::ready)
             && delayed_result.get() == INKPOD_STATUS_OK
             && probe->completions.load() == 1U && probe->polls.load() >= 3U
             && probe->presentation_status.load() == INKPOD_STATUS_OK
@@ -523,7 +542,8 @@ bool FileIoPollingAndInstallFence(HWND owner) {
             });
     }
     if (passed) {
-        passed = outcomes_ready.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+        passed = core_host_diagnostics.WaitMatches(
+            outcomes_ready, std::chrono::seconds(5), std::future_status::ready);
         if (passed) {
             const auto [applied, presented] = outcomes_ready.get();
             InkpodDocumentInfo adopted = EmptyDocumentInfo();
@@ -585,9 +605,11 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
                 read->completed.set_value(status);
             });
     if (passed) {
-        passed = reading.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+        passed = core_host_diagnostics.WaitMatches(
+            reading, std::chrono::seconds(5), std::future_status::ready)
             && host.CloseSession(first, generation) == INKPOD_STATUS_OK
-            && completed_read.wait_for(std::chrono::seconds(5)) == std::future_status::ready
+            && core_host_diagnostics.WaitMatches(
+                completed_read, std::chrono::seconds(5), std::future_status::ready)
             && completed_read.get() == INKPOD_STATUS_CANCELLED && read->completions.load() == 1U
             && read->presentation_status.load() == INKPOD_STATUS_CANCELLED
             && host.CreateSession(first, Generation{2U}) == INKPOD_STATUS_OK
@@ -604,7 +626,8 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
                 install->completions.fetch_add(1U);
                 install->presentation_status.store(presentation_status);
                 install->completed.set_value(status);
-            }) && installing.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+            }) && core_host_diagnostics.WaitMatches(
+                installing, std::chrono::seconds(5), std::future_status::ready);
     }
     if (!passed) {
         install->phase.store(2U);
@@ -612,13 +635,17 @@ bool FileIoCloseCancellationAndShutdownFinalization(HWND owner) {
         return false;
     }
     auto stopped = std::async(std::launch::async, [&host] { host.Stop(); });
-    passed = cancelled_install.wait_for(std::chrono::seconds(5)) == std::future_status::ready
-        && stopped.wait_for(std::chrono::milliseconds(0)) == std::future_status::timeout;
+    passed = core_host_diagnostics.WaitMatches(
+        cancelled_install, std::chrono::seconds(5), std::future_status::ready)
+        && core_host_diagnostics.WaitMatches(
+            stopped, std::chrono::milliseconds(0), std::future_status::timeout);
     install->phase.store(2U, std::memory_order_release);
-    const bool finished = stopped.wait_for(std::chrono::seconds(5)) == std::future_status::ready;
+    const bool finished = core_host_diagnostics.WaitMatches(
+        stopped, std::chrono::seconds(5), std::future_status::ready);
     stopped.get();
     return passed && finished
-        && completed_install.wait_for(std::chrono::seconds(0)) == std::future_status::ready
+        && core_host_diagnostics.WaitMatches(
+            completed_install, std::chrono::seconds(0), std::future_status::ready)
         && completed_install.get() == INKPOD_STATUS_OK && install->completions.load() == 1U
         && install->presentation_status.load() == INKPOD_STATUS_OK;
 }
@@ -692,14 +719,24 @@ bool PrimitiveQueueSaturationIsExactlyOnce(
         Context(session, generation), request, false, false, true);
     release_blocker.set_value();
 
+    const auto drain_started = std::chrono::steady_clock::now();
+    std::uint64_t drain_attempts{};
+    std::uint64_t drain_pending{};
+    bool drain_reached{};
     for (int attempt = 0; attempt < 200; ++attempt) {
+        ++drain_attempts;
         CoreSessionState draining{};
         if (host.GetSessionState(session, generation, draining)
             && draining.pending_operations < queue_capacity) {
+            drain_pending = draining.pending_operations;
+            drain_reached = true;
             break;
         }
+        drain_pending = draining.pending_operations;
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    core_host_diagnostics.Poll("queue-drain", drain_started,
+        drain_attempts, drain_reached, drain_pending);
     if (host.WaitIdle(session, generation) != INKPOD_STATUS_OK) {
         return false;
     }
@@ -978,7 +1015,7 @@ bool PrimitiveShutdownCompletesExactlyOnce(HWND owner) {
 
 }  // namespace
 
-int wmain() {
+static int RunCoreHostTests() {
     SnapshotSink sink;
     SnapshotSink second_sink;
     std::array<SnapshotSink, CoreHost::kMaximumSnapshotSinks - 2U> capacity_sinks{};
@@ -996,20 +1033,20 @@ int wmain() {
         nullptr,
         GetModuleHandleW(nullptr),
         nullptr);
-    if (owner == nullptr) {
-        return 1;
+    if (CORE_HOST_FAILURE(owner == nullptr)) {
+        return core_host_diagnostics.Exit(1);
     }
 
-    if (!FileIoPollingAndInstallFence(owner)
-        || !FileIoCloseCancellationAndShutdownFinalization(owner)) {
+    if (CORE_HOST_FAILURE(!FileIoPollingAndInstallFence(owner)
+        || !FileIoCloseCancellationAndShutdownFinalization(owner))) {
         DestroyWindow(owner);
-        return 40;
+        return core_host_diagnostics.Exit(40);
     }
     CoreHost host;
-    if (host.Start(&sink, owner) != INKPOD_STATUS_OK || host.ThreadId() == 0U
-        || host.SnapshotSinkCount() != 1U) {
+    if (CORE_HOST_FAILURE(host.Start(&sink, owner) != INKPOD_STATUS_OK || host.ThreadId() == 0U
+        || host.SnapshotSinkCount() != 1U)) {
         DestroyWindow(owner);
-        return 2;
+        return core_host_diagnostics.Exit(2);
     }
 
     constexpr DocumentSessionId first{11U};
@@ -1017,30 +1054,30 @@ int wmain() {
     constexpr DocumentSessionId third{13U};
     constexpr Generation generation{7U};
     sink.Bind(first, generation);
-    if (host.CreateSession({}, generation) != INKPOD_STATUS_INVALID_ARGUMENT
+    if (CORE_HOST_FAILURE(host.CreateSession({}, generation) != INKPOD_STATUS_INVALID_ARGUMENT
         || host.CreateSession(first, generation) != INKPOD_STATUS_OK
         || host.CreateSession(second, generation) != INKPOD_STATUS_OK
         || host.CreateSession(first, generation) != INKPOD_STATUS_INVALID_STATE
         || host.SessionCount() != 2U
-        || !host.SetActiveSession(first, generation)) {
+        || !host.SetActiveSession(first, generation))) {
         host.Stop();
         DestroyWindow(owner);
-        return 3;
+        return core_host_diagnostics.Exit(3);
     }
     InkpodReplayContract replay_contract{};
-    if (host.GetReplayContract(first, generation, replay_contract) != INKPOD_STATUS_OK
+    if (CORE_HOST_FAILURE(host.GetReplayContract(first, generation, replay_contract) != INKPOD_STATUS_OK
         || replay_contract.replay_epoch != 29U
         || replay_contract.procedure_format_version != 34U
         || replay_contract.canonical_numeric_version != 1U
-        || replay_contract.primitive_count == 0U) {
+        || replay_contract.primitive_count == 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 34;
+        return core_host_diagnostics.Exit(34);
     }
 
     std::atomic<DWORD> first_thread{};
     std::atomic<DWORD> second_thread{};
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [&first_thread](InkpodCore* core) {
@@ -1063,17 +1100,17 @@ int wmain() {
         || first_thread.load(std::memory_order_acquire) != host.ThreadId()
         || second_thread.load(std::memory_order_acquire) != host.ThreadId()
         || first_thread.load(std::memory_order_acquire)
-            != second_thread.load(std::memory_order_acquire)) {
+            != second_thread.load(std::memory_order_acquire))) {
         host.Stop();
         DestroyWindow(owner);
-        return 4;
+        return core_host_diagnostics.Exit(4);
     }
 
     InkpodSubpalette* asynchronous_subpalette{};
     std::atomic<DWORD> subpalette_thread{};
     std::promise<InkpodStatus> subpalette_completion;
     auto subpalette_future = subpalette_completion.get_future();
-    if (host.CreateSubpalette(&asynchronous_subpalette) != INKPOD_STATUS_OK
+    if (CORE_HOST_FAILURE(host.CreateSubpalette(&asynchronous_subpalette) != INKPOD_STATUS_OK
         || asynchronous_subpalette == nullptr
         || !host.EnqueueSubpalette(
             asynchronous_subpalette,
@@ -1090,10 +1127,10 @@ int wmain() {
         || subpalette_future.get() != INKPOD_STATUS_OK
         || subpalette_thread.load(std::memory_order_acquire) != host.ThreadId()
         || host.ReleaseSubpalette(&asynchronous_subpalette) != INKPOD_STATUS_OK
-        || asynchronous_subpalette != nullptr) {
+        || asynchronous_subpalette != nullptr)) {
         host.Stop();
         DestroyWindow(owner);
-        return 81;
+        return core_host_diagnostics.Exit(81);
     }
 
     constexpr inkpod::app::DocumentViewId first_frontend_view{21U};
@@ -1114,7 +1151,7 @@ int wmain() {
         registered_capacity = host.RegisterSnapshotSink(&capacity_sink)
             && registered_capacity;
     }
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [&second_core_view, &second_pan](InkpodCore* core) {
@@ -1150,24 +1187,24 @@ int wmain() {
         || sink.last_revision.load(std::memory_order_acquire)
             != second_sink.last_revision.load(std::memory_order_acquire)
         || sink.last_pan_x.load(std::memory_order_acquire)
-            == second_sink.last_pan_x.load(std::memory_order_acquire)) {
+            == second_sink.last_pan_x.load(std::memory_order_acquire))) {
         host.Stop();
         DestroyWindow(owner);
-        return 22;
+        return core_host_diagnostics.Exit(22);
     }
 
-    if (!SnapshotPublicationKeepsInputResponsive(
-            host, sink, first, generation, second_core_view)) {
+    if (CORE_HOST_FAILURE(!SnapshotPublicationKeepsInputResponsive(
+            host, sink, first, generation, second_core_view))) {
         host.Stop();
         DestroyWindow(owner);
-        return 87;
+        return core_host_diagnostics.Exit(87);
     }
 
     const auto preserve_hint = static_cast<std::uint32_t>(
         inkpod::renderer::CanvasScrollRangeHint::Preserve);
     const auto reset_hint = static_cast<std::uint32_t>(
         inkpod::renderer::CanvasScrollRangeHint::ResetToBase);
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [](InkpodCore*) { return INKPOD_STATUS_OK; },
@@ -1179,10 +1216,10 @@ int wmain() {
         || sink.last_scroll_hint.load(std::memory_order_acquire) != preserve_hint
         || sink.last_scroll_cause.load(std::memory_order_acquire) != 0U
         || second_sink.last_scroll_hint.load(std::memory_order_acquire) != reset_hint
-        || second_sink.last_scroll_cause.load(std::memory_order_acquire) == 0U) {
+        || second_sink.last_scroll_cause.load(std::memory_order_acquire) == 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 94;
+        return core_host_diagnostics.Exit(94);
     }
 
     second_sink.reject_next_submission.store(true, std::memory_order_release);
@@ -1197,7 +1234,7 @@ int wmain() {
             second_core_view});
     const std::uint64_t retained_cause =
         second_sink.last_attempted_scroll_cause.load(std::memory_order_acquire);
-    if (rejected_reset != INKPOD_STATUS_INVALID_STATE
+    if (CORE_HOST_FAILURE(rejected_reset != INKPOD_STATUS_INVALID_STATE
         || second_sink.last_attempted_scroll_hint.load(std::memory_order_acquire)
             != reset_hint
         || retained_cause == 0U
@@ -1218,13 +1255,13 @@ int wmain() {
                false) != INKPOD_STATUS_OK
         || second_sink.last_scroll_hint.load(std::memory_order_acquire)
             != preserve_hint
-        || second_sink.last_scroll_cause.load(std::memory_order_acquire) != 0U) {
+        || second_sink.last_scroll_cause.load(std::memory_order_acquire) != 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 95;
+        return core_host_diagnostics.Exit(95);
     }
 
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [](InkpodCore*) { return INKPOD_STATUS_OK; },
@@ -1237,14 +1274,14 @@ int wmain() {
         || second_sink.last_scroll_hint.load(std::memory_order_acquire) != reset_hint
         || sink.last_scroll_cause.load(std::memory_order_acquire) == 0U
         || sink.last_scroll_cause.load(std::memory_order_acquire)
-            != second_sink.last_scroll_cause.load(std::memory_order_acquire)) {
+            != second_sink.last_scroll_cause.load(std::memory_order_acquire))) {
         host.Stop();
         DestroyWindow(owner);
-        return 96;
+        return core_host_diagnostics.Exit(96);
     }
 
     bool invalid_target_executed{};
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [&invalid_target_executed](InkpodCore*) {
@@ -1256,13 +1293,13 @@ int wmain() {
             inkpod::app::ScrollRangeResetRequest{
                 inkpod::app::ScrollRangeResetScope::TargetView,
                 UINT64_MAX}) != INKPOD_STATUS_INVALID_STATE
-        || invalid_target_executed) {
+        || invalid_target_executed)) {
         host.Stop();
         DestroyWindow(owner);
-        return 97;
+        return core_host_diagnostics.Exit(97);
     }
 
-    if (host.SetPresentationEpoch(first, generation, 91U)
+    if (CORE_HOST_FAILURE(host.SetPresentationEpoch(first, generation, 91U)
         || host.Invoke(first, generation,
                [&host, first, generation](InkpodCore*) {
                    if (host.SetPresentationEpoch(first,
@@ -1273,28 +1310,28 @@ int wmain() {
                        ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
                }, true, false) != INKPOD_STATUS_OK
         || sink.last_presentation_epoch.load(std::memory_order_acquire) != 91U
-        || second_sink.last_presentation_epoch.load(std::memory_order_acquire) != 91U) {
+        || second_sink.last_presentation_epoch.load(std::memory_order_acquire) != 91U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 89;
+        return core_host_diagnostics.Exit(89);
     }
 
-    if (host.SetPresentationEpoch(first, generation, 0U)
+    if (CORE_HOST_FAILURE(host.SetPresentationEpoch(first, generation, 0U)
         || host.Invoke(first, generation,
                [&host, first, generation](InkpodCore*) {
                    return host.SetPresentationEpoch(first, generation, 0U)
                        ? INKPOD_STATUS_OK : INKPOD_STATUS_INVALID_STATE;
                }, true, false) != INKPOD_STATUS_OK
         || sink.last_presentation_epoch.load(std::memory_order_acquire) != 0U
-        || second_sink.last_presentation_epoch.load(std::memory_order_acquire) != 0U) {
+        || second_sink.last_presentation_epoch.load(std::memory_order_acquire) != 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 92;
+        return core_host_diagnostics.Exit(92);
     }
 
     InkpodDocumentInfo first_info = EmptyDocumentInfo();
     InkpodDocumentInfo second_info = EmptyDocumentInfo();
-    if (!host.GetDocumentInfo(first, generation, first_info)
+    if (CORE_HOST_FAILURE(!host.GetDocumentInfo(first, generation, first_info)
         || !host.GetDocumentInfo(second, generation, second_info)
         || first_info.width != 32U || first_info.height != 24U
         || second_info.width != 48U || second_info.height != 16U
@@ -1302,10 +1339,10 @@ int wmain() {
         || first_info.document_revision != second_info.document_revision
         || (first_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
-        || !DrainNotifications(owner, host, first, second)) {
+        || !DrainNotifications(owner, host, first, second))) {
         host.Stop();
         DestroyWindow(owner);
-        return 5;
+        return core_host_diagnostics.Exit(5);
     }
 
     std::array<InkpodColorValue, 1> queued_colors{{
@@ -1319,18 +1356,18 @@ int wmain() {
         sizeof(InkpodColorValue)};
     InkpodObjectId palette_id{};
     palette_id.struct_size = sizeof(palette_id);
-    if (host.RegisterColorArray(
+    if (CORE_HOST_FAILURE(host.RegisterColorArray(
             first, generation, queued_palette, palette_id)
-        != INKPOD_STATUS_OK) {
+        != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 31;
+        return core_host_diagnostics.Exit(31);
     }
     std::promise<void> typed_blocker_started;
     std::promise<void> release_typed_blocker;
     const std::shared_future<void> typed_release =
         release_typed_blocker.get_future().share();
-    if (!host.Enqueue(
+    if (CORE_HOST_FAILURE(!host.Enqueue(
             Context(first, generation),
             [&typed_blocker_started, typed_release](InkpodCore*) {
                 typed_blocker_started.set_value();
@@ -1339,10 +1376,10 @@ int wmain() {
             },
             false,
             false,
-            false)) {
+            false))) {
         host.Stop();
         DestroyWindow(owner);
-        return 31;
+        return core_host_diagnostics.Exit(31);
     }
     typed_blocker_started.get_future().wait();
     auto palette_request = PrimitiveRequest(
@@ -1350,25 +1387,25 @@ int wmain() {
         1U,
         first_info.document_revision);
     palette_request.payload_id = palette_id;
-    if (!host.EnqueuePrimitive(
+    if (CORE_HOST_FAILURE(!host.EnqueuePrimitive(
             Context(first, generation),
             palette_request,
             true,
             true,
-            true)) {
+            true))) {
         release_typed_blocker.set_value();
         host.Stop();
         DestroyWindow(owner);
-        return 31;
+        return core_host_diagnostics.Exit(31);
     }
     queued_colors[0].red = 240U;
     queued_colors[0].green = 241U;
     queued_colors[0].blue = 242U;
     release_typed_blocker.set_value();
-    if (host.WaitIdle(first, generation) != INKPOD_STATUS_OK) {
+    if (CORE_HOST_FAILURE(host.WaitIdle(first, generation) != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 31;
+        return core_host_diagnostics.Exit(31);
     }
     std::array<InkpodColorValue, 1> copied_colors{};
     copied_colors[0].struct_size = sizeof(InkpodColorValue);
@@ -1379,7 +1416,7 @@ int wmain() {
     copied_palette.color_stride_bytes = sizeof(InkpodColorValue);
     CoreSessionState typed_state{};
     first_info = EmptyDocumentInfo();
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [&copied_palette](InkpodCore* core) {
@@ -1407,12 +1444,12 @@ int wmain() {
                [](InkpodCore*) { return INKPOD_STATUS_OK; },
                false,
                true) != INKPOD_STATUS_OK
-        || !DrainNotifications(owner, host, first, second)) {
+        || !DrainNotifications(owner, host, first, second))) {
         host.Stop();
         DestroyWindow(owner);
-        return 31;
+        return core_host_diagnostics.Exit(31);
     }
-    if (!PrimitiveQueueSaturationIsExactlyOnce(
+    if (CORE_HOST_FAILURE(!PrimitiveQueueSaturationIsExactlyOnce(
             host, first, generation, first_info.document_revision)
         || host.Invoke(
                first,
@@ -1426,10 +1463,10 @@ int wmain() {
                [](InkpodCore*) { return INKPOD_STATUS_OK; },
                false,
                true) != INKPOD_STATUS_OK
-        || !DrainNotifications(owner, host, first, second)) {
+        || !DrainNotifications(owner, host, first, second))) {
         host.Stop();
         DestroyWindow(owner);
-        return 32;
+        return core_host_diagnostics.Exit(32);
     }
 
     InkpodEditorStateInfo second_editor_before{};
@@ -1437,7 +1474,7 @@ int wmain() {
     InkpodEditorStateInfo second_editor_after{};
     second_editor_after.struct_size = sizeof(second_editor_after);
     MSG unexpected_editor_notification{};
-    if (!host.GetEditorState(second, generation, second_editor_before)
+    if (CORE_HOST_FAILURE(!host.GetEditorState(second, generation, second_editor_before)
         || !EditorCachePublicationIsOrdered(host, first, generation)
         || !EditorUpdatePublishesDocumentInfo(host, first, generation)
         || !host.GetEditorState(second, generation, second_editor_after)
@@ -1449,13 +1486,13 @@ int wmain() {
                owner,
                inkpod::app::kCoreStateChanged,
                inkpod::app::kCoreStateChanged,
-               PM_REMOVE) != FALSE) {
+               PM_REMOVE) != FALSE)) {
         host.Stop();
         DestroyWindow(owner);
-        return 28;
+        return core_host_diagnostics.Exit(28);
     }
 
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [](InkpodCore*) { return INKPOD_STATUS_OK; },
@@ -1466,10 +1503,10 @@ int wmain() {
                generation,
                [](InkpodCore*) { return INKPOD_STATUS_OK; },
                false,
-               true) != INKPOD_STATUS_OK) {
+               true) != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 24;
+        return core_host_diagnostics.Exit(24);
     }
     HWND replacement_owner = CreateWindowExW(
         0,
@@ -1484,33 +1521,33 @@ int wmain() {
         nullptr,
         GetModuleHandleW(nullptr),
         nullptr);
-    if (replacement_owner == nullptr
+    if (CORE_HOST_FAILURE(replacement_owner == nullptr
         || host.RetargetNotificationOwner(nullptr, replacement_owner)
-        || !host.RetargetNotificationOwner(owner, replacement_owner)) {
+        || !host.RetargetNotificationOwner(owner, replacement_owner))) {
         if (replacement_owner != nullptr) {
             DestroyWindow(replacement_owner);
         }
         host.Stop();
         DestroyWindow(owner);
-        return 24;
+        return core_host_diagnostics.Exit(24);
     }
     DestroyWindow(owner);
     owner = replacement_owner;
     constexpr UINT completion_message = WM_APP + 0x310U;
     MSG completion_notification{};
-    if (host.PostCompletionNotification(WM_CLOSE, 77U, generation)
+    if (CORE_HOST_FAILURE(host.PostCompletionNotification(WM_CLOSE, 77U, generation)
         || host.PostCompletionNotification(completion_message, 0U, generation)
         || !host.PostCompletionNotification(completion_message, 77U, generation)
         || PeekMessageW(&completion_notification, owner,
                completion_message, completion_message, PM_REMOVE) == FALSE
         || completion_notification.hwnd != replacement_owner
         || completion_notification.wParam != 77U
-        || completion_notification.lParam != static_cast<LPARAM>(generation.Value())) {
+        || completion_notification.lParam != static_cast<LPARAM>(generation.Value()))) {
         host.Stop();
         DestroyWindow(owner);
-        return 88;
+        return core_host_diagnostics.Exit(88);
     }
-    if (!DrainNotifications(owner, host, first, second)
+    if (CORE_HOST_FAILURE(!DrainNotifications(owner, host, first, second)
         || host.Invoke(
             first,
             generation,
@@ -1523,15 +1560,15 @@ int wmain() {
                [](InkpodCore*) { return INKPOD_STATUS_OK; },
                false,
                true) != INKPOD_STATUS_OK
-        || !DrainNotifications(owner, host, first, second)) {
+        || !DrainNotifications(owner, host, first, second))) {
         host.Stop();
         DestroyWindow(owner);
-        return 24;
+        return core_host_diagnostics.Exit(24);
     }
 
     std::wstring second_save_path;
     std::vector<std::uint8_t> second_save_path_utf8;
-    if (!TemporaryPath(second_save_path)
+    if (CORE_HOST_FAILURE(!TemporaryPath(second_save_path)
         || !ToUtf8(second_save_path, second_save_path_utf8)
         || host.Invoke(
                second,
@@ -1548,16 +1585,16 @@ int wmain() {
                true)
             != INKPOD_STATUS_OK
         || !host.GetDocumentInfo(second, generation, second_info)
-        || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+        || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U)) {
         DeleteFileW(second_save_path.c_str());
         host.Stop();
         DestroyWindow(owner);
-        return 21;
+        return core_host_diagnostics.Exit(21);
     }
     DeleteFileW(second_save_path.c_str());
 
     const std::uint64_t before_inactive_publish = sink.submitted.load();
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             second,
             generation,
             [](InkpodCore*) { return INKPOD_STATUS_OK; },
@@ -1566,28 +1603,28 @@ int wmain() {
             != INKPOD_STATUS_OK
         || sink.submitted.load() != before_inactive_publish
         || host.FlushPreview() != INKPOD_STATUS_OK
-        || sink.submitted.load() <= before_inactive_publish) {
+        || sink.submitted.load() <= before_inactive_publish)) {
         host.Stop();
         DestroyWindow(owner);
-        return 6;
+        return core_host_diagnostics.Exit(6);
     }
 
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [](InkpodCore* core) { return ApplyMark(core, 4.0F, 5.0F); },
             false,
             true)
-            != INKPOD_STATUS_OK) {
+            != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 7;
+        return core_host_diagnostics.Exit(7);
     }
-    if (sink.last_revision.load(std::memory_order_acquire)
-            != second_sink.last_revision.load(std::memory_order_acquire)) {
+    if (CORE_HOST_FAILURE(sink.last_revision.load(std::memory_order_acquire)
+            != second_sink.last_revision.load(std::memory_order_acquire))) {
         host.Stop();
         DestroyWindow(owner);
-        return 23;
+        return core_host_diagnostics.Exit(23);
     }
     std::array<inkpod::renderer::CanvasSnapshotSink*,
                CoreHost::kMaximumSnapshotSinks - 2U>
@@ -1597,19 +1634,19 @@ int wmain() {
     }
     std::array<inkpod::renderer::CanvasSnapshotSink*, 2U> invalid_sinks{
         capacity_sink_ptrs.front(), &rejected_sink};
-    if (host.UnregisterSnapshotSinks(
+    if (CORE_HOST_FAILURE(host.UnregisterSnapshotSinks(
             invalid_sinks.data(), invalid_sinks.size())
         || host.SnapshotSinkCount() != CoreHost::kMaximumSnapshotSinks
         || !host.UnregisterSnapshotSinks(
             capacity_sink_ptrs.data(), capacity_sink_ptrs.size())
-        || host.SnapshotSinkCount() != 2U) {
+        || host.SnapshotSinkCount() != 2U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 23;
+        return core_host_diagnostics.Exit(23);
     }
     const std::uint64_t second_sink_before_unmap =
         second_sink.submitted.load(std::memory_order_acquire);
-    if (!host.UnregisterDocumentView(
+    if (CORE_HOST_FAILURE(!host.UnregisterDocumentView(
             first, generation, second_frontend_view)
         || host.UnregisterDocumentView(
             first, generation, second_frontend_view)
@@ -1633,20 +1670,20 @@ int wmain() {
                },
                false,
                false)
-            != INKPOD_STATUS_OK) {
+            != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 23;
+        return core_host_diagnostics.Exit(23);
     }
     first_info = EmptyDocumentInfo();
     second_info = EmptyDocumentInfo();
-    if (!host.GetDocumentInfo(first, generation, first_info)
+    if (CORE_HOST_FAILURE(!host.GetDocumentInfo(first, generation, first_info)
         || !host.GetDocumentInfo(second, generation, second_info)
         || (first_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) == 0U
-        || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+        || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 8;
+        return core_host_diagnostics.Exit(8);
     }
     const std::uint64_t marked_checksum = first_info.color_plane_checksum;
     const std::uint64_t second_revision = second_info.document_revision;
@@ -1655,19 +1692,19 @@ int wmain() {
     const InkpodStatus persistence_status =
         host.GetPersistenceInfo(second, generation, persistence);
     second_info = EmptyDocumentInfo();
-    if (persistence_status != INKPOD_STATUS_OK
+    if (CORE_HOST_FAILURE(persistence_status != INKPOD_STATUS_OK
         || persistence.format_version != 34U
         || persistence.open_strategy != INKPOD_NATIVE_OPEN_NOT_OPENED
         || persistence.feature_flags != INKPOD_FEATURE_NONE
         || !host.GetDocumentInfo(second, generation, second_info)
         || second_info.document_revision != second_revision
-        || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U) {
+        || (second_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 9;
+        return core_host_diagnostics.Exit(9);
     }
 
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [](InkpodCore* core) {
@@ -1688,10 +1725,10 @@ int wmain() {
             false)
             != INKPOD_STATUS_INVALID_ARGUMENT
         || !host.GetDocumentInfo(second, generation, second_info)
-        || second_info.document_revision != second_revision) {
+        || second_info.document_revision != second_revision)) {
         host.Stop();
         DestroyWindow(owner);
-        return 10;
+        return core_host_diagnostics.Exit(10);
     }
 
     StrokeEvent begin{};
@@ -1707,13 +1744,16 @@ int wmain() {
     cancel.context = Context(first, generation);
     cancel.context.document_view = first_frontend_view;
     cancel.core_view_id = 0U;
-    if (!host.EnqueueStroke(std::move(begin))) {
+    if (CORE_HOST_FAILURE(!host.EnqueueStroke(std::move(begin)))) {
         host.Stop();
         DestroyWindow(owner);
-        return 11;
+        return core_host_diagnostics.Exit(11);
     }
     bool stroke_became_active{};
+    const auto stroke_poll_started = std::chrono::steady_clock::now();
+    std::uint64_t stroke_poll_attempts{};
     for (int attempt = 0; attempt < 100; ++attempt) {
+        ++stroke_poll_attempts;
         CoreSessionState active_state{};
         if (host.GetSessionState(first, generation, active_state)
             && active_state.stroke_active) {
@@ -1722,6 +1762,8 @@ int wmain() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    core_host_diagnostics.Poll("stroke-active", stroke_poll_started,
+        stroke_poll_attempts, stroke_became_active, stroke_became_active ? 1U : 0U);
     auto deferred_request = PrimitiveRequest(
         INKPOD_PRIMITIVE_SET_MAIN_LINE_COLOR,
         1U,
@@ -1733,7 +1775,7 @@ int wmain() {
         37U,
         143U,
         255U};
-    if (!stroke_became_active
+    if (CORE_HOST_FAILURE(!stroke_became_active
         || host.FlushPreview() != INKPOD_STATUS_OK
         || sink.last_revision.load(std::memory_order_acquire) <= first_info.document_revision
         || sink.last_committed_document_revision.load(std::memory_order_acquire)
@@ -1743,56 +1785,56 @@ int wmain() {
             deferred_request,
             false,
             true,
-            true)) {
+            true))) {
         (void)host.EnqueueStroke(std::move(cancel));
         host.Stop();
         DestroyWindow(owner);
-        return 11;
+        return core_host_diagnostics.Exit(11);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     CoreSessionState deferred_state{};
     InkpodDocumentInfo deferred_info = EmptyDocumentInfo();
-    if (!host.GetSessionState(first, generation, deferred_state)
+    if (CORE_HOST_FAILURE(!host.GetSessionState(first, generation, deferred_state)
         || !host.GetDocumentInfo(first, generation, deferred_info)
         || !deferred_state.stroke_active
         || deferred_state.pending_operations == 0U
         || deferred_info.document_revision != first_info.document_revision
         || !host.EnqueueStroke(std::move(cancel))
-        || host.WaitIdle(first, generation) != INKPOD_STATUS_OK) {
+        || host.WaitIdle(first, generation) != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 11;
+        return core_host_diagnostics.Exit(11);
     }
     first_info = EmptyDocumentInfo();
     CoreSessionState after_deferred_state{};
-    if (!host.GetDocumentInfo(first, generation, first_info)
+    if (CORE_HOST_FAILURE(!host.GetDocumentInfo(first, generation, first_info)
         || !host.GetSessionState(first, generation, after_deferred_state)
         || first_info.color_plane_checksum != marked_checksum
         || first_info.document_revision != deferred_request.base_revision
         || after_deferred_state.stroke_active
         || after_deferred_state.pending_operations != 0U
         || after_deferred_state.last_completed_sequence
-            != after_deferred_state.last_accepted_sequence) {
+            != after_deferred_state.last_accepted_sequence)) {
         host.Stop();
         DestroyWindow(owner);
-        return 12;
+        return core_host_diagnostics.Exit(12);
     }
 
     InkpodDispatchResult history{};
     history.struct_size = sizeof(history);
-    if (host.Invoke(
+    if (CORE_HOST_FAILURE(host.Invoke(
             first,
             generation,
             [&history](InkpodCore* core) { return inkpod_core_undo(core, &history); },
             false,
             true)
-            != INKPOD_STATUS_OK) {
+            != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 13;
+        return core_host_diagnostics.Exit(13);
     }
     first_info = EmptyDocumentInfo();
-    if (!host.GetDocumentInfo(first, generation, first_info)
+    if (CORE_HOST_FAILURE(!host.GetDocumentInfo(first, generation, first_info)
         || first_info.color_plane_checksum == marked_checksum
         || host.Invoke(
                first,
@@ -1800,25 +1842,25 @@ int wmain() {
                [&history](InkpodCore* core) { return inkpod_core_redo(core, &history); },
                false,
                true)
-            != INKPOD_STATUS_OK) {
+            != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 14;
+        return core_host_diagnostics.Exit(14);
     }
     first_info = EmptyDocumentInfo();
     second_info = EmptyDocumentInfo();
-    if (!host.GetDocumentInfo(first, generation, first_info)
+    if (CORE_HOST_FAILURE(!host.GetDocumentInfo(first, generation, first_info)
         || !host.GetDocumentInfo(second, generation, second_info)
         || first_info.color_plane_checksum != marked_checksum
-        || second_info.document_revision != second_revision) {
+        || second_info.document_revision != second_revision)) {
         host.Stop();
         DestroyWindow(owner);
-        return 15;
+        return core_host_diagnostics.Exit(15);
     }
 
     std::wstring save_path;
     std::vector<std::uint8_t> save_path_utf8;
-    if (!TemporaryPath(save_path) || !ToUtf8(save_path, save_path_utf8)
+    if (CORE_HOST_FAILURE(!TemporaryPath(save_path) || !ToUtf8(save_path, save_path_utf8)
         || host.Invoke(
                first,
                generation,
@@ -1853,17 +1895,17 @@ int wmain() {
                },
                false,
                true)
-            != INKPOD_STATUS_OK) {
+            != INKPOD_STATUS_OK)) {
         DeleteFileW(save_path.c_str());
         host.Stop();
         DestroyWindow(owner);
-        return 16;
+        return core_host_diagnostics.Exit(16);
     }
     first_info = EmptyDocumentInfo();
     InkpodCompactionPlan compaction{};
     std::wstring compact_path;
     std::vector<std::uint8_t> compact_path_utf8;
-    if (host.GetCompactionPlan(first, generation, compaction) != INKPOD_STATUS_OK
+    if (CORE_HOST_FAILURE(host.GetCompactionPlan(first, generation, compaction) != INKPOD_STATUS_OK
         || compaction.history_procedure_count == 0U
         || !TemporaryPath(compact_path)
         || !ToUtf8(compact_path, compact_path_utf8)
@@ -1874,17 +1916,17 @@ int wmain() {
                    reinterpret_cast<const char*>(compact_path_utf8.data()),
                    compact_path_utf8.size()},
                compaction)
-            != INKPOD_STATUS_OK) {
+            != INKPOD_STATUS_OK)) {
         DeleteFileW(compact_path.c_str());
         DeleteFileW(save_path.c_str());
         host.Stop();
         DestroyWindow(owner);
-        return 34;
+        return core_host_diagnostics.Exit(34);
     }
     DeleteFileW(compact_path.c_str());
     const std::wstring invalid_save_path = save_path + L"\\child.inkpod";
     std::vector<std::uint8_t> invalid_save_path_utf8;
-    if (!host.GetDocumentInfo(first, generation, first_info)
+    if (CORE_HOST_FAILURE(!host.GetDocumentInfo(first, generation, first_info)
         || first_info.color_plane_checksum != marked_checksum
         || (first_info.flags & INKPOD_DOCUMENT_FLAG_DIRTY) != 0U
         || host.Invoke(
@@ -1913,11 +1955,11 @@ int wmain() {
                false)
             != INKPOD_STATUS_IO_ERROR
         || !host.GetDocumentInfo(second, generation, second_info)
-        || second_info.document_revision != second_revision) {
+        || second_info.document_revision != second_revision)) {
         DeleteFileW(save_path.c_str());
         host.Stop();
         DestroyWindow(owner);
-        return 17;
+        return core_host_diagnostics.Exit(17);
     }
     DeleteFileW(save_path.c_str());
 
@@ -1930,7 +1972,7 @@ int wmain() {
         release_latency_operation.get_future().share();
     std::promise<InkpodStatus> latency_operation_completion;
     std::promise<InkpodStatus> delayed_input_completion;
-    if (!host.Enqueue(
+    if (CORE_HOST_FAILURE(!host.Enqueue(
             Context(second, generation),
             [&latency_operation_started, latency_release_future](InkpodCore*) {
                 latency_operation_started.set_value();
@@ -1942,10 +1984,10 @@ int wmain() {
             false,
             [&latency_operation_completion](InkpodStatus status) {
                 latency_operation_completion.set_value(status);
-            })) {
+            }))) {
         host.Stop();
         DestroyWindow(owner);
-        return 25;
+        return core_host_diagnostics.Exit(25);
     }
     latency_operation_started.get_future().wait();
     InkpodHistoryInfo cached_history{};
@@ -1971,20 +2013,22 @@ int wmain() {
         first, generation, UINT64_MAX, cached_transform);
     const auto cache_query_elapsed = std::chrono::steady_clock::now()
         - cache_query_started;
-    if (!cached_history_available || !cached_targets_available
+    core_host_diagnostics.Timing("cache-query", cache_query_elapsed, 100000,
+        cache_query_elapsed < std::chrono::milliseconds(100));
+    if (CORE_HOST_FAILURE(!cached_history_available || !cached_targets_available
         || !cached_transform_available || !stale_transform_rejected
-        || cache_query_elapsed >= std::chrono::milliseconds(100)) {
+        || cache_query_elapsed >= std::chrono::milliseconds(100))) {
         release_latency_operation.set_value();
         (void)latency_operation_completion.get_future().get();
         host.Stop();
         DestroyWindow(owner);
-        return !cached_history_available ? 35
+        return core_host_diagnostics.Exit(!cached_history_available ? 35
             : !cached_targets_available ? 36
             : !cached_transform_available ? 37
             : !stale_transform_rejected ? 38
-            : 39;
+            : 39);
     }
-    if (!host.Enqueue(
+    if (CORE_HOST_FAILURE(!host.Enqueue(
             Context(first, generation),
             [](InkpodCore*) { return INKPOD_STATUS_OK; },
             false,
@@ -1992,32 +2036,33 @@ int wmain() {
             false,
             [&delayed_input_completion](InkpodStatus status) {
                 delayed_input_completion.set_value(status);
-            })) {
+            }))) {
         release_latency_operation.set_value();
         host.Stop();
         DestroyWindow(owner);
-        return 26;
+        return core_host_diagnostics.Exit(26);
     }
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
     release_latency_operation.set_value();
     EngineMetrics first_metrics{};
-    if (latency_operation_completion.get_future().get() != INKPOD_STATUS_OK
+    if (CORE_HOST_FAILURE(latency_operation_completion.get_future().get() != INKPOD_STATUS_OK
         || delayed_input_completion.get_future().get() != INKPOD_STATUS_OK
         || !host.GetMetrics(first, generation, first_metrics)
         || first_metrics.accepted_work_items == 0U
         || first_metrics.queue_wait_samples == 0U
-        || first_metrics.maximum_queue_wait_microseconds < 1000U
-        || first_metrics.peak_pending_operations == 0U) {
+        || !core_host_diagnostics.MinimumQueueWait(
+            first_metrics.maximum_queue_wait_microseconds, 1000U)
+        || first_metrics.peak_pending_operations == 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 27;
+        return core_host_diagnostics.Exit(27);
     }
 
     std::promise<void> operation_started;
     std::promise<void> release_operation;
     std::shared_future<void> release_future = release_operation.get_future().share();
     std::promise<InkpodStatus> completion;
-    if (!host.Enqueue(
+    if (CORE_HOST_FAILURE(!host.Enqueue(
             Context(second, generation),
             [&operation_started, release_future](InkpodCore*) {
                 operation_started.set_value();
@@ -2027,17 +2072,20 @@ int wmain() {
             false,
             false,
             false,
-            [&completion](InkpodStatus status) { completion.set_value(status); })) {
+            [&completion](InkpodStatus status) { completion.set_value(status); }))) {
         host.Stop();
         DestroyWindow(owner);
-        return 18;
+        return core_host_diagnostics.Exit(18);
     }
     operation_started.get_future().wait();
     auto close_future = std::async(std::launch::async, [&host, second, generation] {
         return host.CloseSession(second, generation);
     });
     bool close_started{};
+    const auto close_poll_started = std::chrono::steady_clock::now();
+    std::uint64_t close_poll_attempts{};
     for (int attempt = 0; attempt < 100; ++attempt) {
+        ++close_poll_attempts;
         CoreSessionState state{};
         if (host.GetSessionState(second, generation, state)
             && !state.accepting_work) {
@@ -2046,6 +2094,8 @@ int wmain() {
         }
         std::this_thread::sleep_for(std::chrono::milliseconds(1));
     }
+    core_host_diagnostics.Poll("close-started", close_poll_started,
+        close_poll_attempts, close_started, close_started ? 1U : 0U);
     const bool stale_rejected = !host.Enqueue(
         Context(second, generation),
         [](InkpodCore*) { return INKPOD_STATUS_OK; },
@@ -2082,7 +2132,7 @@ int wmain() {
     release_operation.set_value();
     const InkpodStatus completion_status = completion.get_future().get();
     const InkpodStatus close_status = close_future.get();
-    if (!close_started || !stale_rejected || !stale_input_rejected
+    if (CORE_HOST_FAILURE(!close_started || !stale_rejected || !stale_input_rejected
         || !stale_snapshot_rejected || !stale_primitive_rejected
         || completion_status != INKPOD_STATUS_OK
         || close_status != INKPOD_STATUS_OK || host.SessionCount() != 1U
@@ -2093,10 +2143,10 @@ int wmain() {
                [](InkpodCore*) { return INKPOD_STATUS_OK; },
                false,
                false)
-            != INKPOD_STATUS_INVALID_STATE) {
+            != INKPOD_STATUS_INVALID_STATE)) {
         host.Stop();
         DestroyWindow(owner);
-        return 19;
+        return core_host_diagnostics.Exit(19);
     }
 
     std::atomic<DWORD> initializer_thread{};
@@ -2104,7 +2154,7 @@ int wmain() {
         initializer_thread.store(GetCurrentThreadId(), std::memory_order_release);
         return INKPOD_STATUS_OK;
     });
-    if (host.CreateSession(third, generation) != INKPOD_STATUS_OK
+    if (CORE_HOST_FAILURE(host.CreateSession(third, generation) != INKPOD_STATUS_OK
         || initializer_thread.load(std::memory_order_acquire) != host.ThreadId()
         || host.RebindSession(third, generation, third, Generation{8U})
             != INKPOD_STATUS_OK
@@ -2112,41 +2162,50 @@ int wmain() {
         || !host.HasSession(third, Generation{8U})
         || host.CloseSession(third, Generation{8U}) != INKPOD_STATUS_OK
         || host.CloseSession(first, generation) != INKPOD_STATUS_OK
-        || host.SessionCount() != 0U) {
+        || host.SessionCount() != 0U)) {
         host.Stop();
         DestroyWindow(owner);
-        return 20;
+        return core_host_diagnostics.Exit(20);
     }
 
     InkpodEditorDefaults defaults{};
     const DWORD empty_thread = host.ThreadId();
     DWORD empty_owner_thread{};
-    if (empty_thread == 0U || host.GetApplicationEditorDefaults(defaults) != INKPOD_STATUS_OK
+    if (CORE_HOST_FAILURE(empty_thread == 0U || host.GetApplicationEditorDefaults(defaults) != INKPOD_STATUS_OK
         || host.InvokeOwnerThread([&empty_owner_thread] {
                empty_owner_thread = GetCurrentThreadId();
                return INKPOD_STATUS_OK;
            }) != INKPOD_STATUS_OK
         || empty_owner_thread != empty_thread
         || defaults.width == 0U || defaults.height == 0U
-        || host.CreateSession(third, Generation{9U}) != INKPOD_STATUS_OK) {
+        || host.CreateSession(third, Generation{9U}) != INKPOD_STATUS_OK)) {
         host.Stop();
         DestroyWindow(owner);
-        return 34;
+        return core_host_diagnostics.Exit(34);
     }
     host.ClearActiveSession();
-    if (host.Invoke([](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
+    if (CORE_HOST_FAILURE(host.Invoke([](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false)
             != INKPOD_STATUS_INVALID_STATE
         || !host.HasSession(third, Generation{9U})
         || !host.SetActiveSession(third, Generation{9U})
         || host.CloseSession(third, Generation{9U}) != INKPOD_STATUS_OK
-        || host.ThreadId() != empty_thread) {
+        || host.ThreadId() != empty_thread)) {
         host.Stop();
         DestroyWindow(owner);
-        return 35;
+        return core_host_diagnostics.Exit(35);
     }
     host.Stop();
     const bool shutdown_completed_once =
-        PrimitiveShutdownCompletesExactlyOnce(owner);
+        !CORE_HOST_FAILURE(!PrimitiveShutdownCompletesExactlyOnce(owner));
     DestroyWindow(owner);
-    return shutdown_completed_once ? 0 : 33;
+    return core_host_diagnostics.Exit(shutdown_completed_once ? 0 : 33);
+}
+
+#undef CORE_HOST_FAILURE
+
+int wmain() {
+    core_host_diagnostics.Begin();
+    const int result = RunCoreHostTests();
+    core_host_diagnostics.Print(result);
+    return result;
 }

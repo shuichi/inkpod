@@ -313,6 +313,12 @@ struct CoreHost::Impl final {
         {
             std::lock_guard lock(mutex);
             stopping = true;
+            for (const auto& input : inkscript_inputs) {
+                input->cancel_requested.store(true, std::memory_order_release);
+                if (input->task != nullptr) {
+                    input->task->Cancel();
+                }
+            }
         }
         wake.notify_one();
         if (worker.joinable()) {
@@ -939,8 +945,23 @@ struct CoreHost::Impl final {
 
     bool EnqueueInkScript(InkScriptEngineRequest request) noexcept {
         if (request.job_id == 0U || !request.context.document_session.has_value()
-            || !request.context.generation.has_value()) {
+            || !request.context.generation.has_value()
+            || request.publication_targets.size() > kMaximumSessions) {
             return false;
+        }
+        for (std::size_t index = 0U; index < request.publication_targets.size(); ++index) {
+            const auto& target = request.publication_targets[index];
+            if (!target.document_session.has_value() || !target.generation.has_value()
+                || target.document_session == request.context.document_session
+                || target.workspace != request.context.workspace
+                || target.editor_group != request.context.editor_group) {
+                return false;
+            }
+            for (std::size_t prior = 0U; prior < index; ++prior) {
+                if (target.document_session == request.publication_targets[prior].document_session) {
+                    return false;
+                }
+            }
         }
         const SessionBinding binding{
             request.context.document_session.value(),
@@ -963,6 +984,8 @@ struct CoreHost::Impl final {
                 return false;
             }
             input->sequence = ++session->state.last_accepted_sequence;
+            input->request.expected_document = session->document_info;
+            input->request.expected_editor = session->editor_state;
             ++session->state.pending_operations;
         }
         const std::uint64_t sequence = input->sequence;
@@ -1055,6 +1078,9 @@ struct CoreHost::Impl final {
                 return false;
             }
             (*found)->cancel_requested.store(true, std::memory_order_release);
+            if ((*found)->task != nullptr) {
+                (*found)->task->Cancel();
+            }
             if (!(*found)->work_scheduled) {
                 if (work.size() >= kMaximumQueuedWork + kReservedStrokeControlWork) {
                     accepted = true;
@@ -1274,7 +1300,20 @@ struct CoreHost::Impl final {
             if (stopping || work.size() >= kMaximumQueuedWork + kReservedStrokeControlWork) {
                 return false;
             }
+            const SessionBinding binding = item.binding;
+            const bool closing = !IsCreationControl(item.kind);
             work.emplace_back(std::move(item));
+            if (closing) {
+                for (const auto& input : inkscript_inputs) {
+                    if (input->context.document_session == binding.session
+                        && input->context.generation == binding.generation) {
+                        input->cancel_requested.store(true, std::memory_order_release);
+                        if (input->task != nullptr) {
+                            input->task->Cancel();
+                        }
+                    }
+                }
+            }
         } catch (const std::bad_alloc&) {
             return false;
         }
@@ -2036,6 +2075,106 @@ struct CoreHost::Impl final {
         }
     }
 
+    InkpodStatus ValidateInkScriptPublication(
+        const std::vector<CommandContext>& targets) noexcept {
+        for (const auto& target : targets) {
+            const SessionBinding binding{*target.document_session, *target.generation};
+            CoreEntry* entry = FindEntry(binding);
+            if (entry == nullptr || entry->stroke_active || entry->io_install_fence != 0U
+                || entry->active_view_id != 0U) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+            {
+                std::lock_guard lock(mutex);
+                if (stopping || HasTransitionControlLocked(binding)) {
+                    return INKPOD_STATUS_CANCELLED;
+                }
+            }
+            InkpodDocumentInfo document{};
+            document.struct_size = sizeof(document);
+            if (inkpod_core_get_document_info(entry->core, &document) != INKPOD_STATUS_NO_DOCUMENT) {
+                return INKPOD_STATUS_INVALID_STATE;
+            }
+        }
+        return INKPOD_STATUS_OK;
+    }
+
+    InkpodStatus PublishInkScript(
+        CoreEntry& source, InkScriptEngineTask& task,
+        InkScriptEngineResult& result, const CommandContext& context) noexcept {
+        const auto& targets = task.PublicationTargets();
+        InkpodStatus status = ValidateInkScriptPublication(targets);
+        if (status != INKPOD_STATUS_OK) {
+            return status;
+        }
+        std::vector<InkpodCore*> staged;
+        status = task.TakePublication(source.core, staged);
+        if (status == INKPOD_STATUS_OK && io_manager != nullptr) {
+            for (auto* value : staged) {
+                status = inkpod_core_bind_io_manager(value, io_manager);
+                if (status != INKPOD_STATUS_OK) {
+                    break;
+                }
+            }
+        }
+        if (status == INKPOD_STATUS_OK && !staged.empty()) {
+            // Close/rebind and preview cancel can arrive during preparation.
+            // Linearize their final checks with pointer swaps; no Core calls,
+            // allocation or destruction run under these short locks.
+            std::scoped_lock lock(mutex, state_mutex);
+            if (result.image_preview) {
+                const auto input = FindInkScriptInput(result.job_id);
+                if (input == inkscript_inputs.end()
+                    || (*input)->cancel_requested.load(std::memory_order_acquire)) {
+                    status = INKPOD_STATUS_CANCELLED;
+                }
+            }
+            const auto origin = FindPublishedLocked(source.binding);
+            if (origin == published.end() || !origin->state.accepting_work) {
+                status = INKPOD_STATUS_CANCELLED;
+            }
+            for (const auto& target : targets) {
+                const auto destination = FindPublishedLocked(
+                    SessionBinding{*target.document_session, *target.generation});
+                if (destination == published.end() || !destination->state.accepting_work) {
+                    status = INKPOD_STATUS_CANCELLED;
+                    break;
+                }
+            }
+            if (status == INKPOD_STATUS_OK) {
+                for (std::size_t index = 0U; index < staged.size(); ++index) {
+                    const auto& target = targets[index];
+                    CoreEntry* entry = FindEntry(
+                        SessionBinding{*target.document_session, *target.generation});
+                    std::swap(entry->core, staged[index]);
+                }
+            }
+        }
+        if (status != INKPOD_STATUS_OK) {
+            for (auto*& value : staged) {
+                (void)inkpod_core_destroy(&value);
+            }
+            return status;
+        }
+        // Former empty Core owners and presentation work stay outside the
+        // short publication lock, after all destinations have been installed.
+        for (std::size_t index = 0U; index < staged.size(); ++index) {
+            const auto& target = targets[index];
+            CoreEntry* entry = FindEntry(SessionBinding{*target.document_session, *target.generation});
+            (void)inkpod_core_destroy(&staged[index]);
+            (void)RefreshDocumentInfo(*entry, target);
+        }
+        result.published_result_count = staged.size();
+        if (result.active_output) {
+            result.published_result_count = 1U;
+            status = RefreshDocumentInfo(source, context);
+            if (status == INKPOD_STATUS_OK) {
+                status = PublishSnapshot(source, false);
+            }
+        }
+        return status;
+    }
+
     void ProcessInkScript(InkScriptWork item) noexcept {
         RecordQueueWait(item.binding, item.queued_at);
         InkScriptInput* input{};
@@ -2063,10 +2202,24 @@ struct CoreHost::Impl final {
             step.notification = result;
         } else {
             try {
+                bool capture_sessions{};
                 if (input->task == nullptr) {
-                    input->task = std::make_unique<InkScriptEngineTask>(
-                        std::move(input->request));
+                    const InkpodStatus preflight = ValidateInkScriptPublication(
+                        input->request.publication_targets);
+                    if (preflight != INKPOD_STATUS_OK) {
+                        step.kind = InkScriptEngineStepKind::Completed;
+                        step.has_notification = true;
+                        step.notification.job_id = input->job_id;
+                        step.notification.status = preflight;
+                    } else {
+                        auto task = std::make_unique<InkScriptEngineTask>(
+                            std::move(input->request));
+                        std::lock_guard lock(mutex);
+                        input->task = std::move(task);
+                        capture_sessions = true;
+                    }
                 }
+                if (input->task != nullptr) {
                 bool transitioning{};
                 {
                     std::lock_guard lock(mutex);
@@ -2077,7 +2230,50 @@ struct CoreHost::Impl final {
                     || input->cancel_requested.load(std::memory_order_acquire);
                 const std::uint32_t scope = std::exchange(
                     input->confirmation_scope, 0U);
-                step = input->task->Advance(entry->core, cancel, scope);
+                std::array<InkpodInkScriptIoSession, kMaximumSessions> sessions{};
+                std::size_t session_count{};
+                static constexpr char session_label[] = "open-session.inkpod";
+                for (const auto& open : entries) {
+                    if (capture_sessions) {
+                        InkpodDocumentInfo document{};
+                        document.struct_size = sizeof(document);
+                        if (inkpod_core_get_document_info(open->core, &document) != INKPOD_STATUS_OK) {
+                            continue;
+                        }
+                    }
+                    auto& session = sessions[session_count++];
+                    session.struct_size = sizeof(session);
+                    session.version = INKPOD_INKSCRIPT_RECORD_VERSION;
+                    session.session_id = open->binding.session.Value();
+                    session.session_generation = open->binding.generation.Value();
+                    session.source_generation = open->binding.generation.Value();
+                    session.feature_flags = INKPOD_INKSCRIPT_SESSION_USE_CORE_BACKING;
+                    session.session_core = open->core;
+                    session.label = {reinterpret_cast<const std::uint8_t*>(session_label), sizeof(session_label) - 1U};
+                    session.display_number = 1U;
+                }
+                step = input->task->Advance(entry->core, cancel, scope, io_manager,
+                    std::span<const InkpodInkScriptIoSession>(sessions.data(), session_count));
+                if (step.kind == InkScriptEngineStepKind::Completed
+                    && step.notification.staged_result_count != 0U) {
+                    {
+                        std::lock_guard lock(mutex);
+                        transitioning = stopping || HasTransitionControlLocked(item.binding);
+                    }
+                    {
+                        std::lock_guard lock(state_mutex);
+                        const auto published_source = FindPublishedLocked(item.binding);
+                        transitioning = transitioning || published_source == published.end()
+                            || !published_source->state.accepting_work;
+                    }
+                    const InkpodStatus publication = transitioning
+                        ? INKPOD_STATUS_CANCELLED
+                        : PublishInkScript(*entry, *input->task, step.notification, item.context);
+                    if (publication != INKPOD_STATUS_OK) {
+                        step.notification.status = publication;
+                    }
+                }
+                }
             } catch (const std::bad_alloc&) {
                 InkScriptEngineResult result{};
                 result.job_id = item.job_id;
@@ -2144,13 +2340,18 @@ struct CoreHost::Impl final {
         if (entry != nullptr) {
             CaptureFailure(*entry, status, true, item.context);
         }
+        std::unique_ptr<InkScriptInput> completed_input;
         {
             std::lock_guard lock(mutex);
             const auto found = FindInkScriptInput(input->job_id);
             if (found != inkscript_inputs.end()) {
+                completed_input = std::move(*found);
                 inkscript_inputs.erase(found);
             }
         }
+        // End UI query/cancel access under the queue lock, then release Rust
+        // owners without holding that lock across cleanup or manager teardown.
+        completed_input.reset();
         CompletePending(item.binding, item.sequence, 1U, false);
     }
 
@@ -2285,6 +2486,14 @@ struct CoreHost::Impl final {
                         SessionContext(item.binding));
                 }
                 break;
+            }
+        }
+        if (status == INKPOD_STATUS_OK) {
+            std::lock_guard lock(mutex);
+            for (const auto& input : inkscript_inputs) {
+                if (input->task != nullptr) {
+                    input->task->InvalidateOpenSessions();
+                }
             }
         }
         if (item.completion != nullptr) {
@@ -3496,6 +3705,17 @@ bool CoreHost::Enqueue(
 
 bool CoreHost::EnqueueInkScript(InkScriptEngineRequest request) noexcept {
     return impl_ != nullptr && impl_->EnqueueInkScript(std::move(request));
+}
+
+bool CoreHost::QueryInkScriptProgress(std::uint64_t job_id,
+    const CommandContext& context, InkpodTaskInfo& output) noexcept {
+    if (impl_ == nullptr) {
+        return false;
+    }
+    std::lock_guard lock(impl_->mutex);
+    const auto found = impl_->FindInkScriptInput(job_id);
+    return found != impl_->inkscript_inputs.end() && (*found)->context == context
+        && (*found)->task != nullptr && (*found)->task->QueryProgress(output);
 }
 
 bool CoreHost::EnqueueFileIo(

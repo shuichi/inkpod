@@ -5156,6 +5156,8 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     let batch_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/batch.rs"));
     let file_io_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/file_io.rs"));
     let inkscript_tests = read(&repository.join("rust/inkpod-ffi/tests/unit/inkscript.rs"));
+    let inkscript_shared_tests =
+        read(&repository.join("rust/inkpod-ffi/tests/unit/inkscript_shared.rs"));
     let cpp_tests = read(&repository.join("tests/abi_smoke.cpp"));
 
     let header_names = names_followed_by_parenthesis(&header);
@@ -5174,6 +5176,7 @@ fn ffi_contract_public_surface_matches_header_and_every_function_has_a_test_refe
     referenced.extend(names_followed_by_parenthesis(&batch_tests));
     referenced.extend(names_followed_by_parenthesis(&file_io_tests));
     referenced.extend(names_followed_by_parenthesis(&inkscript_tests));
+    referenced.extend(names_followed_by_parenthesis(&inkscript_shared_tests));
     referenced.extend(names_followed_by_parenthesis(&contract_tests));
     referenced.extend(names_followed_by_parenthesis(&cpp_tests));
     let missing = header_names

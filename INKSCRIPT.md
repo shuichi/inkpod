@@ -27,8 +27,8 @@ type、section、selector、assert、asset の exact field、型、default、上
 75 command の閉じた集合を定義する。退役 primitive ID は tombstone として再利用しない。
 production Rust compile／bind／staged-run API と、実装済みの source／export／execution C ABI、
 Windows private authority／engine route を再利用する。これらの存在は `.inkscript` の product
-file filter、clipboard、Batch pane への接続を意味しない。公開境界は 14–17 節に従う。M4 の input profile／codec／staged output／画像 preview は
-Core-only の実行経路であり、既存 ABI の native private 経路への接続拡張は M5 で扱う。
+file filter、clipboard、Batch pane への接続を意味しない。公開境界は 14–17 節に従う。M4 の input profile／codec／staged output／画像 preview を
+M5 の ABI v35 と Windows private engine へ接続し、同じ共有 Rust I/O manager と canonical executor を使用する。
 [command reference](docs/inkscript-command-reference.md) は registry からの生成物であり、手編集しない。
 
 本文中の「必須」「禁止」「拒否」は規範要件である。「推奨」は、同等の安全性、
@@ -43,7 +43,7 @@ Core-only の実行経路であり、既存 ABI の native private 経路への�
 | required replay epoch               | 29 |
 | native output                       |                      exact-current `.inkpod` |
 | native top-level format             | 34 |
-| C ABI                               | 34 |
+| C ABI                               | 35 |
 
 フォーマットフリーズ前のため、reader、writer、clipboard fragment は常に
 exact-current version だけを受理する。grammar、serialized field、selector の
@@ -66,16 +66,16 @@ contractを識別する。実装coverageは非永続の内部状態であり、f
 
 4–13 節は現在の file v3／catalog v8 の language/runtime 契約を記す。clipboard と編集 UI の記述は
 未接続の受入契約であり、実装済みの主張ではない。現行 Batch の製品挙動は
-[SPEC 19 節](SPEC.md#19-バッチ処理)を正本とし、次表の Core-only 契約を維持し、M5 の ABI／Windows 統合と後続の受入を経て UI を接続する。
+[SPEC 19 節](SPEC.md#19-バッチ処理)を正本とし、Core の契約を維持し、次表の ABI／Windows private 統合と後続の受入を経て製品 UI を接続する。
 M1 の承認は input profile／output envelope の実装契約であり、製品 cutover の承認を兼ねない。
 
 | 対象 | 現行 InkScript の境界 | 再開後に満たす契約 |
 | --- | --- | --- |
 | Batch program | catalog v8 の `apply_batch_operations` と展開済み Commit の fragment export | 四種類の処理と全 target を一 canonical invocation／一 transaction／一 Undo で実行し、M9 の製品 parity へ接続する |
-| 入力・出力 | file v3 の二 profile、共通codec、native naming／folder／active／new_tabs の Core-only plan/run | M5 で ABI／Windows の ownership と発行時 target へ統合し、M9 で製品 parity を確認する |
-| preview | authority preview、staged dry-run、temporary copy から作る画像 contact sheet を別結果型とする Core-only API | M5 以降で元 target を保持する preview tab publication へ接続する |
+| 入力・出力 | file v3 の二 profile、共通codec、native naming／folder／active／new_tabs の plan/run と ABI v35／Windows private engine | 発行時 target と共有 Rust I/O を維持し、M9 で製品 parity を確認する |
+| preview | authority preview、staged dry-run、temporary copy から作る画像 contact sheet を別結果型とし、ABI v35／private preview tab publication へ接続 | M5 の可視受入後、後続工程で製品 UI へ接続する |
 | 編集 UI | lossless source と typed model の基盤。製品 editor は未接続 | 現行の固定 Input／Output、四種類の処理、set 保存、専用 Batch tab、三つの実行 button を出発点にする |
-| I/O ownership | 共有 Rust I/O manager の Core-only adapter と private platform backend。既存 Windows native adapter は別経路 | M5 で Windows engine を共有 manager へ移管し、authority／atomic install の強度を保つ |
+| I/O ownership | 共有 Rust I/O manager の adapter と private platform backend。Windows private engine は ABI から委譲 | authority／atomic install の強度を保ち、製品 cutover まで現行 Batch v5 を維持する |
 
 標準 layer は MainLine と Color を各一枚持ち、追加 plane は Raster とする。保存選択 mask は
 document-owned collection、fill protection は selection と別の document state である。
@@ -1564,7 +1564,7 @@ execution {
   - `script/run`: sequential staged runner、dry-run、itemごとのfile／staged result
   - `script/output`: shared codec、materialize、active／new-tabのpublication所有権
   - `script/preview`: 専用temporaryのcopy／save-reopenとcontact sheet
-  - `script/io`: 共有Rust I/O managerを使うCore-only authority／plan／run adapter
+  - `script/io`: 共有Rust I/O managerを使うauthority／plan／run adapter
   - `script/export`: canonical journalからfragment ASTへの変換
   - `script/report`: preview/dry-run/run report
 - `inkpod-ffi`
@@ -1830,7 +1830,7 @@ file v3によるRelease quickの承認済みchecksum一値更新と
 [性能基準・全sample](docs/core-benchmark-baseline.md#m4-file-v3-checksum-decision)は維持する。
 保証範囲のユーザー判断は完了し、今回の変更はCore-onlyで新しい製品UIを含まないため、追加の手動UI受入は不要。
 代表検証・既存CoreHostの間欠失敗・未検証範囲は [compatibility](docs/compatibility.md) に記録する。
-M5・製品cutoverは未着手のままとする。
+M5・製品cutoverはこのCore-only受入の対象外とする。
 
 **範囲**
 
@@ -1848,7 +1848,11 @@ M5・製品cutoverは未着手のままとする。
 - 共通I/Oのauthority、lock、同volume atomic install、失敗item非公開、成功済み先行item保持が成立する。
 - previewは実outputとlive sourceを変更せず、元target contextを保持し、cleanup失敗では公開結果を返さない。
 
-### [ ] M5 — ABIとWindows engine／共有I/O adapterの統合
+### [~] M5 — ABIとWindows engine／共有I/O adapterの統合
+
+**受入状態**：共有ABIとprivate Windows接続、および必要な自動検証を完了し、利用者確認を待つ。
+private実行・status bar・staged publicationの確認範囲、元の失敗と修正後の検証は
+[compatibility](docs/compatibility.md)に記録する。製品切替はこの受入に含めない。
 
 **範囲**
 

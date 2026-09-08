@@ -12510,23 +12510,75 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         state.Workspace().animation.smoke_sequence_switch_completed;
     const std::uint64_t before_autosave_epoch =
         state.Document().sequence_required_present_epoch;
-    const auto sequence_edit_callbacks_are_fenced = [&state]() noexcept {
+    struct ScopedSequenceRendererPause final {
+        explicit ScopedSequenceRendererPause(renderer::RendererHost& owner) noexcept : host(&owner) {
+            host->SetQueuePausedForSmokeTest(true);
+        }
+        ~ScopedSequenceRendererPause() { Resume(); }
+        ScopedSequenceRendererPause(const ScopedSequenceRendererPause&) = delete;
+        ScopedSequenceRendererPause& operator=(const ScopedSequenceRendererPause&) = delete;
+        void Resume() noexcept {
+            if (host != nullptr) {
+                host->SetQueuePausedForSmokeTest(false);
+                host = nullptr;
+            }
+        }
+        renderer::RendererHost* host{};
+    };
+    const auto can_pause_resident_presentation = [&state](std::uint32_t target_index) noexcept {
+        const auto& tools = state.Workspace().tools;
+        // This fixture keeps the active session and has finished its gestures.
+        // Resident exchange therefore needs no synchronous renderer rebind or
+        // geometry-clear control while its new snapshot is held in the queue.
+        return state.renderer != nullptr && state.engine != nullptr
+            && state.Document().id == state.routing.targets.DocumentSession()
+            && state.Document().ActiveView() != nullptr
+            && state.Document().ActiveView()->id == state.routing.targets.ActiveDocumentView()
+            && !tools.geometry_preview_active && !tools.geometry_preview_clear_pending
+            && tools.geometry_gesture_samples.empty() && tools.fill_gesture_samples.empty()
+            && tools.selection_gesture_samples.empty() && tools.color_replace_gesture_samples.empty()
+            && state.engine->Invoke(state.Document().id, state.Document().generation,
+                [target_index](InkpodCore* core) {
+                    return inkpod_core_sequence_resident_target_available(core, target_index);
+                }, false, false) == INKPOD_STATUS_OK;
+    };
+    struct SequenceCallbackFenceDiagnostic final {
+        bool called{};
+        bool entry_ready{};
+        bool callbacks_available{};
+        bool before_metrics_ok{};
+        bool actions_completed{};
+        bool after_metrics_queried{};
+        bool after_metrics_ok{};
+        InkpodStatus updated{INKPOD_STATUS_INVALID_STATE};
+        bool context_same{};
+        bool drawing_same{};
+        bool main_line_same{};
+        bool diameter_same{};
+        bool chart_same{};
+        inkpod::app::EngineMetrics before{};
+        inkpod::app::EngineMetrics after{};
+    } callback_fence_diagnostic;
+    const auto sequence_edit_callbacks_are_fenced = [&state, &callback_fence_diagnostic]() noexcept {
+        callback_fence_diagnostic = {};
+        auto& diagnostic = callback_fence_diagnostic;
+        diagnostic.called = true;
         const CommandContext target = state.routing.targets.Capture();
         auto& workspace = state.Workspace();
         auto& color_pane = workspace.panes.color_pane;
         auto& options = workspace.tools.options_pane;
         inkpod::app::EngineMetrics before{};
-        // Presentation can complete between the caller's readiness probe and
-        // this helper. That is already the other accepted outcome; it must not
-        // be misreported as an unfenced callback failure.
-        if (state.SequenceEditReady(target)) {
-            return true;
+        // The caller pauses dispatch before issuing the new epoch. Readiness
+        // must remain false throughout these pre-presentation callback checks.
+        diagnostic.entry_ready = state.SequenceEditReady(target);
+        if (diagnostic.entry_ready) {
+            return false;
         }
-        if (color_pane.change_main_line_color == nullptr
-            || color_pane.change_color == nullptr
-            || options.change_diameter == nullptr
-            || !state.engine->GetMetrics(state.Document().id,
-                state.Document().generation, before)) {
+        diagnostic.callbacks_available = color_pane.change_main_line_color != nullptr
+            && color_pane.change_color != nullptr && options.change_diameter != nullptr;
+        if (!diagnostic.callbacks_available
+            || !(diagnostic.before_metrics_ok = state.engine->GetMetrics(state.Document().id,
+                state.Document().generation, before))) {
             return false;
         }
         const InkpodColorValue drawing_before = workspace.tools.drawing_color;
@@ -12555,16 +12607,30 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
                 && left.alpha == right.alpha;
         };
         inkpod::app::EngineMetrics after{};
-        return updated == INKPOD_STATUS_CANCELLED
+        const bool fenced = updated == INKPOD_STATUS_CANCELLED
             && state.routing.targets.Capture() == target
             && colors_match(workspace.tools.drawing_color, drawing_before)
             && colors_match(workspace.panes.main_line_color, main_line_before)
             && workspace.tools.diameter == diameter_before
             && workspace.panes.selected_color_chart_index == chart_index_before
-            && state.engine->GetMetrics(state.Document().id,
-                state.Document().generation, after)
+            && (diagnostic.after_metrics_queried = true,
+                diagnostic.after_metrics_ok = state.engine->GetMetrics(state.Document().id,
+                    state.Document().generation, after))
             && after.accepted_work_items == before.accepted_work_items
             && after.rejected_work_items == before.rejected_work_items;
+        // Capture observations without another readiness/metrics query or
+        // callback. These values diagnose the failure; they do not identify
+        // presentation timing as its cause without supporting evidence.
+        diagnostic.actions_completed = true;
+        diagnostic.updated = updated;
+        diagnostic.context_same = state.routing.targets.Capture() == target;
+        diagnostic.drawing_same = colors_match(workspace.tools.drawing_color, drawing_before);
+        diagnostic.main_line_same = colors_match(workspace.panes.main_line_color, main_line_before);
+        diagnostic.diameter_same = workspace.tools.diameter == diameter_before;
+        diagnostic.chart_same = workspace.panes.selected_color_chart_index == chart_index_before;
+        diagnostic.before = before;
+        diagnostic.after = after;
+        return fenced;
     };
     bool autosave_preflight_observed{};
     std::wstring autosave_native_reservation_path;
@@ -12586,6 +12652,11 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         restore_sequence_policy();
         return 4096;
     }
+    if (!can_pause_resident_presentation(2U)) {
+        std::fputs("autosave resident callback fixture is not ready for renderer pause\n", stderr);
+        restore_sequence_policy();
+        return 4096;
+    }
     state.lifetime.smoke_after_sequence_pair_reserved = [
         &](const std::wstring&,
             const std::wstring&,
@@ -12593,6 +12664,10 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             const inkpod::app::DocumentIdentity&) noexcept {
         autosave_preflight_observed = true;
     };
+    // Pause before the switch issues its epoch: an already in-flight old
+    // frame cannot satisfy that new token. The existing callback assertions
+    // then measure rejection before Present, without racing legitimate edits.
+    ScopedSequenceRendererPause autosave_renderer_pause(*state.renderer);
     const LRESULT autosave_switch_queued = SendMessageW(
             state.Workspace().windows.window,
             WM_COMMAND,
@@ -12613,6 +12688,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             {}, autosave_native_reservation_path)
         || state.Documents().HasIdentityReservation(
             {}, autosave_raster_reservation_path)) {
+        autosave_renderer_pause.Resume();
         std::fprintf(stderr,
             "autosave resident switch used the slow pair path: queued=%lld "
             "preflight=%d pending=%d authority=%d native_id=%d raster_id=%d "
@@ -12648,6 +12724,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     // second Next is drained as an endpoint no-op after cell10 is presented.
     if (duplicate_autosave_switch_result != 1
         || autosave_fence_status != INKPOD_STATUS_OK) {
+        autosave_renderer_pause.Resume();
         std::fprintf(stderr,
             "autosave sequence fence failed: duplicate=%lld status=%u\n",
             static_cast<long long>(duplicate_autosave_switch_result),
@@ -12658,12 +12735,14 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     const std::uint64_t autosave_epoch =
         state.Document().sequence_required_present_epoch;
     if (autosave_epoch == 0U || autosave_epoch == before_autosave_epoch
-        || (!state.SequenceEditReady(state.routing.targets.Capture())
-            && !sequence_edit_callbacks_are_fenced())) {
+        || state.SequenceEditReady(state.routing.targets.Capture())
+        || !sequence_edit_callbacks_are_fenced()) {
+        autosave_renderer_pause.Resume();
         std::fputs("pending sequence accepted a direct pane/editor callback\n", stderr);
         restore_sequence_policy();
         return 4096;
     }
+    autosave_renderer_pause.Resume();
     if (!WaitForFileIo(state) || !WaitForSequencePresentation(state)) {
         restore_sequence_policy();
         return 4096;
@@ -12931,6 +13010,11 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
         restore_sequence_policy();
         return 1517;
     }
+    if (!can_pause_resident_presentation(1U)) {
+        std::fputs("recovery resident callback fixture is not ready for renderer pause\n", stderr);
+        restore_sequence_policy();
+        return 4098;
+    }
     bool recovery_preflight_observed{};
     std::wstring recovery_native_reservation_path =
         autosave_source_native_path;
@@ -12945,6 +13029,7 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     };
     const std::uint32_t recovery_completed_before =
         state.Workspace().animation.smoke_sequence_switch_completed;
+    ScopedSequenceRendererPause recovery_renderer_pause(*state.renderer);
     const LRESULT recovery_switch_queued = SendMessageW(
         state.Workspace().windows.window,
         WM_COMMAND,
@@ -12954,13 +13039,16 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
     // only the source autosave remains in FileIo.
     const std::uint64_t recovery_epoch =
         state.Document().sequence_required_present_epoch;
+    callback_fence_diagnostic = {};
+    int recovery_readiness_probe = -1;
     const bool recovery_callbacks_fenced = recovery_switch_queued == 1
         && recovery_epoch != 0U && recovery_epoch != autosave_epoch
-        && (state.SequenceEditReady(state.routing.targets.Capture())
-            || sequence_edit_callbacks_are_fenced());
+        && ((recovery_readiness_probe = state.SequenceEditReady(state.routing.targets.Capture())) == 0
+            && sequence_edit_callbacks_are_fenced());
     state.lifetime.smoke_after_sequence_pair_reserved = {};
     const InkpodStatus recovery_fence_status = state.engine->Invoke(
         [](InkpodCore*) { return INKPOD_STATUS_OK; }, false, false);
+    recovery_renderer_pause.Resume();
     if (recovery_switch_queued != 1
         || recovery_preflight_observed
         || state.Workspace().animation.sequence_switch_pending
@@ -12986,6 +13074,23 @@ int RunProductionWorkflowSmoke(ApplicationHost& state) noexcept {
             recovery_callbacks_fenced,
             static_cast<unsigned long long>(recovery_epoch),
             static_cast<unsigned>(recovery_fence_status));
+        const auto& diagnostic = callback_fence_diagnostic;
+        std::fprintf(stderr,
+            "recovery callback fence detail: autosave_epoch=%llu recovery_epoch=%llu "
+            "caller_ready=%d helper=%d entry_ready=%d available=%d before_metrics=%d "
+            "actions=%d update=%u same(context/drawing/main/diameter/chart)=%d/%d/%d/%d/%d "
+            "after_metrics=%d/%d accepted=%llu/%llu rejected=%llu/%llu\n",
+            static_cast<unsigned long long>(autosave_epoch),
+            static_cast<unsigned long long>(recovery_epoch), recovery_readiness_probe,
+            diagnostic.called, diagnostic.entry_ready, diagnostic.callbacks_available,
+            diagnostic.before_metrics_ok, diagnostic.actions_completed,
+            static_cast<unsigned>(diagnostic.updated), diagnostic.context_same,
+            diagnostic.drawing_same, diagnostic.main_line_same, diagnostic.diameter_same,
+            diagnostic.chart_same, diagnostic.after_metrics_queried, diagnostic.after_metrics_ok,
+            static_cast<unsigned long long>(diagnostic.before.accepted_work_items),
+            static_cast<unsigned long long>(diagnostic.after.accepted_work_items),
+            static_cast<unsigned long long>(diagnostic.before.rejected_work_items),
+            static_cast<unsigned long long>(diagnostic.after.rejected_work_items));
         restore_sequence_policy();
         return 4098;
     }
@@ -21793,7 +21898,11 @@ int RunApplicationSmoke(app::ApplicationHost& state) noexcept {
         ? 731
         : 0;
     if (exit_code == 0) {
-        exit_code = app::RunPrivateInkScriptEngineSmoke() == 0 ? 0 : 828;
+        exit_code = app::RunPrivateInkScriptEngineSmoke(
+            state.Workspace().windows.status_bar, state.Workspace().job_progress_state) == 0 ? 0 : 828;
+    }
+    if (exit_code == 0) {
+        exit_code = app::RunPrivateInkScriptPublicationSmoke(state) == 0 ? 0 : 829;
     }
     if (exit_code == 0) {
         const InkpodShortcutSequence* original = FindShortcutSequence(

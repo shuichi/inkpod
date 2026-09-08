@@ -1,4 +1,95 @@
 use super::*;
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodInkScriptApprovedPath {
+    pub struct_size: u32,
+    pub version: u32,
+    pub feature_flags: u64,
+    pub intent_id: u64,
+    pub path: InkpodInkScriptUtf8Span,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodInkScriptIoRequest {
+    pub struct_size: u32,
+    pub version: u32,
+    pub feature_flags: u64,
+    pub approved_paths: *const InkpodInkScriptApprovedPath,
+    pub path_count: u64,
+    pub path_stride_bytes: u64,
+    pub new_tab_capacity: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodInkScriptIoSession {
+    pub struct_size: u32,
+    pub version: u32,
+    pub feature_flags: u64,
+    pub session_id: u64,
+    pub session_generation: u64,
+    pub source_generation: u64,
+    pub session_core: *mut InkpodCore,
+    pub label: InkpodInkScriptUtf8Span,
+    pub backing_path: InkpodInkScriptUtf8Span,
+    pub display_number: u32,
+    pub reserved: u32,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodInkScriptIoSequenceMember {
+    pub struct_size: u32,
+    pub version: u32,
+    pub kind: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub session_id: u64,
+    pub source_generation: u64,
+    pub path: InkpodInkScriptUtf8Span,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodInkScriptIoSequenceRequest {
+    pub struct_size: u32,
+    pub version: u32,
+    pub feature_flags: u64,
+    pub sequence_id: u64,
+    pub generation: u64,
+    pub members: *const InkpodInkScriptIoSequenceMember,
+    pub member_count: u64,
+    pub member_stride_bytes: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodInkScriptSharedPlanRequest {
+    pub struct_size: u32,
+    pub version: u32,
+    pub feature_flags: u64,
+    pub controller_id: u64,
+    pub session_generation: u64,
+    pub current_session_id: u64,
+    pub script_path: InkpodInkScriptUtf8Span,
+    pub maximum_folder_entries: u64,
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, Default)]
+pub struct InkpodInkScriptStagedInfo {
+    pub struct_size: u32,
+    pub version: u32,
+    pub kind: u32,
+    pub reserved: u32,
+    pub feature_flags: u64,
+    pub ordinal: u64,
+    pub session_id: u64,
+    pub session_generation: u64,
+    pub source_generation: u64,
+}
 use core::ffi::c_void;
 
 #[repr(C)]

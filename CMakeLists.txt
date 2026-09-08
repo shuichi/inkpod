@@ -816,6 +816,8 @@ if(WIN32)
         apps/windows/app/inkscript_engine_route.h
         apps/windows/app/inkscript_file_authority.cpp
         apps/windows/app/inkscript_file_authority.h
+        apps/windows/ui/job_progress.cpp
+        apps/windows/ui/localization.cpp
         tests/windows_inkscript_engine_route.cpp)
     target_include_directories(inkpod_windows_inkscript_engine_route_tests PRIVATE
         "${CMAKE_SOURCE_DIR}/apps/windows"
@@ -825,7 +827,7 @@ if(WIN32)
         UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
     target_link_libraries(inkpod_windows_inkscript_engine_route_tests PRIVATE
         inkpod_ffi_static
-        user32)
+        comctl32 gdi32 user32)
     if(MSVC)
         inkpod_enable_strict_warnings(inkpod_windows_inkscript_engine_route_tests)
         target_compile_options(inkpod_windows_inkscript_engine_route_tests PRIVATE /EHsc)

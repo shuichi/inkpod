@@ -33,6 +33,7 @@ enum class JobProgressSlot : std::uint8_t {
     Batch,
     ColorChart,
     HistoryVisualization,
+    InkScript,
     Count,
 };
 
